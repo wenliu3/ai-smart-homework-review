@@ -1,0 +1,56 @@
+services:
+  # ==================== 数据库 ====================
+  mysql:
+    image: mysql:8.0
+    container_name: ai-review-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ai_smart_review
+      TZ: Asia/Shanghai
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ==================== 后端 ====================
+  backend:
+    build: ./backend_python
+    container_name: ai-review-backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: mysql+pymysql://root:${MYSQL_ROOT_PASSWORD}@mysql:3306/ai_smart_review?charset=utf8mb4
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: 7200
+      JWT_REFRESH_EXPIRES_IN: 604800
+      PORT: 8000
+      DEFAULT_PASSWORD: 123456789
+      UPLOAD_DIR: /app/uploads
+    ports:
+      - "8000:8000"
+    volumes:
+      - uploads_data:/app/uploads
+
+  # ==================== 前端 ====================
+  frontend:
+    build: ./frontend
+    container_name: ai-review-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+
+volumes:
+  mysql_data:
+  uploads_data:
