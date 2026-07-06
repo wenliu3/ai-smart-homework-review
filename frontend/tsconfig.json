@@ -1,0 +1,23 @@
+{
+  "extends": "@vue/tsconfig/tsconfig.web.json",
+  "include": ["env.d.ts", "src/**/*", "src/**/*.vue"],
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+    "moduleResolution": "node",
+    "types": ["element-plus/global"],
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "skipLibCheck": true,
+    "noImplicitAny": false,
+    "strict": false,
+    "allowJs": true,
+    "checkJs": false
+  },
+  "references": [
+    {
+      "path": "./tsconfig.config.json"
+    }
+  ]
+} 

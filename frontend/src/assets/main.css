@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 全局样式 */
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+}
+
+#app {
+  height: 100%;
+  width: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+}
+
+/* 解决移动端适配问题 */
+.el-table {
+  width: 100% !important;
+  overflow-x: auto;
+}
+
+/* 修复表格在移动端可能出现的样式问题 */
+@media (max-width: 768px) {
+  .el-form-item {
+    margin-bottom: 18px;
+  }
+
+  .el-dialog {
+    width: 95% !important;
+  }
+
+  .el-pagination {
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+}
+
+/* 恢复标题标签的默认样式 */
+h1 {
+  font-size: 2rem;
+  font-weight: 700;
+} /* 32px, 粗体 */
+h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+} /* 24px, 半粗体 */
+h3 {
+  font-size: 1.25rem;
+  font-weight: 600;
+} /* 20px, 半粗体 */
+h4 {
+  font-size: 1.125rem;
+  font-weight: 600;
+} /* 18px, 半粗体 */
+h5 {
+  font-size: 1rem;
+  font-weight: 600;
+} /* 16px, 半粗体 */
+h6 {
+  font-size: 0.875rem;
+  font-weight: 600;
+} /* 14px, 半粗体 */
