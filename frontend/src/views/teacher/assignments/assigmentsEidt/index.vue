@@ -154,6 +154,43 @@
                   <span class="text-sm text-gray-600">允许学生上传附件</span>
                 </div>
               </el-form-item>
+
+              <!-- 教师上传附件 -->
+              <el-form-item label="作业附件" class="form-item">
+                <div class="w-full">
+                  <!-- 上传中进度 -->
+                  <div v-if="uploading" class="mb-2">
+                    <el-progress :percentage="uploadProgress" :stroke-width="8" />
+                    <span class="text-xs text-blue-500">正在上传... {{ uploadProgress }}%</span>
+                  </div>
+                  <!-- 已上传文件列表 -->
+                  <div v-if="assignmentAttachments.length > 0" class="mb-2">
+                    <div
+                      v-for="(f, i) in assignmentAttachments"
+                      :key="i"
+                      class="flex items-center p-2 bg-gray-50 rounded mb-1"
+                    >
+                      <el-icon class="text-blue-500 mr-2"><Document /></el-icon>
+                      <span class="flex-1 text-sm">{{ f.fileName }}</span>
+                      <span class="text-xs text-gray-400 mr-2">{{ formatFileSize(f.fileSize) }}</span>
+                      <el-button type="danger" size="small" text @click="removeAttachment(i)">删除</el-button>
+                    </div>
+                  </div>
+                  <input
+                    ref="assignmentFileInputRef"
+                    type="file"
+                    multiple
+                    accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx,.txt"
+                    style="display:none"
+                    @change="onAssignmentFilesSelected"
+                  />
+                  <el-button type="primary" size="small" @click="triggerAssignmentFileSelect" :disabled="uploading">
+                    <el-icon><Upload /></el-icon>
+                    上传附件（供学生下载）
+                  </el-button>
+                  <div class="text-xs text-gray-400 mt-1">支持 jpg、png、pdf、doc、docx、txt，单文件不超过20MB</div>
+                </div>
+              </el-form-item>
             </div>
           </div>
         </el-form>
@@ -166,7 +203,7 @@
 import { ref, reactive, onMounted, computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { ArrowLeft } from "@element-plus/icons-vue";
+import { ArrowLeft, Upload, Document } from "@element-plus/icons-vue";
 import type { FormInstance, FormRules } from "element-plus";
 import {
   getAssignment,
@@ -202,6 +239,15 @@ const formRef = ref<FormInstance>();
 // 状态
 const saving = ref(false);
 const loading = ref(false);
+const uploading = ref(false);
+const uploadProgress = ref(0);
+const assignmentFileInputRef = ref<HTMLInputElement | null>(null);
+const assignmentAttachments = ref<Array<{
+  fileName: string;
+  fileUrl: string;
+  fileSize: number;
+  fileType: string;
+}>>([]);
 
 // 表单数据
 const formData = reactive<CreateAssignmentDto & { allowAttachments: boolean }>({
@@ -334,8 +380,9 @@ const loadAssignmentData = async () => {
       aiRule: assignment.aiRule,
       startDate: moment(assignment.startDate).format("YYYY-MM-DD HH:mm:ss"),
       endDate: moment(assignment.endDate).format("YYYY-MM-DD HH:mm:ss"),
-      allowAttachments: assignment.allowAttachments,
+      allowAttachments: assignment.allowAttachments || false,
     });
+    assignmentAttachments.value = assignment.attachments || [];
   } catch (error) {
     console.error("加载作业数据失败:", error);
     ElMessage.error("加载作业数据失败");
@@ -354,6 +401,7 @@ const buildAssignmentData = (includeStatus = false) => {
     startDate: formData.startDate,
     endDate: formData.endDate,
     allowAttachments: formData.allowAttachments,
+    attachments: assignmentAttachments.value,
   };
 
   if (includeStatus) {
@@ -450,7 +498,87 @@ const handlePublish = async () => {
 // 返回
 const goBack = () => {
   router.back();
-  // router.push('/teacher/assignments')
+};
+
+// 格式化文件大小
+const formatFileSize = (bytes: number) => {
+  if (!bytes) return "0 B";
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+  return (bytes / 1024 / 1024).toFixed(1) + " MB";
+};
+
+// 触发文件选择
+const triggerAssignmentFileSelect = () => {
+  assignmentFileInputRef.value?.click();
+};
+
+// 文件选择处理
+const onAssignmentFilesSelected = (e: Event) => {
+  const target = e.target as HTMLInputElement;
+  const files = target.files;
+  if (!files || files.length === 0) return;
+  uploadAssignmentFiles(Array.from(files));
+  target.value = ""; // 重置input，允许重复选择同一文件
+};
+
+// 上传附件文件
+const uploadAssignmentFiles = (files: File[]) => {
+  uploading.value = true;
+  uploadProgress.value = 0;
+  const token = localStorage.getItem("token");
+  const formDataObj = new FormData();
+  files.forEach((f) => formDataObj.append("files", f));
+  const xhr = new XMLHttpRequest();
+  xhr.upload.onprogress = (e) => {
+    if (e.lengthComputable) {
+      uploadProgress.value = Math.round((e.loaded / e.total) * 100);
+    }
+  };
+  xhr.onload = () => {
+    uploading.value = false;
+    try {
+      const res = JSON.parse(xhr.responseText);
+      if (res.code === 200 && res.data?.files) {
+        res.data.files.forEach((f: any) => {
+          assignmentAttachments.value.push({
+            fileName: f.fileName,
+            fileUrl: f.fileUrl,
+            fileSize: f.fileSize,
+            fileType: f.fileType,
+          });
+        });
+        ElMessage.success(`成功上传 ${res.data.files.length} 个文件`);
+      } else {
+        ElMessage.error(res.message || "上传失败");
+      }
+    } catch {
+      ElMessage.error("上传响应解析失败");
+    }
+  };
+  xhr.onerror = () => {
+    uploading.value = false;
+    ElMessage.error("上传失败，请检查网络");
+  };
+  xhr.open("POST", "/api/upload/files");
+  xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+  xhr.send(formDataObj);
+};
+
+// 删除附件
+const removeAttachment = (index: number) => {
+  const file = assignmentAttachments.value[index];
+  // 尝试删除服务器上的文件
+  const filename = (file.fileUrl || "").replace("/uploads/", "");
+  if (filename) {
+    const token = localStorage.getItem("token");
+    fetch(`/api/upload/delete/${filename}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    }).catch(() => {});
+  }
+  assignmentAttachments.value.splice(index, 1);
+  ElMessage.success("已删除附件");
 };
 
 // 处理富文本超出字数限制

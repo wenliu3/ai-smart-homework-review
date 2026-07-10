@@ -111,13 +111,25 @@ export function updateAiRule(id: string, data: UpdateAiRuleDto) {
 }
 
 /**
- * 删除AI规则（软删除）
+ * 删除AI规则（硬删除）
  * @param id 规则ID
  * @returns 删除结果
  */
 export function deleteAiRule(id: string) {
   return request<{ id: string; success: boolean }>({
     url: `/v1/ai-rules/${id}/delete`,
+    method: "post",
+  });
+}
+
+/**
+ * 切换AI规则状态（启用/禁用）
+ * @param id 规则ID
+ * @returns 切换后的状态
+ */
+export function toggleAiRuleStatus(id: string) {
+  return request<{ id: string; status: string; success: boolean }>({
+    url: `/v1/ai-rules/${id}/toggle-status`,
     method: "post",
   });
 }

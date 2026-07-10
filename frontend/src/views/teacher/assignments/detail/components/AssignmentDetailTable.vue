@@ -62,26 +62,12 @@
           </template>
         </el-table-column>
 
-        <!-- 内容预览 -->
-        <el-table-column label="内容预览" show-overflow-tooltip>
+        <!-- 词数统计 -->
+        <el-table-column label="词数统计" width="90" align="center">
           <template #default="{ row }">
-            <div
-              v-if="row.content"
-              class="content-preview"
-              :title="row.content"
-            >
-              {{ getContentPreview(row.content) }}
-            </div>
-            <span v-else class="no-data">无内容</span>
-          </template>
-        </el-table-column>
-
-        <!-- 字数统计 -->
-        <el-table-column label="字数统计" width="90" align="center">
-          <template #default="{ row }">
-            <div v-if="row.content">
-              <span class="word-count">{{ getWordCount(row.content) }}</span>
-              <span class="word-unit">字</span>
+            <div v-if="getWordCount(row) > 0">
+              <span class="word-count">{{ getWordCount(row) }}</span>
+              <span class="word-unit">词</span>
             </div>
             <span v-else class="no-data">-</span>
           </template>
@@ -221,6 +207,9 @@
       :assignment-id="assignmentId"
       @graded="handleGraded"
     />
+
+    <!-- 文件预览对话框 -->
+    <FilePreviewDialog ref="filePreviewRef" />
   </div>
 </template>
 
@@ -230,6 +219,7 @@ import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { View, Edit, Paperclip, Document, Delete } from "@element-plus/icons-vue";
 import GradingDrawer from "./GradingDrawer.vue";
+import FilePreviewDialog from "@/components/FilePreviewDialog.vue";
 
 // Props
 interface Props {
@@ -243,6 +233,7 @@ const props = defineProps<Props>();
 
 // 批改抽屉状态
 const gradingDrawerVisible = ref(false);
+const filePreviewRef = ref();
 const currentSubmissionId = ref<string | null>(null);
 
 // Router
@@ -316,16 +307,9 @@ const handleDeleteSubmission = async (row: any) => {
   }
 };
 
-// 获取内容预览（前50字）
-const getContentPreview = (content: string) => {
-  if (!content) return "";
-  return content.length > 50 ? content.substring(0, 50) + "..." : content;
-};
-
-// 获取字数统计
-const getWordCount = (content: string) => {
-  if (!content) return 0;
-  return content.replace(/\s/g, "").length;
+// 获取字数统计（直接使用后端存储的 wordCount 字段）
+const getWordCount = (row: any) => {
+  return row.wordCount || 0;
 };
 
 // 格式化文件大小
@@ -359,30 +343,7 @@ const handleDownloadFile = (att: any) => {
 
 // 预览附件
 const handlePreviewFile = (att: any) => {
-  const token = localStorage.getItem('token');
-  const filename = att.fileUrl.replace('/uploads/', '');
-  const url = `/api/upload/preview/${filename}`;
-  
-  // 通过 fetch 带 Auth header 获取文件，然后在新窗口打开 blob URL
-  fetch(url, { headers: { Authorization: `Bearer ${token}` } })
-    .then(async resp => {
-      if (!resp.ok) throw new Error('预览失败');
-      
-      // 如果是 JSON 响应（不支持预览的格式）
-      const contentType = resp.headers.get('content-type') || '';
-      if (contentType.includes('json')) {
-        const data = await resp.json();
-        ElMessage.warning(data.message || '不支持在线预览');
-        return;
-      }
-      
-      const blob = await resp.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      window.open(blobUrl, '_blank');
-      // 稍后释放
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
-    })
-    .catch(e => ElMessage.warning('文件预览失败: ' + e.message));
+  filePreviewRef.value?.open(att);
 };
 
 // 获取提交状态类型
@@ -556,19 +517,6 @@ defineOptions({
   font-family: "SF Mono", "Monaco", "Inconsolata", "Roboto Mono", monospace;
 }
 
-/* 内容预览样式 */
-.content-preview {
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13px;
-  color: #374151;
-  line-height: 1.4;
-  cursor: help;
-  word-break: break-all;
-}
-
 /* 分数样式 */
 .score {
   font-size: 16px;
@@ -704,10 +652,6 @@ defineOptions({
     width: 32px;
     height: 32px;
     font-size: 14px;
-  }
-
-  .content-preview {
-    max-width: 150px;
   }
 
   .action-buttons {

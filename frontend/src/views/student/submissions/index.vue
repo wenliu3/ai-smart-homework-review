@@ -102,7 +102,7 @@
         <!-- Tab内容区域 -->
         <div class="tab-content">
           <!-- 作业详情Tab -->
-          <div v-show="activeTab === 'assignment'" class="tab-pane">
+          <div v-show="activeTab === 'assignment'" class="tab-pane tab-pane-padded">
             <AssignmentInfo
               :assignment="submissionData.assignment"
               :submission="submissionData.submission"
@@ -158,7 +158,7 @@
 
             <!-- AI处理中的全屏Loading -->
             <div
-              v-if="showAiProcessingFullscreen"
+              v-show="showAiProcessingFullscreen"
               class="ai-processing-overlay"
             >
               <div class="ai-processing-content">
@@ -200,7 +200,7 @@
             </div>
 
             <!-- 表单内容 -->
-            <div v-else>
+            <div v-show="!showAiProcessingFullscreen" class="form-content-wrapper">
               <!-- 自动保存状态 -->
               <div
                 v-if="activeTab === 'submission' && (saving || lastSaveTime)"
@@ -234,7 +234,7 @@
           </div>
 
           <!-- 评价结果Tab -->
-          <div v-show="activeTab === 'results'" class="tab-pane">
+          <div v-show="activeTab === 'results'" class="tab-pane tab-pane-padded">
             <ReviewResults
               :ai-review="submissionData.aiReview"
               :teacher-review="submissionData.teacherReview"
@@ -485,19 +485,17 @@ const handleSubmitClick = async () => {
       return;
     }
 
-    const content = submissionFormRef.value.form.content;
-    console.log('表单内容长度:', content?.length || 0);
-
-    // 获取已上传的附件
+    // 获取已上传的附件和内容
     const fn = submissionFormRef.value?.getUploadedAttachments;
     const attachments = (typeof fn === 'function' ? fn() : []) || [];
     if (!Array.isArray(attachments)) {
       console.error('getUploadedAttachments 返回非数组值:', attachments);
     }
+    const content = submissionFormRef.value?.getContent?.() || '';
     console.log('提交时附件数:', Array.isArray(attachments) ? attachments.length : '非数组', typeof attachments);
 
     // 调用提交处理（确保 attachments 是数组）
-    await handleSubmitWithAiLoading(content, Array.isArray(attachments) ? attachments : []);
+    await handleSubmitWithAiLoading(Array.isArray(attachments) ? attachments : [], content);
   } catch (error: any) {
     console.error("提交失败:", error);
     ElMessage.error(error?.message || "提交失败，请重试");
@@ -506,8 +504,8 @@ const handleSubmitClick = async () => {
 
 // 带AI Loading控制的提交处理
 const handleSubmitWithAiLoading = async (
-  content: string,
-  attachments: any[]
+  attachments: any[],
+  content: string = ""
 ) => {
   try {
     // 根据当前状态显示不同的确认信息
@@ -525,14 +523,17 @@ const handleSubmitWithAiLoading = async (
       type: "warning",
     });
 
-    // 用户确认后显示AI处理Loading
+    // 用户确认后，先标记文件已被消费（防止组件卸载时清理文件）
+    submissionFormRef.value?.markFilesConsumed?.();
+
+    // 显示AI处理Loading
     showAiProcessingFullscreen.value = true;
 
     // 启动超时保护（每次提交都重新计时）
     startAiTimeout();
 
     // 调用纯提交逻辑（不包含确认对话框）
-    await handleSubmitDirect(content, attachments);
+    await handleSubmitDirect(attachments, content);
 
     // 提交成功后不立即关闭Loading，等待AI评价完成
     // Loading会在轮询检测到AI评价完成后自动关闭
@@ -549,7 +550,7 @@ const handleSubmitWithAiLoading = async (
 };
 
 // 直接提交（不包含确认对话框）
-const handleSubmitDirect = async (content: string, attachments: any[]) => {
+const handleSubmitDirect = async (attachments: any[], content: string = "") => {
   // 根据当前状态判断是否为重新提交
   const isResubmit =
     submissionData.value?.submission &&
@@ -569,7 +570,7 @@ const handleSubmitDirect = async (content: string, attachments: any[]) => {
     console.log("🔍 提交参数检查:");
     console.log("assignmentId:", assignmentId.value);
     console.log("classId:", classId.value);
-    console.log("content length:", content?.length || 0);
+    console.log("attachments count:", attachments?.length || 0);
     console.log("route.params:", route.params);
 
     // 只有当有附件时才添加 attachments 字段
@@ -579,6 +580,8 @@ const handleSubmitDirect = async (content: string, attachments: any[]) => {
 
     console.log("📤 最终提交参数:", params);
     await SubmissionsApi.submit(params);
+    // 标记文件已被消费，防止组件卸载时清理
+    submissionFormRef.value?.markFilesConsumed?.();
     ElMessage.success(isResubmit ? "作业重新提交成功！" : "作业提交成功！");
 
     // 重新加载数据
@@ -608,9 +611,11 @@ const handleSaveDraftClick = async () => {
       return;
     }
 
-    const content = submissionFormRef.value.form.content;
     const attachments = await submissionFormRef.value.getUploadedAttachments?.() || [];
-    await handleSaveDraft(content, attachments);
+    const content = submissionFormRef.value?.getContent?.() || '';
+    await handleSaveDraft(attachments, content);
+    // 标记文件已被消费，防止组件卸载时清理
+    submissionFormRef.value?.markFilesConsumed?.();
 
     // 更新保存时间
     updateLastSaveTime();
@@ -790,9 +795,19 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 1rem 1.5rem;
-  background: #fafbfc;
+  background: white;
   border-bottom: 1px solid #e5e7eb;
   margin-bottom: 0;
+}
+
+/* 表单内容容器 */
+.form-content-wrapper {
+  padding: 1.5rem;
+}
+
+/* 带padding的Tab面板 */
+.tab-pane-padded {
+  padding: 1.5rem;
 }
 
 .actions-left,
@@ -816,7 +831,7 @@ onUnmounted(() => {
 
 /* 内联保存状态 */
 .auto-save-status-inline {
-  padding: 0 1.5rem 1rem;
+  padding: 0 0 1rem;
   text-align: right;
 }
 

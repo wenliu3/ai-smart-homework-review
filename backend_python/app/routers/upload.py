@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from ..deps import get_current_user
 from ..core.response import ok
 from ..core.exceptions import NotFoundException, BadRequestException
-from ..core.file_parser import extract_file_text
+from ..plagiarism.extractors import extract_file_text
 from ..config import settings
 from ..models import User
 
@@ -81,19 +81,20 @@ async def preview_file(filename: str, current_user: User = Depends(get_current_u
         return JSONResponse({"code": 404, "message": "文件不存在"}, status_code=404)
     ext = os.path.splitext(filename)[1].lower()
 
-    if ext in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".pdf", ".txt"):
+    if ext in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".pdf", ".txt", ".docx"):
         return FileResponse(path=str(file_path), media_type=MIME_MAP.get(ext, "application/octet-stream"), headers={"Content-Disposition": "inline"})
-    if ext == ".docx":
-        try:
-            text = extract_file_text(str(file_path), ext) or "文档内容为空."
-            escaped = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            html = (
-                "<!DOCTYPE html><html><head><meta charset='utf-8'><title>文件预览</title>"
-                "<style>body{font-family:'Microsoft YaHei',sans-serif;padding:20px;line-height:1.8;white-space:pre-wrap;word-break:break-all}</style>"
-                f"</head><body>{escaped}</body></html>"
-            )
-            return HTMLResponse(html)
-        except Exception as e:
-            return JSONResponse({"fileName": filename, "fileType": ext, "message": f"预览失败: {e}"})
     stat = file_path.stat()
     return ok({"fileName": filename, "fileSize": stat.st_size, "fileType": ext, "message": f"文件类型 {ext} 不支持在线预览，请下载查看"})
+
+
+@router.delete("/upload/delete/{filename}")
+def delete_file(filename: str, current_user: User = Depends(get_current_user)):
+    """删除上传的文件 — 学生取消上传或离开页面时清理未提交的临时文件"""
+    file_path = settings.upload_path / filename
+    if not file_path.exists():
+        return ok({"success": True, "message": "文件不存在或已删除"})
+    try:
+        file_path.unlink()
+        return ok({"success": True, "message": "文件已删除"})
+    except Exception as e:
+        return JSONResponse({"code": 500, "message": f"删除失败: {e}"}, status_code=500)

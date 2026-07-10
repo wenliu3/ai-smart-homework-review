@@ -127,25 +127,25 @@
         <div class="stats-grid">
           <div class="stat-item">
             <div class="stat-number">
-              {{ assignment.submissionStats.total }}
+              {{ assignment.totalStudents ?? 0 }}
             </div>
             <div class="stat-label">总学生数</div>
           </div>
           <div class="stat-item">
             <div class="stat-number submitted">
-              {{ assignment.submissionStats.submitted }}
+              {{ assignment.submissionStats.totalSubmissions ?? 0 }}
             </div>
             <div class="stat-label">已提交</div>
           </div>
           <div class="stat-item">
             <div class="stat-number ai-reviewed">
-              {{ assignment.submissionStats.aiReviewed }}
+              {{ assignment.submissionStats.aiReviewed ?? 0 }}
             </div>
             <div class="stat-label">AI已批改</div>
           </div>
           <div class="stat-item">
             <div class="stat-number teacher-reviewed">
-              {{ assignment.submissionStats.teacherReviewed }}
+              {{ assignment.submissionStats.teacherReviewed ?? 0 }}
             </div>
             <div class="stat-label">教师已批改</div>
           </div>
@@ -209,11 +209,33 @@
             <span class="card-title">作业描述</span>
           </div>
         </template>
-        git
+
         <div
           class="description-content editor-content-view"
           v-html="assignment.description"
         ></div>
+      </el-card>
+
+      <!-- 作业附件 -->
+      <el-card v-if="assignment.attachments?.length" class="info-card" shadow="never">
+        <template #header>
+          <div class="card-header">
+            <span class="card-title">作业附件</span>
+            <span class="class-count">共 {{ assignment.attachments.length }} 个文件</span>
+          </div>
+        </template>
+
+        <div class="attachment-list">
+          <div
+            v-for="(att, i) in assignment.attachments"
+            :key="i"
+            class="attachment-item"
+          >
+            <el-icon class="text-blue-500"><Document /></el-icon>
+            <span class="attachment-name">{{ att.fileName }}</span>
+            <el-button type="primary" size="small" text @click="downloadAttachment(att)">下载</el-button>
+          </div>
+        </div>
       </el-card>
 
       <!-- 终止原因（如果有） -->
@@ -240,7 +262,8 @@
 </template>
 
 <script setup lang="ts">
-import { Edit, Close } from "@element-plus/icons-vue";
+import { Edit, Close, Document } from "@element-plus/icons-vue";
+import { ElMessage } from "element-plus";
 import { AssignmentStatus } from "@/api/assignments";
 import type { Assignment } from "@/types/assignments";
 
@@ -299,20 +322,21 @@ const formatDateTime = (dateString: string) => {
 
 // 计算提交百分比
 const getSubmissionPercentage = (stats: Assignment["submissionStats"]) => {
-  if (stats.total === 0) return 0;
-  return Math.round((stats.submitted / stats.total) * 100);
+  const totalStudents = props.assignment.totalStudents ?? 0;
+  if (totalStudents === 0) return 0;
+  return Math.round(((stats.totalSubmissions ?? 0) / totalStudents) * 100);
 };
 
 // 计算AI批改百分比
 const getAiReviewPercentage = (stats: Assignment["submissionStats"]) => {
-  if (stats.submitted === 0) return 0;
-  return Math.round((stats.aiReviewed / stats.submitted) * 100);
+  if (!stats.totalSubmissions) return 0;
+  return Math.round(((stats.aiReviewed ?? 0) / stats.totalSubmissions) * 100);
 };
 
 // 计算教师批改百分比
 const getTeacherReviewPercentage = (stats: Assignment["submissionStats"]) => {
-  if (stats.submitted === 0) return 0;
-  return Math.round((stats.teacherReviewed / stats.submitted) * 100);
+  if (!stats.totalSubmissions) return 0;
+  return Math.round(((stats.teacherReviewed ?? 0) / stats.totalSubmissions) * 100);
 };
 
 // 编辑作业
@@ -323,6 +347,25 @@ const handleEdit = () => {
 // 关闭详情
 const handleClose = () => {
   emit("close");
+};
+
+// 下载附件
+const downloadAttachment = (att: any) => {
+  const token = localStorage.getItem("token");
+  const filename = (att.fileUrl || "").replace("/uploads/", "");
+  fetch(`/api/upload/download/${filename}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+    .then((res) => res.blob())
+    .then((blob) => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = att.fileName || filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    })
+    .catch(() => ElMessage.warning("下载失败"));
 };
 
 // 添加默认导出
@@ -519,6 +562,27 @@ export default defineComponent({
   padding: 12px;
   border-radius: 4px;
   overflow-x: auto;
+}
+
+.attachment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.attachment-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #f8f9fa;
+  border-radius: 6px;
+}
+
+.attachment-name {
+  flex: 1;
+  color: #303133;
+  font-size: 14px;
 }
 
 .terminated-reason {

@@ -72,6 +72,7 @@ declare module '@vue/runtime-core' {
     ElTooltip: typeof import('element-plus/es')['ElTooltip']
     ElTree: typeof import('element-plus/es')['ElTree']
     ElUpload: typeof import('element-plus/es')['ElUpload']
+    FilePreviewDialog: typeof import('./src/components/FilePreviewDialog.vue')['default']
     FlexboxDemo: typeof import('./src/components/FlexboxDemo.vue')['default']
     FloatingAssistantButton: typeof import('./src/components/FloatingAssistantButton.vue')['default']
     JoinClassDialog: typeof import('./src/components/JoinClassDialog.vue')['default']

@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from ..models import User, Class, ClassStudent, Assignment, Submission
 from ..core.exceptions import BadRequestException, NotFoundException
 from ..core.utils import now, camel_to_snake
-from ..core.plagiarism import run_plagiarism_check
+from ..plagiarism import merge_results
 
 
 def _max_score(assignment: Assignment) -> int:
@@ -65,7 +65,7 @@ def get_teacher_assignments(db: Session, teacher_id: int, params: dict) -> dict:
 
 
 def get_teacher_detail(db: Session, assignment_id: int) -> dict:
-    """获取单个作业详情 — 含提交统计(总数/已批改/待批改/草稿)"""
+    """获取单个作业详情 — 含提交统计(总数/已批改/待批改/草稿/AI批改/教师批改)"""
     a = db.query(Assignment).filter(Assignment.id == assignment_id).first()
     if not a:
         raise NotFoundException(10015, "作业不存在")
@@ -74,8 +74,10 @@ def get_teacher_detail(db: Session, assignment_id: int) -> dict:
     reviewed = db.query(Submission).filter(Submission.assignment_id == a.id, Submission.status.in_(["ai_reviewed", "teacher_reviewed"])).count()
     pending = db.query(Submission).filter(Submission.assignment_id == a.id, Submission.status == "submitted").count()
     draft = db.query(Submission).filter(Submission.assignment_id == a.id, Submission.status == "draft").count()
+    ai_reviewed = db.query(Submission).filter(Submission.assignment_id == a.id, Submission.status == "ai_reviewed").count()
+    teacher_reviewed = db.query(Submission).filter(Submission.assignment_id == a.id, Submission.status == "teacher_reviewed").count()
     all_students = db.query(ClassStudent).filter(ClassStudent.class_id.in_(_class_ids(a)), ClassStudent.status == "active").count()
-    d["submissionStats"] = {"totalSubmissions": total, "reviewedSubmissions": reviewed, "pendingSubmissions": pending, "draftSubmissions": draft}
+    d["submissionStats"] = {"totalSubmissions": total, "reviewedSubmissions": reviewed, "pendingSubmissions": pending, "draftSubmissions": draft, "aiReviewed": ai_reviewed, "teacherReviewed": teacher_reviewed}
     d["totalStudents"] = all_students
     d["isExpired"] = bool(a.end_date and now() > a.end_date)
     return d
@@ -122,12 +124,12 @@ def get_assignment_students(db: Session, assignment_id: int, params: dict) -> di
                 "studentName": student.name,
                 "studentNumber": student.student_id or "",
                 "classId": str(s.class_id), "className": cls.name if cls else "",
-                "content": s.content, "status": s.status,
+                "status": s.status,
                 "submittedAt": s.submitted_at.isoformat() if s.submitted_at else None,
                 "aiScore": _to100(s.ai_score, max_score), "aiReviewContent": s.ai_review_content,
                 "teacherScore": _to100(s.teacher_score, max_score), "teacherReviewContent": s.teacher_review_content,
                 "teacherReviewedAt": s.teacher_reviewed_at.isoformat() if s.teacher_reviewed_at else None,
-                "wordCount": len(s.content or ""), "attachments": s.attachments or [],
+                "wordCount": s.word_count or 0, "attachments": s.attachments or [],
             })
         else:
             # 没提交的学生也显示出来
@@ -136,7 +138,7 @@ def get_assignment_students(db: Session, assignment_id: int, params: dict) -> di
                 "studentName": student.name,
                 "studentNumber": student.student_id or "",
                 "classId": str(cs.class_id), "className": cls.name if cls else "",
-                "content": "", "status": "not_submitted",
+                "status": "not_submitted",
                 "submittedAt": None, "aiScore": None, "aiReviewContent": None,
                 "teacherScore": None, "teacherReviewContent": None,
                 "teacherReviewedAt": None, "wordCount": 0, "attachments": [],
@@ -179,6 +181,8 @@ def create_assignment(db: Session, teacher_id: int, teacher_name: str, data: dic
         teacher_id=teacher_id, teacher_name=teacher_name,
         classes=classes, start_date=data.get("startDate"), end_date=data.get("endDate"),
         status="draft", ai_rule=data.get("aiRule"),
+        attachments=data.get("attachments", []),
+        allow_attachments=data.get("allowAttachments", False),
     )
     db.add(a)
     db.commit()
@@ -334,8 +338,13 @@ def get_student_detail(db: Session, assignment_id: int, student_id: int) -> dict
 
 # ========== 作业查重 ==========
 
-def check_plagiarism(db: Session, assignment_id: int, teacher_id: int) -> dict:
-    """对指定作业的所有学生提交进行查重 — 优先读磁盘原始文件，没有文件则用提交文本"""
+def check_plagiarism(
+    db: Session, assignment_id: int, teacher_id: int,
+    template_text: str = None,
+    template_images: list = None,
+) -> dict:
+    """对指定作业的所有学生提交进行查重 — 优先读磁盘原始文件，没有文件则用提交文本
+    可选传入模板内容（template_text/template_images），比对前自动剔除模板部分。"""
     a = db.query(Assignment).filter(Assignment.id == assignment_id).first()
     if not a:
         raise NotFoundException(10015, "作业不存在")
@@ -358,17 +367,46 @@ def check_plagiarism(db: Session, assignment_id: int, teacher_id: int) -> dict:
             "message": "有效提交不足2份，无法进行查重比对",
         }
 
-    import re as _re
     import os as _os
-    from ..core.file_parser import extract_file_text
+    import json as _json
+    from ..plagiarism import (
+        run_plagiarism_check,
+        run_image_plagiarism_check,
+        extract_file_text,
+        extract_all_from_docx as extract_docx_text_and_images,
+        get_char_ngram_set,
+        PHRASE_NGRAM,
+    )
     from ..config import settings
+
+    # 将模板 n-gram 缓存到磁盘，供后续 compare_submissions 排除模板内容
+    _template_cache_path = _os.path.join(
+        str(settings.upload_path), f"plagiarism_template_{assignment_id}.json"
+    )
+    if template_text:
+        try:
+            _template_ngrams = list(get_char_ngram_set(template_text, PHRASE_NGRAM))
+            with open(_template_cache_path, "w", encoding="utf-8") as _f:
+                _json.dump({"template_ngrams": _template_ngrams}, _f, ensure_ascii=False)
+        except Exception:
+            pass
+    else:
+        # 没传模板时清除旧缓存
+        if _os.path.exists(_template_cache_path):
+            try:
+                _os.remove(_template_cache_path)
+            except Exception:
+                pass
 
     upload_dir = str(settings.upload_path)
     student_data = []
+    image_data = []
+    skipped = []
 
     for s in submissions:
         student = db.query(User).filter(User.id == s.student_id).first()
         content = ""
+        all_images = []
 
         # 优先从磁盘读原始附件文件
         for att in (s.attachments or []):
@@ -377,14 +415,36 @@ def check_plagiarism(db: Session, assignment_id: int, teacher_id: int) -> dict:
             if filename:
                 file_path = _os.path.join(upload_dir, filename)
                 if _os.path.exists(file_path):
-                    ext = _os.path.splitext(att.get("fileName", ""))[1]
-                    text = extract_file_text(file_path, ext)
-                    if text and text.strip():
-                        content += text + "\n"
+                    ext = _os.path.splitext(att.get("fileName", ""))[1].lower()
+                    if ext == ".docx":
+                        # docx: 复用同一个 Document 对象提取全文+图片
+                        full_text, images = extract_docx_text_and_images(file_path)
+                        if full_text and full_text.strip():
+                            content += full_text + "\n"
+                        if images:
+                            all_images.extend(images)
+                    else:
+                        text = extract_file_text(file_path, ext)
+                        if text and text.strip():
+                            content += text + "\n"
+                else:
+                    # 文件不存在时回退到上传时保存的 textContent
+                    text_content = att.get("textContent", "")
+                    if text_content and text_content.strip():
+                        content += text_content + "\n"
 
-        # 如果没附件或文件读不到,用提交的文本内容(去HTML标签)
+        # 回退到 submission.content 字段（富文本编辑器提交的内容）
+        if not content.strip() and s.content:
+            content = s.content
+
+        # 内容为空则跳过并记录原因
         if not content.strip():
-            content = _re.sub(r"<[^>]*>", "", s.content or "").strip()
+            skipped.append({
+                "studentName": student.name if student else "",
+                "studentNumber": student.student_id if student else "",
+                "reason": "提交内容为空，无法进行查重比对",
+            })
+            continue
 
         student_data.append({
             "id": s.id,
@@ -393,4 +453,155 @@ def check_plagiarism(db: Session, assignment_id: int, teacher_id: int) -> dict:
             "content": content,
         })
 
-    return run_plagiarism_check(student_data)
+        if all_images:
+            image_data.append({
+                "id": s.id,
+                "studentName": student.name if student else "",
+                "studentNumber": student.student_id if student else "",
+                "images": all_images,
+            })
+
+    # 双维度查重 + 合并（文本 + 图片，支持模板剔除）
+    text_result = run_plagiarism_check(student_data, template_text=template_text)
+    image_result = run_image_plagiarism_check(image_data, template_images=template_images) if len(image_data) >= 2 else None
+
+    return merge_results(text_result, None, image_result, skipped=skipped)
+
+
+# ========== 对比预览 ==========
+
+def _extract_submission_text(submission, upload_dir: str) -> str:
+    """从提交记录中提取全文文本（优先读磁盘原始文件，回退到 content 字段）"""
+    import os as _os
+    from ..plagiarism import extract_file_text, extract_all_from_docx as extract_docx_all
+
+    text = ""
+    for att in (submission.attachments or []):
+        file_url = att.get("fileUrl", "")
+        filename = file_url.replace("/uploads/", "")
+        if filename:
+            file_path = _os.path.join(upload_dir, filename)
+            if _os.path.exists(file_path):
+                ext = _os.path.splitext(att.get("fileName", ""))[1].lower()
+                if ext == ".docx":
+                    full_text, _ = extract_docx_all(file_path)
+                    if full_text and full_text.strip():
+                        text += full_text + "\n"
+                else:
+                    t = extract_file_text(file_path, ext)
+                    if t and t.strip():
+                        text += t + "\n"
+    # 回退到 content 字段
+    if not text.strip() and submission.content:
+        text = submission.content
+    return text
+
+
+def _extract_submission_html(submission, upload_dir: str) -> str:
+    """从提交记录中提取 HTML（docx 用 mammoth 转换，其他用 <pre>，回退到 content）"""
+    import os as _os
+    from ..plagiarism import file_to_html
+
+    html_parts = []
+    has_file = False
+    for att in (submission.attachments or []):
+        file_url = att.get("fileUrl", "")
+        filename = file_url.replace("/uploads/", "")
+        if filename:
+            file_path = _os.path.join(upload_dir, filename)
+            if _os.path.exists(file_path):
+                ext = _os.path.splitext(att.get("fileName", ""))[1].lower()
+                has_file = True
+                h = file_to_html(file_path, ext)
+                if h and h.strip():
+                    html_parts.append(h)
+    # 没有文件附件时回退到 content 字段（富文本 HTML）
+    if not has_file and submission.content:
+        return submission.content
+    return "\n".join(html_parts) if html_parts else "<p>（无内容）</p>"
+
+
+def _get_submission_file_info(submission, upload_dir: str) -> dict:
+    """获取提交记录的第一个文件附件信息（URL、扩展名），用于前端渲染原始 Word。"""
+    import os as _os
+    for att in (submission.attachments or []):
+        file_url = att.get("fileUrl", "")
+        filename = file_url.replace("/uploads/", "")
+        if filename:
+            file_path = _os.path.join(upload_dir, filename)
+            if _os.path.exists(file_path):
+                ext = _os.path.splitext(att.get("fileName", ""))[1].lower()
+                return {"fileUrl": file_url, "ext": ext, "fileName": att.get("fileName", "")}
+    return None
+
+
+def compare_submissions(db: Session, submission_id: int, match_submission_id: int, teacher_id: int) -> dict:
+    """获取两份提交的对比预览数据。
+    返回: { studentA, studentB, fileA, fileB, contentHtmlA, contentHtmlB, snippets: [...] }
+    - fileA/fileB: 文件URL和扩展名（前端用 docx-preview 渲染原始 Word）
+    - contentHtmlA/contentHtmlB: 无文件时的富文本 HTML 兑底
+    - snippets: 全量公共 N-gram（只保留长度>=PHRASE_NGRAM 的）
+    """
+    s1 = db.query(Submission).filter(Submission.id == submission_id).first()
+    s2 = db.query(Submission).filter(Submission.id == match_submission_id).first()
+    if not s1 or not s2:
+        raise NotFoundException(10016, "提交记录不存在")
+
+    # 验证老师拥有该作业
+    a = db.query(Assignment).filter(Assignment.id == s1.assignment_id).first()
+    if not a or a.teacher_id != teacher_id:
+        raise BadRequestException(10007, "无权操作此作业")
+
+    import os as _os
+    import json as _json
+    from ..plagiarism import get_char_ngram_set, PHRASE_NGRAM
+    from ..config import settings
+
+    upload_dir = str(settings.upload_path)
+
+    # 纯文本用于计算命中片段
+    text_a = _extract_submission_text(s1, upload_dir)
+    text_b = _extract_submission_text(s2, upload_dir)
+
+    # 文件信息（供前端渲染原始 Word）
+    file_a = _get_submission_file_info(s1, upload_dir)
+    file_b = _get_submission_file_info(s2, upload_dir)
+
+    # 无文件时回退到 content 字段
+    content_html_a = s1.content if not file_a and s1.content else ""
+    content_html_b = s2.content if not file_b and s2.content else ""
+
+    # 加载模板 n-gram 缓存（check_plagiarism 时保存的），用于排除模板内容
+    template_ngrams = set()
+    _template_cache_path = _os.path.join(upload_dir, f"plagiarism_template_{s1.assignment_id}.json")
+    if _os.path.exists(_template_cache_path):
+        try:
+            with open(_template_cache_path, "r", encoding="utf-8") as _f:
+                _cache = _json.load(_f)
+            template_ngrams = set(_cache.get("template_ngrams", []))
+        except Exception:
+            pass
+
+    # 计算全量公共 N-gram，排除模板 n-gram，只保留长度 >= PHRASE_NGRAM 的
+    snippets = []
+    if text_a and text_b:
+        set_a = get_char_ngram_set(text_a, PHRASE_NGRAM)
+        set_b = get_char_ngram_set(text_b, PHRASE_NGRAM)
+        common = set_a & set_b
+        # 排除模板 n-gram
+        if template_ngrams:
+            common = common - template_ngrams
+        snippets = [g for g in common if len(g) >= PHRASE_NGRAM]
+
+    u1 = db.query(User).filter(User.id == s1.student_id).first()
+    u2 = db.query(User).filter(User.id == s2.student_id).first()
+
+    return {
+        "studentA": {"name": u1.name if u1 else "", "number": u1.student_id if u1 else ""},
+        "studentB": {"name": u2.name if u2 else "", "number": u2.student_id if u2 else ""},
+        "fileA": file_a,
+        "fileB": file_b,
+        "contentHtmlA": content_html_a,
+        "contentHtmlB": content_html_b,
+        "snippets": snippets,
+    }

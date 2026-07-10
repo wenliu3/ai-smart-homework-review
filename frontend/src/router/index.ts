@@ -133,14 +133,6 @@ export const constantRoutes: Array<RouteRecordRaw> = [
     ],
   },
   {
-    path: "/teacher/assignments/edit",
-    component: LayoutIndex,
-    meta: { requiresAuth: true },
-    children: [
-      { path: "", name: "TeacherAssignmentsEdit2", component: () => import("@/views/teacher/assignments/assigmentsEidt/index.vue"), meta: { title: "编辑作业", requiresAuth: true } },
-    ],
-  },
-  {
     path: "/teacher/ai-rules",
     component: LayoutIndex,
     meta: { requiresAuth: true },
@@ -234,7 +226,7 @@ export function resetRouter() {
         "Login", "ForceChangePassword", "NotFound", "Redirect", "Dashboard",
         "AdminDashboard", "TeacherDashboard", "StudentDashboard",
         "SystemUsers", "SystemRoles", "SystemMenus", "SystemAiModel", "SystemClasses", "SystemLogs",
-        "TeacherClasses", "TeacherClassesDetail", "TeacherAssignments", "TeacherAssignmentsEdit", "TeacherAssignmentsEdit2", "TeacherAssignmentsDetail", "TeacherAiRules", "TeacherCorrecting", "TeacherGrading", "TeacherSubmissionDetail", "TeacherPlagiarism",
+        "TeacherClasses", "TeacherClassesDetail", "TeacherAssignments", "TeacherAssignmentsEdit", "TeacherAssignmentsDetail", "TeacherAiRules", "TeacherCorrecting", "TeacherGrading", "TeacherSubmissionDetail", "TeacherPlagiarism",
         "StudentClasses", "StudentAssignments", "StudentAssignmentDetail", "StudentSubmission",
       ].indexOf(route.name.toString()) === -1
     ) {

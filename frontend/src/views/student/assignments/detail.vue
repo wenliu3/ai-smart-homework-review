@@ -9,9 +9,8 @@
               {{ assignment?.title }}
             </h1>
             <div class="flex items-center space-x-4 text-sm text-gray-500">
-              <span>{{ assignment?.subject }}</span>
-              <span>总分：{{ assignment?.totalPoints }}分</span>
-              <span>截止时间：{{ formatDate(assignment?.deadline) }}</span>
+              <span>{{ assignment?.teacherName }}</span>
+              <span>截止时间：{{ formatDate(assignment?.endDate) }}</span>
             </div>
           </div>
           <el-tag :type="getStatusType(assignment?.status)" size="large">
@@ -24,9 +23,7 @@
       <div class="p-6">
         <div class="prose max-w-none">
           <h3 class="text-lg font-medium text-gray-900 mb-3">作业要求</h3>
-          <div class="text-gray-700 whitespace-pre-wrap">
-            {{ assignment?.description }}
-          </div>
+          <div class="text-gray-700 assignment-content" v-html="assignment?.description"></div>
         </div>
 
         <!-- 附件列表 -->
@@ -35,11 +32,11 @@
           <div class="space-y-2">
             <div
               v-for="attachment in assignment.attachments"
-              :key="attachment.url"
+              :key="attachment.fileUrl"
               class="flex items-center p-3 bg-gray-50 rounded-lg"
             >
               <el-icon class="text-blue-500 mr-2"><Document /></el-icon>
-              <span class="flex-1">{{ attachment.name }}</span>
+              <span class="flex-1">{{ attachment.fileName }}</span>
               <el-button
                 type="primary"
                 size="small"
@@ -227,8 +224,22 @@ const getReviewStatusText = () => {
 };
 
 // 下载附件
-const downloadFile = (attachment) => {
-  window.open(attachment.url, "_blank");
+const downloadFile = (attachment: any) => {
+  const token = localStorage.getItem("token");
+  const filename = (attachment.fileUrl || "").replace("/uploads/", "");
+  fetch(`/api/upload/download/${filename}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+    .then((res) => res.blob())
+    .then((blob) => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = attachment.fileName || filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    })
+    .catch(() => ElMessage.warning("下载失败"));
 };
 
 // 返回
@@ -274,5 +285,30 @@ onMounted(() => {
 
 .prose {
   line-height: 1.6;
+}
+
+.assignment-content {
+  line-height: 1.8;
+}
+
+.assignment-content :deep(p) {
+  margin: 0.5em 0;
+}
+
+.assignment-content :deep(h1),
+.assignment-content :deep(h2),
+.assignment-content :deep(h3) {
+  margin: 0.8em 0 0.4em;
+  font-weight: 600;
+}
+
+.assignment-content :deep(ul),
+.assignment-content :deep(ol) {
+  padding-left: 1.5em;
+  margin: 0.5em 0;
+}
+
+.assignment-content :deep(img) {
+  max-width: 100%;
 }
 </style>

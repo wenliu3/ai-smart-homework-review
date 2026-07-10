@@ -10,6 +10,8 @@ class AssignmentCreate(BaseModel):
     startDate: datetime
     endDate: datetime
     aiRule: dict | None = None
+    attachments: list[dict] = []  # 教师上传的作业附件
+    allowAttachments: bool = False
 
 
 class AssignmentUpdate(BaseModel):
@@ -19,6 +21,8 @@ class AssignmentUpdate(BaseModel):
     startDate: datetime | None = None
     endDate: datetime | None = None
     aiRule: dict | None = None
+    attachments: list[dict] | None = None
+    allowAttachments: bool | None = None
 
 
 class UpdateStatusRequest(BaseModel):

@@ -82,6 +82,7 @@
         @delete="handleDeleteRule"
         @copy="handleCopyRule"
         @view="handleViewRule"
+        @toggle="handleToggleStatus"
       />
 
       <!-- 分页 -->
@@ -118,12 +119,11 @@
 <script lang="ts" setup>
 import { ref, reactive, computed, onMounted } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { getAiRuleList, deleteAiRule, copyAiRule } from "../../../api/ai-rule";
+import { getAiRuleList, deleteAiRule, copyAiRule, toggleAiRuleStatus } from "../../../api/ai-rule";
 import { Plus, Refresh, Search } from "@element-plus/icons-vue";
 import { useStore } from "vuex";
 
 // 导入组件
-import AdaptiveTableContainer from "@/components/AdaptiveTableContainer.vue";
 import AiRuleTable from "./components/AiRuleTable.vue";
 import AiRuleForm from "./components/AiRuleForm.vue";
 import AiRuleDetail from "./components/AiRuleDetail.vue";
@@ -160,12 +160,8 @@ const loading = ref(false);
 const ruleList = ref([]);
 
 // 组件引用
-const adaptiveTableRef = ref(null);
 const ruleFormRef = ref(null);
 const ruleDetailRef = ref(null);
-
-// 触发重新计算表格高度的计数器
-const recalculateTrigger = ref(0);
 
 // 重置搜索
 const resetSearch = () => {
@@ -213,9 +209,6 @@ const loadRuleData = async () => {
     const response = await getAiRuleList(params);
     ruleList.value = response.items || [];
     pagination.total = response.total || 0;
-
-    // 触发表格高度重新计算
-    recalculateTrigger.value++;
   } catch (error) {
     console.error("加载AI规则数据失败", error);
     ElMessage.error("加载AI规则列表失败");
@@ -276,6 +269,28 @@ const handleDeleteRule = async (rule) => {
     if (error === "cancel") return;
     console.error("删除规则失败", error);
     ElMessage.error("删除失败：" + (error.message || "未知错误"));
+  }
+};
+
+// 处理切换状态（启用/禁用）
+const handleToggleStatus = async (rule) => {
+  if (!rule || !rule.id) {
+    ElMessage.error("规则数据不完整");
+    return;
+  }
+  const action = rule.status === "active" ? "禁用" : "启用";
+  try {
+    await ElMessageBox.confirm(
+      `确定要${action}规则 "${rule.name}" 吗？`,
+      `${action}提示`,
+      { confirmButtonText: "确定", cancelButtonText: "取消", type: "warning" }
+    );
+    await toggleAiRuleStatus(rule.id);
+    ElMessage.success(`${action}成功`);
+    loadRuleData();
+  } catch (error) {
+    if (error === "cancel") return;
+    ElMessage.error(`${action}失败：` + (error.message || "未知错误"));
   }
 };
 

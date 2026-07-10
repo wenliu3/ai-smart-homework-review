@@ -23,6 +23,13 @@ export interface Assignment {
   status: AssignmentStatus;
   terminatedReason?: string;
   isExpired: boolean;
+  allowAttachments?: boolean;
+  attachments?: Array<{
+    fileName: string;
+    fileUrl: string;
+    fileSize: number;
+    fileType: string;
+  }>;
   createdAt: string;
   updatedAt: string;
 }
@@ -45,6 +52,8 @@ export interface AssignmentDetail extends Assignment {
     reviewedSubmissions: number;
     pendingSubmissions: number;
     draftSubmissions: number;
+    aiReviewed: number;
+    teacherReviewed: number;
   };
 }
 
@@ -118,6 +127,13 @@ export interface CreateAssignmentParams {
   startDate: string;
   endDate: string;
   aiRule?: any;
+  allowAttachments?: boolean;
+  attachments?: Array<{
+    fileName: string;
+    fileUrl: string;
+    fileSize: number;
+    fileType: string;
+  }>;
 }
 
 // 更新作业参数
@@ -321,6 +337,21 @@ export interface PlagiarismResultItem {
   matchName: string;      // 最相似对象姓名
   matchId: string;        // 最相似对象学号
   matchSubmissionId: string | null;
+  // 代码维度查重结果
+  codeRate?: number | null;      // 代码重合度(%)
+  codeStatus?: string;           // 代码判定结果
+  codeMatchName?: string;       // 代码最相似对象
+  codeMatchId?: string;         // 代码对方学号
+  // 图片维度查重结果
+  imageRate?: number | null;     // 图片重合度(%)
+  imageStatus?: string;          // 图片判定结果
+  imageMatchName?: string;      // 图片最相似对象
+  imageMatchId?: string;        // 图片对方学号
+  matchedImageCount?: number;   // 疑似复制图片数
+  totalImageCount?: number;     // 该学生参与比对的有效图片总数
+  lowConfidence?: boolean;     // 单张图片命中时置信度低
+  suspectReason?: string;       // 疑似原因（如 "文字+图片"）
+  matchedSnippets?: string[];   // 命中片段样例
 }
 
 /** 查重结果 */
@@ -331,14 +362,67 @@ export interface PlagiarismResult {
   suspectCount: number;
   passRate: number;
   message?: string;
+  // 代码查重维度
+  codeCheckEnabled?: boolean;
+  codeSuspectCount?: number;
+  codePassRate?: number | null;
+  // 图片查重维度
+  imageCheckEnabled?: boolean;
+  imageSuspectCount?: number;
+  templateFiltered?: boolean;
+  autoCommonFiltered?: boolean;
 }
 
 /**
  * 作业查重 — 对该作业所有学生提交进行查重比对
+ * @param assignmentId 作业ID
+ * @param templateFile 可选，任务书/起始代码模板
  */
-export function checkPlagiarism(assignmentId: string): Promise<PlagiarismResult> {
+export function checkPlagiarism(assignmentId: string, templateFile?: File | null): Promise<PlagiarismResult> {
+  if (templateFile) {
+    const formData = new FormData();
+    formData.append("template_file", templateFile);
+    return request({
+      url: `/teacher/assignments/${assignmentId}/plagiarism`,
+      method: "post",
+      data: formData,
+      timeout: 120000,
+      headers: { "Content-Type": undefined as any },
+    });
+  }
   return request({
     url: `/teacher/assignments/${assignmentId}/plagiarism`,
     method: "post",
+    timeout: 120000,
+  });
+}
+
+/** 文件信息 */
+export interface CompareFileInfo {
+  fileUrl: string;
+  ext: string;
+  fileName: string;
+}
+
+/** 对比预览结果 */
+export interface CompareResult {
+  studentA: { name: string; number: string };
+  studentB: { name: string; number: string };
+  fileA: CompareFileInfo | null;
+  fileB: CompareFileInfo | null;
+  contentHtmlA: string;
+  contentHtmlB: string;
+  snippets: string[];
+}
+
+/**
+ * 对比预览 — 获取两份提交的全文和命中片段
+ */
+export function compareSubmissions(submissionId: string, matchSubmissionId: string): Promise<CompareResult> {
+  return request({
+    url: "/teacher/submissions/compare",
+    method: "get",
+    params: { submission_id: submissionId, match_submission_id: matchSubmissionId },
+    timeout: 60000,
   });
 }

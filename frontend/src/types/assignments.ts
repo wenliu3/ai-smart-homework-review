@@ -30,6 +30,12 @@ export interface Assignment {
   startDate: string;
   endDate: string;
   allowAttachments: boolean;
+  attachments?: Array<{
+    fileName: string;
+    fileUrl: string;
+    fileSize: number;
+    fileType: string;
+  }>;
   status: AssignmentStatus;
   terminatedReason?: string;
   isDeleted: boolean;
@@ -39,14 +45,14 @@ export interface Assignment {
   isExpired?: boolean;
   // 统计信息
   submissionStats: {
-    total: number;
-    submitted: number;
-    graded: number;
-    pending: number;
+    totalSubmissions: number;
+    reviewedSubmissions: number;
+    pendingSubmissions: number;
+    draftSubmissions: number;
+    aiReviewed: number;
+    teacherReviewed: number;
   };
-  totalSubmissions?: number;
-  gradedSubmissions?: number;
-  pendingSubmissions?: number;
+  totalStudents?: number;
 }
 
 // 作业列表项接口（简化版）
@@ -80,7 +86,7 @@ export interface AssignmentListItem {
 export interface AssignmentQueryParams {
   page?: number;
   pageSize?: number;
-  search?: string;
+  title?: string;
   status?: AssignmentStatus;
   classId?: string; // 班级ID精确查询
   className?: string; // 班级名称模糊查询
@@ -88,8 +94,8 @@ export interface AssignmentQueryParams {
   startDate?: string;
   endDate?: string;
   isExpired?: boolean;
-  sort?: string;
-  order?: "asc" | "desc";
+  sortBy?: string;
+  sortOrder?: "asc" | "desc";
 }
 
 // 作业列表响应
@@ -110,6 +116,12 @@ export interface CreateAssignmentDto {
   startDate: string;
   endDate: string;
   allowAttachments: boolean;
+  attachments?: Array<{
+    fileName: string;
+    fileUrl: string;
+    fileSize: number;
+    fileType: string;
+  }>;
 }
 
 // 更新作业DTO

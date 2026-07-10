@@ -10,6 +10,8 @@ export interface SubmissionRecord {
   classId: string;
   className: string;
   content: string;
+  attachments: any[];
+  wordCount: number;
   status: "draft" | "submitted" | "ai_reviewed" | "teacher_reviewed";
   submittedAt?: string;
   aiScore?: number;

@@ -30,10 +30,6 @@ export interface User {
   tokenExpiresAt?: number;
 }
 
-// 重新导出User接口，确保它能被正确识别
-const UserType = User;
-export { UserType as User };
-
 // 创建用户DTO
 export interface CreateUserDto {
   username: string;

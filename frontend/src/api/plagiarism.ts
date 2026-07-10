@@ -12,6 +12,23 @@ export interface PlagiarismResultItem {
   matchName: string;
   matchId: string;
   matchSubmissionId: string | null;
+  // 代码维度查重结果
+  codeRate: number | null;
+  codeStatus: string;
+  codeMatchName: string;
+  codeMatchId: string;
+  // 图片维度查重结果
+  imageRate: number | null;
+  imageStatus: string;
+  imageMatchName: string;
+  imageMatchId: string;
+  matchedImageCount: number;
+  totalImageCount?: number;   // 该学生参与比对的有效图片总数
+  lowConfidence?: boolean;   // 单张图片命中时置信度低
+  // 疑似抄袭原因（如 "文字+图片"）
+  suspectReason?: string;
+  // 命中片段样例
+  matchedSnippets?: string[];
 }
 
 /** 跳过的文件 */
@@ -31,20 +48,46 @@ export interface AdhocCheckResult {
   suspectCount: number;
   passRate: number;
   message?: string;
+  // 代码查重维度
+  codeCheckEnabled?: boolean;
+  codeSuspectCount?: number;
+  // 图片查重维度
+  imageCheckEnabled?: boolean;
+  imageSuspectCount?: number;
+  templateFiltered?: boolean;
+  codeTemplateFiltered?: boolean;
+  imageTemplateFiltered?: boolean;
+  textResult?: {
+    total: number;
+    suspectCount: number;
+    autoCommonFiltered: boolean;
+  };
+  codeResult?: {
+    total: number;
+    suspectCount: number;
+  } | null;
+  imageResult?: {
+    total: number;
+    suspectCount: number;
+  } | null;
 }
 
 /**
  * 临时查重 — 上传多个文件进行查重
+ * @param files 学生作业文件
+ * @param templateFile 可选，任务书/起始代码模板
  */
-export function adhocCheck(files: File[]): Promise<AdhocCheckResult> {
+export function adhocCheck(files: File[], templateFile?: File | null): Promise<AdhocCheckResult> {
   const formData = new FormData();
   files.forEach((f) => formData.append("files", f));
+  if (templateFile) {
+    formData.append("template_file", templateFile);
+  }
   return request({
     url: "/plagiarism/adhoc-check",
     method: "post",
     data: formData,
     timeout: 120000,
-    // 不要手动设 Content-Type，让浏览器自动设置 multipart/form-data; boundary=xxx
     headers: { "Content-Type": undefined as any },
   });
 }
@@ -52,7 +95,11 @@ export function adhocCheck(files: File[]): Promise<AdhocCheckResult> {
 /**
  * 下载查重报告 Excel
  */
-export function downloadReportUrl(checkId: string): string {
-  const token = localStorage.getItem("token");
-  return `/api/plagiarism/${checkId}/report`;
+export function downloadReport(checkId: string): Promise<Blob> {
+  return request({
+    url: `/plagiarism/${checkId}/report`,
+    method: "get",
+    responseType: "blob",
+    timeout: 60000,
+  });
 }

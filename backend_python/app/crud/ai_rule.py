@@ -69,12 +69,23 @@ def update(db: Session, rule_id: int, data: dict) -> dict:
 
 
 def delete(db: Session, rule_id: int) -> dict:
-    """软删除 AI 规则 — 状态置为 inactive"""
+    """硬删除 AI 规则 — 从数据库中彻底删除"""
     rule = db.query(AiRule).filter(AiRule.id == rule_id).first()
-    if rule:
-        rule.status = "inactive"
-        db.commit()
+    if not rule:
+        raise NotFoundException(10015, "AI规则不存在")
+    db.delete(rule)
+    db.commit()
     return {"id": str(rule_id), "success": True}
+
+
+def toggle_status(db: Session, rule_id: int) -> dict:
+    """切换 AI 规则状态 — active <-> inactive"""
+    rule = db.query(AiRule).filter(AiRule.id == rule_id).first()
+    if not rule:
+        raise NotFoundException(10015, "AI规则不存在")
+    rule.status = "inactive" if rule.status == "active" else "active"
+    db.commit()
+    return {"id": str(rule_id), "status": rule.status, "success": True}
 
 
 def copy(db: Session, rule_id: int, name: str | None) -> dict:

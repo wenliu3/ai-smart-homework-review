@@ -160,6 +160,9 @@
                 <el-dropdown-item @click="handleCopyRule(row)">
                   <el-icon><CopyDocument /></el-icon>复制
                 </el-dropdown-item>
+                <el-dropdown-item @click="handleToggleStatus(row)">
+                  <el-icon><Open /></el-icon>{{ row.status === 'active' ? '禁用' : '启用' }}
+                </el-dropdown-item>
                 <el-dropdown-item
                   @click="handleDeleteRule(row)"
                   :disabled="!canDeleteRule(row)"
@@ -198,6 +201,14 @@
             </el-button>
             <el-button
               link
+              :type="row.status === 'active' ? 'warning' : 'success'"
+              size="small"
+              @click="handleToggleStatus(row)"
+            >
+              <el-icon><Open /></el-icon>{{ row.status === 'active' ? '禁用' : '启用' }}
+            </el-button>
+            <el-button
+              link
               type="danger"
               size="small"
               @click="handleDeleteRule(row)"
@@ -219,6 +230,7 @@ import {
   Delete,
   View,
   CopyDocument,
+  Open,
 } from "@element-plus/icons-vue";
 
 const props = defineProps({
@@ -244,7 +256,7 @@ const props = defineProps({
   },
 });
 
-const emit = defineEmits(["edit", "delete", "copy", "view"]);
+const emit = defineEmits(["edit", "delete", "copy", "view", "toggle"]);
 
 // 获取模型类型显示名称
 const getModelTypeName = (modelType) => {
@@ -297,6 +309,11 @@ const handleCopyRule = (row) => {
   emit("copy", row);
 };
 
+// 切换状态（启用/禁用）
+const handleToggleStatus = (row) => {
+  emit("toggle", row);
+};
+
 // 删除规则
 const handleDeleteRule = (row) => {
   if (!canDeleteRule(row)) {
@@ -342,10 +359,16 @@ const canEditRule = (row) => {
     return true;
   }
 
+  // createdBy 为 null 时（历史数据），允许教师编辑
+  if (!row.createdBy) {
+    return true;
+  }
+
   // 只有创建者可以编辑自己的规则
+  const userId = props.currentUser._id || props.currentUser.id;
   return (
-    row.createdBy?._id === props.currentUser._id ||
-    row.createdBy?.id === props.currentUser._id
+    row.createdBy?._id === userId ||
+    row.createdBy?.id === userId
   );
 };
 
@@ -366,10 +389,16 @@ const canDeleteRule = (row) => {
     return true;
   }
 
+  // createdBy 为 null 时（历史数据），允许教师删除
+  if (!row.createdBy) {
+    return true;
+  }
+
   // 只有创建者可以删除自己的规则
+  const userId = props.currentUser._id || props.currentUser.id;
   return (
-    row.createdBy?._id === props.currentUser._id ||
-    row.createdBy?.id === props.currentUser._id
+    row.createdBy?._id === userId ||
+    row.createdBy?.id === userId
   );
 };
 </script>

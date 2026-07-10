@@ -6,3 +6,20 @@ declare module "*.vue" {
   const component: DefineComponent<{}, {}, any>;
   export default component;
 }
+
+declare module "docx-preview" {
+  export interface RenderOptions {
+    className?: string;
+    inWrapper?: boolean;
+    ignoreWidth?: boolean;
+    ignoreHeight?: boolean;
+    breakPages?: boolean;
+    [key: string]: any;
+  }
+  export function renderAsync(
+    data: Blob | ArrayBuffer,
+    bodyContainer: HTMLElement,
+    styleContainer?: HTMLElement | null,
+    options?: RenderOptions
+  ): Promise<HTMLElement | void>;
+}

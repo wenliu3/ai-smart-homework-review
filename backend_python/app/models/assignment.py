@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, JSON, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, DateTime, JSON, Boolean, ForeignKey
 from ..database import Base
 from .base import TimestampMixin, ModelMixin
 
@@ -17,3 +17,5 @@ class Assignment(Base, TimestampMixin, ModelMixin):
     status = Column(String(20), default="draft")
     terminated_reason = Column(String(255), nullable=True)
     ai_rule = Column(JSON, nullable=True)
+    attachments = Column(JSON, default=list)  # 教师上传的作业附件 [{fileName, fileUrl, fileSize, fileType}]
+    allow_attachments = Column(Boolean, default=False)  # 是否允许学生上传附件

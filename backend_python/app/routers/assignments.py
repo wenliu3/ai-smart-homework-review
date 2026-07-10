@@ -1,10 +1,16 @@
 """作业路由 — 仅做路由转发，业务逻辑在 crud/assignment.py"""
-from fastapi import APIRouter, Depends, Request
+import os
+import uuid
+import tempfile
+from typing import Optional
+from fastapi import APIRouter, Depends, Request, UploadFile, File
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..deps import get_current_user
 from ..models import User
 from ..core.response import ok
+from ..plagiarism import extract_all_from_file
+from ..core.exceptions import BadRequestException
 from ..schemas.assignment import AssignmentCreate, AssignmentUpdate, UpdateStatusRequest
 from ..crud import assignment as assignment_crud
 
@@ -56,9 +62,45 @@ def delete_assignment(assignment_id: int, current_user: User = Depends(get_curre
 
 # ========== 作业查重 ==========
 @router.post("/teacher/assignments/{assignment_id}/plagiarism")
-def check_plagiarism(assignment_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """作业查重 — 对该作业所有学生提交进行两两比对，返回重复率排名"""
-    return ok(assignment_crud.check_plagiarism(db, assignment_id, current_user.id))
+async def check_plagiarism(
+    assignment_id: int,
+    template_file: Optional[UploadFile] = File(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """作业查重 — 对该作业所有学生提交进行两两比对，返回重复率排名
+    可选参数 template_file: 上传一份任务书/起始代码模板，比对前自动剔除模板内容。
+    """
+    template_text = None
+    template_images = None
+    if template_file:
+        try:
+            tf_ext = "." + (template_file.filename or "").rsplit(".", 1)[-1].lower() if "." in (template_file.filename or "") else ""
+            tf_bytes = await template_file.read()
+            tf_tmp = os.path.join(tempfile.gettempdir(), f"plagiarism_template_{uuid.uuid4().hex}{tf_ext}")
+            with open(tf_tmp, "wb") as tmp:
+                tmp.write(tf_bytes)
+            template_text, template_images = extract_all_from_file(tf_tmp, tf_ext)
+            os.remove(tf_tmp)
+        except Exception:
+            pass
+
+    return ok(assignment_crud.check_plagiarism(
+        db, assignment_id, current_user.id,
+        template_text=template_text or None,
+        template_images=template_images or None,
+    ))
+
+
+@router.get("/teacher/submissions/compare")
+def compare_submissions(
+    submission_id: int,
+    match_submission_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """对比预览 — 返回两份提交的全文和命中片段，用于前端左右并排展示，命中部分标黄"""
+    return ok(assignment_crud.compare_submissions(db, submission_id, match_submission_id, current_user.id))
 
 
 # ========== 学生端 ==========

@@ -12,7 +12,7 @@ export interface Attachment {
 export interface SubmitAssignmentParams {
   assignmentId: string;
   classId: string;
-  content: string;
+  content?: string;
   attachments?: Attachment[];
   isDraft?: boolean;
 }
@@ -35,6 +35,7 @@ export interface Submission {
   id: string;
   content: string;
   attachments: Attachment[];
+  wordCount: number;
   status: "draft" | "submitted" | "ai_reviewed" | "teacher_reviewed";
   submittedAt: string | null;
   updatedAt: string;

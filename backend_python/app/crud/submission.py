@@ -8,7 +8,8 @@ from ..database import SessionLocal
 from ..models import User, Assignment, Submission, AiModel
 from ..core.exceptions import BadRequestException, NotFoundException
 from ..core.utils import now
-from ..core.file_parser import extract_file_text
+from ..plagiarism.extractors import extract_file_text
+from ..plagiarism import get_word_tokens
 from ..config import settings
 
 logger = logging.getLogger(__name__)
@@ -40,8 +41,25 @@ def submit(db: Session, student_id: int, data: dict) -> dict:
     if not is_draft and assignment.end_date and now() > assignment.end_date:
         raise BadRequestException(10011, "作业已截止，无法提交")
 
-    content = data.get("content", "")
     attachments = data.get("attachments", []) or []
+    content = data.get("content", "")
+    # 重新从文件提取文本，计算字数并更新 textContent
+    upload_dir = str(settings.upload_path)
+    word_count = 0
+    # 统计词数（jieba 分词后的词数，非字符数）
+    if content:
+        text_content = re.sub(r"<[^>]*>", "", content)
+        word_count += len(get_word_tokens(text_content))
+    for att in attachments:
+        file_url = att.get("fileUrl", "")
+        filename = file_url.replace("/uploads/", "")
+        if filename:
+            file_path = os.path.join(upload_dir, filename)
+            ext = os.path.splitext(att.get("fileName", ""))[1].lower()
+            text = extract_file_text(file_path, ext)
+            if text:
+                att["textContent"] = text
+                word_count += len(get_word_tokens(text))
     submission = db.query(Submission).filter(
         Submission.assignment_id == assignment.id, Submission.student_id == student_id
     ).first()
@@ -49,6 +67,7 @@ def submit(db: Session, student_id: int, data: dict) -> dict:
     if submission:
         submission.content = content
         submission.attachments = attachments
+        submission.word_count = word_count
         submission.is_draft = is_draft
         submission.status = "draft" if is_draft else "submitted"
         submission.submission_count = (submission.submission_count or 1) + 1
@@ -59,7 +78,7 @@ def submit(db: Session, student_id: int, data: dict) -> dict:
     else:
         submission = Submission(
             assignment_id=assignment.id, student_id=student_id,
-            class_id=int(data.get("classId")), content=content, attachments=attachments,
+            class_id=int(data.get("classId")), content=content, attachments=attachments, word_count=word_count,
             is_draft=is_draft, status="draft" if is_draft else "submitted",
             submitted_at=None if is_draft else now(), submission_count=1,
         )
@@ -90,8 +109,10 @@ def get_my_submission(db: Session, assignment_id: int, student_id: int) -> dict:
     }
     if submission:
         result["submission"] = {
-            "id": str(submission.id), "content": submission.content,
-            "attachments": submission.attachments, "status": submission.status,
+            "id": str(submission.id),
+            "content": submission.content or "",
+            "attachments": submission.attachments, "wordCount": submission.word_count or 0,
+            "status": submission.status,
             "submittedAt": submission.submitted_at.isoformat() if submission.submitted_at else None,
             "updatedAt": submission.updated_at.isoformat() if submission.updated_at else None,
             "createdAt": submission.created_at.isoformat() if submission.created_at else None,
@@ -159,8 +180,8 @@ def trigger_ai_review(submission_id: int):
         prompt = ai_rule.get("prompt", "")
         model_type = ai_rule.get("modelType", "deepseek")
 
-        content_text = re.sub(r"<[^>]*>", "", submission.content or "").strip()
         attachments = submission.attachments or []
+        content_text = re.sub(r"<[^>]*>", "", submission.content or "").strip()
         if attachments:
             content_text += "\n\n【附件内容】"
             upload_dir = str(settings.upload_path)
@@ -170,8 +191,13 @@ def trigger_ai_review(submission_id: int):
                 filename = file_url.replace("/uploads/", "")
                 if filename:
                     file_path = os.path.join(upload_dir, filename)
+                    if not os.path.exists(file_path):
+                        logger.warning("[AI] 附件文件不存在: %s, 回退到 textContent", file_path)
                     ext = os.path.splitext(att.get("fileName", ""))[1].lower()
                     text = extract_file_text(file_path, ext)
+                # 文件不存在或提取失败时，回退到上传时已存储的 textContent
+                if not text or not text.strip():
+                    text = att.get("textContent", "")
                 if text and text.strip():
                     content_text += f"\n--- 附件「{att.get('fileName')}」文本内容 ---\n{text}"
                 else:

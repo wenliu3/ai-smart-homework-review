@@ -13,7 +13,7 @@
         </el-form-item>
         <el-form-item label="作业标题" class="!mb-0">
           <el-input
-            v-model="searchForm.search"
+            v-model="searchForm.title"
             placeholder="搜索作业标题"
             :prefix-icon="Search"
             clearable
@@ -263,10 +263,10 @@ const assignments = ref<Assignment[]>([]);
 
 // 搜索表单
 const searchForm = reactive<AssignmentQueryParams>({
-  search: "",
+  title: "",
   status: undefined,
-  sort: "createdAt",
-  order: "desc",
+  sortBy: "createdAt",
+  sortOrder: "desc",
 });
 
 // 分页数据

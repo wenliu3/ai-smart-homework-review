@@ -49,7 +49,9 @@
               <h3>作业查重分析</h3>
               <p class="action-desc">
                 对当前作业所有已提交的学生作业进行两两比对，识别疑似抄袭。
-                <br />算法综合<span class="highlight">片段重合度</span>(整句照抄)和<span class="highlight">主题相似度</span>(改写/打乱)两种指标。
+                <br /><span class="highlight">文本维度</span>：片段重合度(整句照抄) + 主题相似度(改写/打乱)。
+                <br /><span class="highlight">代码维度</span>：token归一化 + winnowing指纹（抓改名/改结构）。
+                <br /><span class="highlight">图片维度</span>：感知哈希aHash+dHash（抓截图复制粘贴）。
               </p>
             </div>
             <el-button
@@ -60,6 +62,23 @@
             >
               {{ plagiarismLoading ? "查重中..." : "开始查重" }}
             </el-button>
+          </div>
+
+          <!-- 模板上传（可选） -->
+          <div class="template-section">
+            <el-upload
+              :auto-upload="false"
+              :show-file-list="false"
+              :limit="1"
+              accept=".docx,.txt,.pdf"
+              @change="handleTemplateChange"
+            >
+              <el-button type="info" plain :icon="Document">
+                {{ templateFile ? templateFile.name : '上传任务书/模板（可选）' }}
+              </el-button>
+            </el-upload>
+            <el-button v-if="templateFile" text type="danger" :icon="Delete" @click="templateFile = null" />
+            <span class="template-tip">比对前自动剔除模板内容，避免“大家都抄了任务书”被误判</span>
           </div>
 
           <!-- 查重结果 -->
@@ -78,7 +97,19 @@
                   <div class="summary-label">疑似抄袭</div>
                 </el-card>
               </el-col>
-              <el-col :span="6">
+              <el-col :span="6" v-if="plagiarismResult.codeCheckEnabled">
+                <el-card shadow="hover" class="summary-card">
+                  <div class="summary-value danger">{{ plagiarismResult.codeSuspectCount || 0 }}</div>
+                  <div class="summary-label">代码疑似</div>
+                </el-card>
+              </el-col>
+              <el-col :span="6" v-if="plagiarismResult.imageCheckEnabled">
+                <el-card shadow="hover" class="summary-card">
+                  <div class="summary-value danger">{{ plagiarismResult.imageSuspectCount || 0 }}</div>
+                  <div class="summary-label">图片疑似</div>
+                </el-card>
+              </el-col>
+              <el-col :span="6" v-if="!plagiarismResult.codeCheckEnabled && !plagiarismResult.imageCheckEnabled">
                 <el-card shadow="hover" class="summary-card">
                   <div class="summary-value success">{{ plagiarismResult.total - plagiarismResult.suspectCount }}</div>
                   <div class="summary-label">合格</div>
@@ -130,6 +161,38 @@
                   </el-tag>
                 </template>
               </el-table-column>
+              <!-- 代码查重列（仅在启用代码查重时显示） -->
+              <el-table-column v-if="plagiarismResult.codeCheckEnabled" prop="codeRate" label="代码重合度" width="120" align="center" sortable>
+                <template #default="{ row }">
+                  <span v-if="row.codeRate !== null && row.codeRate !== undefined" :class="getRateClass(row.codeRate)">{{ row.codeRate }}%</span>
+                  <span v-else class="text-gray">-</span>
+                </template>
+              </el-table-column>
+              <el-table-column v-if="plagiarismResult.codeCheckEnabled" prop="codeStatus" label="代码判定" width="120" align="center">
+                <template #default="{ row }">
+                  <el-tag v-if="row.codeStatus && row.codeStatus !== '-'" :type="row.codeStatus === '合格' ? 'success' : 'danger'" size="small">{{ row.codeStatus }}</el-tag>
+                  <span v-else class="text-gray">-</span>
+                </template>
+              </el-table-column>
+              <!-- 图片查重列（仅在启用图片查重时显示） -->
+              <el-table-column v-if="plagiarismResult.imageCheckEnabled" prop="imageRate" label="图片重合度" width="120" align="center" sortable>
+                <template #default="{ row }">
+                  <span v-if="row.imageRate !== null && row.imageRate !== undefined" :class="getRateClass(row.imageRate)">{{ row.imageRate }}%</span>
+                  <span v-else class="text-gray">-</span>
+                </template>
+              </el-table-column>
+              <el-table-column v-if="plagiarismResult.imageCheckEnabled" prop="matchedImageCount" label="复制图片" width="100" align="center">
+                <template #default="{ row }">
+                  <span v-if="row.matchedImageCount > 0" class="rate-danger">{{ row.matchedImageCount }} 张</span>
+                  <span v-else class="text-gray">0</span>
+                </template>
+              </el-table-column>
+              <el-table-column v-if="plagiarismResult.imageCheckEnabled" prop="imageStatus" label="图片判定" width="120" align="center">
+                <template #default="{ row }">
+                  <el-tag v-if="row.imageStatus && row.imageStatus !== '-'" :type="row.imageStatus === '合格' ? 'success' : 'danger'" size="small">{{ row.imageStatus }}</el-tag>
+                  <span v-else class="text-gray">-</span>
+                </template>
+              </el-table-column>
               <el-table-column label="最相似对象" min-width="160">
                 <template #default="{ row }">
                   <span v-if="row.matchName !== '-'">
@@ -138,11 +201,24 @@
                   <span v-else class="text-gray">-</span>
                 </template>
               </el-table-column>
-              <el-table-column prop="status" label="判定结果" width="140" align="center" fixed="right">
+              <el-table-column prop="suspectReason" label="疑似原因" width="140" align="center" fixed="right">
                 <template #default="{ row }">
-                  <el-tag :type="row.status === '合格' ? 'success' : 'danger'" size="small">
-                    {{ row.status }}
-                  </el-tag>
+                  <el-tag v-if="row.suspectReason" type="danger" effect="dark" size="small">{{ row.suspectReason }}</el-tag>
+                  <el-tag v-else type="success" size="small">合格</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="100" align="center" fixed="right">
+                <template #default="{ row }">
+                  <el-button
+                    v-if="row.matchSubmissionId"
+                    type="primary"
+                    link
+                    size="small"
+                    :icon="Document"
+                    @click="openCompare(row)"
+                  >
+                    对比预览
+                  </el-button>
                 </template>
               </el-table-column>
             </el-table>
@@ -174,6 +250,44 @@
               <el-icon size="80" color="#c0c4cc"><CopyDocument /></el-icon>
             </template>
           </el-empty>
+
+          <!-- 对比预览弹窗 -->
+          <el-dialog
+            v-model="compareVisible"
+            title="查重对比预览 — 命中片段标黄"
+            width="95%"
+            top="3vh"
+            class="compare-dialog"
+            :close-on-click-modal="false"
+          >
+            <div v-loading="compareLoading" class="compare-container">
+              <div class="compare-hit-count" v-if="compareData">
+                共 {{ compareData.snippets.length }} 个命中片段，黄色标记的句子与对方重合
+              </div>
+              <el-row :gutter="12">
+                <el-col :span="12">
+                  <div class="compare-panel">
+                    <div class="compare-header">
+                      <el-icon><User /></el-icon>
+                      <span class="compare-name">{{ compareData?.studentA?.name }}</span>
+                      <span class="compare-number">({{ compareData?.studentA?.number }})</span>
+                    </div>
+                    <div class="compare-text" ref="compareTextARef"></div>
+                  </div>
+                </el-col>
+                <el-col :span="12">
+                  <div class="compare-panel">
+                    <div class="compare-header">
+                      <el-icon><User /></el-icon>
+                      <span class="compare-name">{{ compareData?.studentB?.name }}</span>
+                      <span class="compare-number">({{ compareData?.studentB?.number }})</span>
+                    </div>
+                    <div class="compare-text" ref="compareTextBRef"></div>
+                  </div>
+                </el-col>
+              </el-row>
+            </div>
+          </el-dialog>
         </div>
       </el-tab-pane>
     </el-tabs>
@@ -181,10 +295,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
-import { User, CopyDocument, Search } from "@element-plus/icons-vue";
+import { ref, nextTick, watch } from "vue";
+import { User, CopyDocument, Search, Document, Delete } from "@element-plus/icons-vue";
+import type { UploadFile } from "element-plus";
 import { ElMessage } from "element-plus";
-import { checkPlagiarism, type PlagiarismResult } from "@/api/assignments";
+import { renderAsync } from "docx-preview";
+import { checkPlagiarism, compareSubmissions, type PlagiarismResult, type CompareResult, type CompareFileInfo } from "@/api/assignments";
 
 interface Props {
   assignmentId?: string;
@@ -204,6 +320,14 @@ const activeTab = ref("submissions");
 // 查重状态
 const plagiarismLoading = ref(false);
 const plagiarismResult = ref<PlagiarismResult | null>(null);
+const templateFile = ref<File | null>(null);
+
+/** 模板文件选择 */
+const handleTemplateChange = (file: UploadFile) => {
+  if (file.raw) {
+    templateFile.value = file.raw;
+  }
+};
 
 /** 执行查重 */
 const runPlagiarismCheck = async () => {
@@ -213,7 +337,7 @@ const runPlagiarismCheck = async () => {
   }
   plagiarismLoading.value = true;
   try {
-    plagiarismResult.value = await checkPlagiarism(props.assignmentId);
+    plagiarismResult.value = await checkPlagiarism(props.assignmentId, templateFile.value);
     if (plagiarismResult.value.results.length === 0) {
       ElMessage.warning(plagiarismResult.value.message || "暂无足够的提交进行查重");
     } else {
@@ -231,6 +355,143 @@ const getRateClass = (rate: number) => {
   if (rate >= 50) return "rate-danger";
   if (rate >= 30) return "rate-warning";
   return "rate-normal";
+};
+
+// ====== 对比预览 ======
+const compareVisible = ref(false);
+const compareLoading = ref(false);
+const compareData = ref<CompareResult | null>(null);
+const compareTextARef = ref<HTMLElement | null>(null);
+const compareTextBRef = ref<HTMLElement | null>(null);
+
+const NGRAM_SIZE = 10; // 与后端 PHRASE_NGRAM 一致
+const HIT_RATIO_THRESHOLD = 0.6; // 段落 n-gram 命中率超过 60% 才标黄
+const MIN_HITS = 2; // 至少命中 2 个 n-gram 才标黄，避免短段落误匹配
+
+/** 与后端一致的清洗逻辑：只保留中文汉字和英文字母，英文统一转小写 */
+function cleanChars(s: string): string {
+  return s.replace(/[^\u4e00-\u9fff a-zA-Z]/g, "").replace(/\s/g, "").toLowerCase();
+}
+
+/** 与后端一致的 n-gram 生成：先按句分割（不跨句），再为每句生成 n-gram
+ *  注意：不添加短碎片（len < n），因为后端 snippets 只含 len >= n 的 gram */
+function getSentenceNgramSet(text: string, n: number): Set<string> {
+  const grams = new Set<string>();
+  // 按句末标点和换行分割（与后端 split_sentences 一致）
+  const sentences = text.split(/[。！？；\n\r]+/);
+  for (const sentence of sentences) {
+    const cleaned = cleanChars(sentence);
+    if (cleaned.length < n) continue; // 短于 n 的句子跳过，不生成碎片
+    for (let i = 0; i <= cleaned.length - n; i++) {
+      grams.add(cleaned.substring(i, i + n));
+    }
+  }
+  return grams;
+}
+
+/** DOM 级标黄：按段落块遍历，命中率达阈值且命中数达最低要求的整块标黄 */
+function applyDomHighlighting(element: HTMLElement | null, snippets: string[]) {
+  if (!element || !snippets || snippets.length === 0) return;
+
+  const snippetSet = new Set(snippets);
+
+  // 块级元素（不含 div/span，避免容器被标黄）
+  const blocks = Array.from(
+    element.querySelectorAll("p, li, td, th, h1, h2, h3, h4, h5, h6, pre, blockquote")
+  );
+
+  // 逆序遍历：子元素先处理，父元素被子元素标记后自动跳过
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const block = blocks[i];
+    if (block.classList.contains("hl-hit")) continue;
+    if (block.querySelector(".hl-hit")) continue; // 子元素已标黄，跳过父元素
+
+    const text = block.textContent || "";
+    if (!text.trim()) continue;
+
+    // 与后端一致：按句分割生成 n-gram（不跨句）
+    const blockNgrams = getSentenceNgramSet(text, NGRAM_SIZE);
+    if (blockNgrams.size === 0) continue;
+
+    let hitCount = 0;
+    for (const ng of blockNgrams) {
+      if (snippetSet.has(ng)) hitCount++;
+    }
+    const ratio = hitCount / blockNgrams.size;
+
+    // 双重条件：命中率达标 + 命中数达标，减少误匹配
+    if (ratio >= HIT_RATIO_THRESHOLD && hitCount >= MIN_HITS) {
+      block.classList.add("hl-hit");
+    }
+  }
+}
+
+/** 渲染单个提交内容（docx 用 docx-preview，其他用 v-html） */
+async function renderSubmission(
+  container: HTMLElement | null,
+  fileInfo: CompareFileInfo | null,
+  contentHtml: string
+): Promise<void> {
+  if (!container) return;
+  container.innerHTML = "";
+
+  if (fileInfo && fileInfo.ext === ".docx" && fileInfo.fileUrl) {
+    try {
+      const res = await fetch(fileInfo.fileUrl);
+      const blob = await res.blob();
+      await renderAsync(blob, container, undefined, {
+        className: "docx",
+        inWrapper: true,
+        ignoreWidth: false,
+        ignoreHeight: false,
+        breakPages: true,
+      });
+    } catch {
+      container.innerHTML = "<p>Word 渲染失败</p>";
+    }
+  } else if (contentHtml) {
+    container.innerHTML = contentHtml;
+  } else {
+    container.innerHTML = "<p>（无内容）</p>";
+  }
+}
+
+/** 数据加载后渲染 Word + 标黄 */
+watch(compareData, async (val) => {
+  if (!val) return;
+  await nextTick();
+  compareLoading.value = true;
+  try {
+    // 并行渲染两侧
+    await Promise.all([
+      renderSubmission(compareTextARef.value, val.fileA, val.contentHtmlA),
+      renderSubmission(compareTextBRef.value, val.fileB, val.contentHtmlB),
+    ]);
+    // 渲染完成后标黄
+    applyDomHighlighting(compareTextARef.value, val.snippets);
+    applyDomHighlighting(compareTextBRef.value, val.snippets);
+  } finally {
+    compareLoading.value = false;
+  }
+});
+
+/** 打开对比预览 */
+const openCompare = async (row: any) => {
+  if (!row.matchSubmissionId) {
+    ElMessage.warning("该记录没有可对比对象");
+    return;
+  }
+  compareVisible.value = true;
+  compareLoading.value = true;
+  compareData.value = null;
+  try {
+    compareData.value = await compareSubmissions(row.submissionId, row.matchSubmissionId);
+  } catch (error: any) {
+    ElMessage.error(error.message || "加载对比数据失败");
+    compareVisible.value = false;
+  } finally {
+    compareLoading.value = false;
+  }
 };
 
 defineOptions({
@@ -346,8 +607,20 @@ defineOptions({
   background: #f8fafc;
   border-radius: 8px;
   padding: 20px;
-  margin-bottom: 20px;
+  margin-bottom: 12px;
   border: 1px solid #e5e7eb;
+}
+
+.template-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.template-tip {
+  font-size: 12px;
+  color: #9ca3af;
 }
 
 .action-left h3 {
@@ -370,6 +643,145 @@ defineOptions({
 
 .summary-cards {
   margin-bottom: 20px;
+}
+
+/* ====== 对比预览弹窗 ====== */
+.compare-dialog .el-dialog__body {
+  padding: 12px 20px;
+}
+
+.compare-container {
+  min-height: 400px;
+}
+
+.compare-hit-count {
+  font-size: 13px;
+  color: #92400e;
+  background: #fef3c7;
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+}
+
+.compare-panel {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+  height: 70vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.compare-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e5e7eb;
+  font-size: 15px;
+}
+
+.compare-name {
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.compare-number {
+  color: #9ca3af;
+  font-size: 13px;
+}
+
+.compare-text {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 24px;
+  font-size: 14px;
+  line-height: 1.8;
+  color: #374151;
+  word-break: break-word;
+}
+
+/* Word 文档渲染样式 */
+.compare-text :deep(h1),
+.compare-text :deep(h2),
+.compare-text :deep(h3),
+.compare-text :deep(h4) {
+  margin: 16px 0 8px 0;
+  font-weight: 600;
+  color: #1f2937;
+}
+.compare-text :deep(h1) { font-size: 20px; }
+.compare-text :deep(h2) { font-size: 17px; }
+.compare-text :deep(h3) { font-size: 15px; }
+.compare-text :deep(h4) { font-size: 14px; }
+
+.compare-text :deep(p) {
+  margin: 6px 0;
+}
+
+.compare-text :deep(table) {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8px 0;
+}
+.compare-text :deep(td),
+.compare-text :deep(th) {
+  border: 1px solid #d1d5db;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+.compare-text :deep(th) {
+  background: #f3f4f6;
+  font-weight: 600;
+}
+
+.compare-text :deep(strong) {
+  font-weight: 600;
+}
+
+.compare-text :deep(img) {
+  max-width: 100%;
+  height: auto;
+  margin: 8px 0;
+}
+
+.compare-text :deep(ul),
+.compare-text :deep(ol) {
+  margin: 6px 0;
+  padding-left: 24px;
+}
+
+.compare-text :deep(li) {
+  margin: 3px 0;
+}
+
+.compare-text :deep(pre) {
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 12px;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.compare-text :deep(.hl-hit) {
+  background: #fef08a;
+  box-shadow: inset 4px 0 0 #f59e0b;
+  border-radius: 2px;
+}
+
+/* docx-preview 容器样式 */
+.compare-text :deep(.docx-wrapper) {
+  background: transparent;
+  padding: 0;
+}
+
+.compare-text :deep(.docx-wrapper > .docx) {
+  box-shadow: none;
+  margin: 0 auto;
+  max-width: 100%;
 }
 
 .summary-card {

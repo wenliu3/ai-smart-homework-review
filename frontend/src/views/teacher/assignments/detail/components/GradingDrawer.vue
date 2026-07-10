@@ -68,7 +68,7 @@
                 >截止时间：{{ formatDateTime(assignmentData?.endDate) }}</span
               >
               <span class="word-limit" v-if="assignmentData?.wordLimit">
-                字数要求：{{ assignmentData.wordLimit }}字
+                词数要求：{{ assignmentData.wordLimit }}词
               </span>
             </div>
           </div>
@@ -89,21 +89,14 @@
                   size="small"
                   class="word-count-tag"
                 >
-                  {{ getWordCount(submissionData?.content) }}字
+                  {{ getWordCount() }}词
                 </el-tag>
               </div>
             </div>
           </template>
           <div class="collapse-content">
-            <div v-if="submissionData?.content" class="submission-content">
-              <div v-html="submissionData.content"></div>
-            </div>
-            <div v-else class="no-content">
-              <el-empty description="学生尚未提交作业内容" :image-size="80" />
-            </div>
-            
             <!-- 附件列表 -->
-            <div v-if="submissionData?.attachments && submissionData.attachments.length > 0" class="attachment-section mt-3">
+            <div v-if="submissionData?.attachments && submissionData.attachments.length > 0" class="attachment-section">
               <div class="text-sm font-medium mb-2 flex items-center gap-1">
                 <el-icon :size="14" color="#f59e0b"><Paperclip /></el-icon>
                 作业附件（{{ submissionData.attachments.length }}个）
@@ -125,6 +118,9 @@
                   </div>
                 </div>
               </div>
+            </div>
+            <div v-else class="no-content">
+              <el-empty description="学生尚未上传附件" :image-size="80" />
             </div>
           </div>
         </el-collapse-item>
@@ -303,6 +299,9 @@
       </div>
     </template>
   </el-drawer>
+
+  <!-- 文件预览对话框 -->
+  <FilePreviewDialog ref="filePreviewRef" />
 </template>
 
 <script lang="ts" setup>
@@ -313,6 +312,7 @@ import type { FormInstance, FormRules } from "element-plus";
 import { getSubmissionDetail, submitTeacherReview } from "@/api/correcting";
 import { getAssignmentDetail } from "@/api/assignments";
 import { marked } from "marked";
+import FilePreviewDialog from "@/components/FilePreviewDialog.vue";
 // Props
 interface Props {
   visible: boolean;
@@ -334,6 +334,7 @@ const submitting = ref(false);
 const submissionData = ref<any>(null);
 const assignmentData = ref<any>(null);
 const gradingFormRef = ref<FormInstance>();
+const filePreviewRef = ref();
 
 // 折叠面板激活状态 - 默认展开学生提交和教师批改相关的面板
 const activeCollapse = ref(["submission"]);
@@ -527,10 +528,9 @@ const handleClose = () => {
 };
 
 // 工具函数
-const getWordCount = (content: string) => {
-  if (!content) return 0;
-  const textContent = content.replace(/<[^>]*>/g, "");
-  return textContent.replace(/\s/g, "").length;
+const getWordCount = () => {
+  if (!submissionData.value) return 0;
+  return submissionData.value.wordCount || 0;
 };
 
 const formatFileSize = (bytes: number) => {
@@ -555,23 +555,7 @@ const handleDownloadAttachment = (att: any) => {
 };
 
 const handlePreviewAttachment = (att: any) => {
-  const token = localStorage.getItem('token');
-  const filename = att.fileUrl.replace('/uploads/', '');
-  fetch(`/api/upload/preview/${filename}`, { headers: { Authorization: `Bearer ${token}` } })
-    .then(async resp => {
-      if (!resp.ok) throw new Error('预览失败');
-      const ct = resp.headers.get('content-type') || '';
-      if (ct.includes('json')) {
-        const data = await resp.json();
-        ElMessage.warning(data.message || '不支持在线预览');
-        return;
-      }
-      const blob = await resp.blob();
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank');
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
-    })
-    .catch(e => ElMessage.warning('预览失败: ' + e.message));
+  filePreviewRef.value?.open(att);
 };
 
 const getSubmissionStatusType = (status: string) => {

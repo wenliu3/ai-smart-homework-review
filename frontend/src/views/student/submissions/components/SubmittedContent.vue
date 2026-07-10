@@ -10,12 +10,12 @@
     </template>
 
     <div class="space-y-4">
-      <!-- 提交内容 -->
-      <div>
+      <!-- 作业文本内容 -->
+      <div v-if="submission?.content" class="content-section">
         <h4 class="font-medium text-gray-900 mb-2">作业内容：</h4>
         <div
-          class="prose max-w-none bg-gray-50 p-4 rounded-md"
-          v-html="submission?.content"
+          class="prose prose-sm max-w-none text-gray-700 submission-content"
+          v-html="submission.content"
         ></div>
       </div>
 
@@ -38,6 +38,14 @@
             >
           </el-tag>
         </div>
+      </div>
+
+      <!-- 无内容提示 -->
+      <div
+        v-if="!submission?.content && !submission?.attachments?.length"
+        class="text-center text-gray-400 py-8"
+      >
+        暂无提交内容
       </div>
     </div>
   </el-card>
@@ -62,6 +70,26 @@ defineOptions({
 </script>
 
 <style scoped>
+.content-section {
+  padding: 1rem;
+  background: #f9fafb;
+  border-radius: 8px;
+  border: 1px solid #f0f0f0;
+}
+
+.submission-content {
+  line-height: 1.8;
+}
+
+.submission-content :deep(img) {
+  max-width: 100%;
+  border-radius: 6px;
+}
+
+.submission-content :deep(p) {
+  margin: 0.5rem 0;
+}
+
 .prose {
   max-width: none;
 }

@@ -239,7 +239,7 @@ export function useSubmissionManagement() {
   };
 
   // 提交作业
-  const handleSubmit = async (content: string, attachments: Attachment[]) => {
+  const handleSubmit = async (attachments: Attachment[], content: string = "") => {
     try {
       // 根据当前状态显示不同的确认信息
       const isResubmit =
@@ -290,8 +290,8 @@ export function useSubmissionManagement() {
 
   // 保存草稿
   const handleSaveDraft = async (
-    content: string,
-    attachments: Attachment[]
+    attachments: Attachment[],
+    content: string = ""
   ) => {
     // 检查是否可以保存草稿
     if (!canSaveDraft.value) {
@@ -299,8 +299,8 @@ export function useSubmissionManagement() {
       return;
     }
 
-    if (!content.trim()) {
-      ElMessage.warning("请先输入作业内容");
+    if ((!attachments || attachments.length === 0) && !content.trim()) {
+      ElMessage.warning("请先输入作业内容或上传作业文件");
       return;
     }
 

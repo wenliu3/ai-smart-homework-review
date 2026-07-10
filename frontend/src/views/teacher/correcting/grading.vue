@@ -26,9 +26,12 @@
         </div>
 
         <!-- 学生作业内容 -->
-        <div class="mb-4">
-          <div class="text-sm font-medium mb-2">📝 学生作业内容</div>
-          <div class="p-3 bg-gray-50 rounded-lg text-sm whitespace-pre-wrap" v-html="submission.content"></div>
+        <div v-if="submission.content" class="mb-4">
+          <div class="text-sm font-medium mb-2 flex items-center gap-1">
+            <el-icon :size="14" color="#3b82f6"><Document /></el-icon>
+            作业内容
+          </div>
+          <div class="p-3 bg-blue-50 rounded border border-blue-200 text-sm text-gray-700 submission-content" v-html="submission.content"></div>
         </div>
 
         <!-- 学生附件 -->
@@ -90,6 +93,9 @@
 
       <el-empty v-if="!loading && !submission" description="未找到提交记录" />
     </div>
+
+    <!-- 文件预览对话框 -->
+    <FilePreviewDialog ref="filePreviewRef" />
   </div>
 </template>
 
@@ -98,7 +104,8 @@ import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, Paperclip, Document, PictureFilled } from '@element-plus/icons-vue'
-import { getSubmissionDetail, submitTeacherReview } from '@/api/correcting'
+import { getSubmissionDetail, submitTeacherReview } from "@/api/correcting";
+import FilePreviewDialog from "@/components/FilePreviewDialog.vue";
 import type { SubmissionRecord } from '@/api/correcting'
 
 const route = useRoute()
@@ -107,6 +114,7 @@ const loading = ref(true)
 const submitting = ref(false)
 const submission = ref<SubmissionRecord | null>(null)
 const form = ref({ teacherScore: 0, teacherReviewContent: '' })
+const filePreviewRef = ref()
 
 const goBack = () => router.back()
 
@@ -141,23 +149,7 @@ const downloadAttachment = (att: any) => {
 }
 
 const previewAttachment = (att: any) => {
-  const token = localStorage.getItem('token')
-  const filename = att.fileUrl.replace('/uploads/', '')
-  fetch(`/api/upload/preview/${filename}`, { headers: { Authorization: `Bearer ${token}` } })
-    .then(async resp => {
-      if (!resp.ok) throw new Error('预览失败')
-      const ct = resp.headers.get('content-type') || ''
-      if (ct.includes('json')) {
-        const data = await resp.json()
-        ElMessage.warning(data.message || '不支持在线预览')
-        return
-      }
-      const blob = await resp.blob()
-      const url = URL.createObjectURL(blob)
-      window.open(url, '_blank')
-      setTimeout(() => URL.revokeObjectURL(url), 60000)
-    })
-    .catch(e => ElMessage.warning('预览失败: ' + e.message))
+  filePreviewRef.value?.open(att);
 }
 
 const loadData = async () => {
@@ -206,3 +198,20 @@ const handleSubmit = async () => {
 
 onMounted(loadData)
 </script>
+
+<style scoped>
+.submission-content {
+  line-height: 1.8;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.submission-content :deep(p) {
+  margin: 0.5rem 0;
+}
+
+.submission-content :deep(img) {
+  max-width: 100%;
+  border-radius: 6px;
+}
+</style>

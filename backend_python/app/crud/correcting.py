@@ -56,7 +56,7 @@ def get_submission_list(db: Session, params: dict) -> dict:
             "studentName": student.name if student else "",
             "studentNumber": student.student_id if student else "",
             "classId": str(s.class_id), "className": cls.name if cls else "",
-            "content": s.content, "status": s.status,
+            "wordCount": s.word_count or 0, "content": s.content or "", "status": s.status,
             "submittedAt": s.submitted_at.isoformat() if s.submitted_at else None,
             "aiScore": _to100(s.ai_score, max_score), "aiReviewContent": s.ai_review_content,
             "teacherScore": _to100(s.teacher_score, max_score), "teacherReviewContent": s.teacher_review_content,
@@ -75,21 +75,24 @@ def get_submission_detail(db: Session, submission_id: int) -> dict:
         raise NotFoundException(10015, "提交记录不存在")
     student = db.query(User).filter(User.id == s.student_id).first()
     cls = db.query(Class).filter(Class.id == s.class_id).first()
+    assignment = db.query(Assignment).filter(Assignment.id == s.assignment_id).first()
+    max_score = _max_score(assignment) if assignment else 100
     return {
         "_id": str(s.id), "assignmentId": str(s.assignment_id), "studentId": str(s.student_id),
         "studentName": student.name if student else "",
         "studentNumber": student.student_id if student else "",
         "classId": str(s.class_id), "className": cls.name if cls else "",
-        "content": s.content, "status": s.status,
+        "wordCount": s.word_count or 0, "content": s.content or "", "status": s.status,
         "submittedAt": s.submitted_at.isoformat() if s.submitted_at else None,
-        "aiScore": s.ai_score, "aiReviewContent": s.ai_review_content,
-        "teacherScore": s.teacher_score, "teacherReviewContent": s.teacher_review_content,
+        "aiScore": _to100(s.ai_score, max_score), "aiReviewContent": s.ai_review_content,
+        "teacherScore": _to100(s.teacher_score, max_score), "teacherReviewContent": s.teacher_review_content,
         "teacherReviewedAt": s.teacher_reviewed_at.isoformat() if s.teacher_reviewed_at else None,
         "createdAt": s.created_at.isoformat() if s.created_at else None,
         "updatedAt": s.updated_at.isoformat() if s.updated_at else None,
         "attachments": [
             {"fileName": a.get("fileName"), "fileUrl": a.get("fileUrl"),
-             "fileSize": a.get("fileSize"), "fileType": a.get("fileType")}
+             "fileSize": a.get("fileSize"), "fileType": a.get("fileType"),
+             "textContent": a.get("textContent", "")}
             for a in (s.attachments or [])
         ],
     }

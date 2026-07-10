@@ -12,7 +12,7 @@ class AttachmentItem(BaseModel):
 class SubmitRequest(BaseModel):
     assignmentId: int
     classId: int
-    content: str
+    content: str = ""
     attachments: list[dict] = []
     isDraft: bool = False
 

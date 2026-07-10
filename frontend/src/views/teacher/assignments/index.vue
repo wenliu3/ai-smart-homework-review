@@ -33,7 +33,7 @@
           <div class="search-row">
             <el-form-item label="作业标题">
               <el-input
-                v-model="searchForm.search"
+                v-model="searchForm.title"
                 placeholder="请输入作业标题"
                 clearable
                 style="width: 180px"
@@ -392,7 +392,7 @@ const contentHeight = ref("400px");
 
 // 搜索表单
 const searchForm = reactive<AssignmentQueryParams>({
-  search: "",
+  title: "",
   status: undefined,
   className: "",
   isExpired: undefined,
@@ -477,8 +477,8 @@ const getAssignmentList = async () => {
     const params: AssignmentQueryParams = {
       page: pagination.page,
       pageSize: pagination.pageSize,
-      sort: sortData.sort,
-      order: sortData.order,
+      sortBy: sortData.sort,
+      sortOrder: sortData.order,
       ...searchForm,
     };
 
@@ -740,11 +740,6 @@ const getStatusText = (status: AssignmentStatus) => {
     default:
       return "未知";
   }
-};
-
-const getSubmissionPercentage = (stats: Assignment["submissionStats"]) => {
-  if (stats.total === 0) return 0;
-  return Math.round((stats.submitted / stats.total) * 100);
 };
 
 const getSubmissionPercentageForList = (assignment: AssignmentListItem) => {

@@ -10,7 +10,6 @@
     <!-- 步骤1: 上传文件 -->
     <el-card v-if="step === 'upload'" class="upload-card">
       <el-upload
-        ref="uploadRef"
         drag
         multiple
         :auto-upload="false"
@@ -26,6 +25,23 @@
           </div>
         </template>
       </el-upload>
+
+      <!-- 模板文件上传（可选） -->
+      <div class="template-section">
+        <el-upload
+          :auto-upload="false"
+          :show-file-list="false"
+          :limit="1"
+          accept=".docx,.txt,.pdf"
+          @change="handleTemplateChange"
+        >
+          <el-button type="info" plain :icon="Document">
+            {{ templateFile ? templateFile.name : '上传任务书/模板（可选）' }}
+          </el-button>
+        </el-upload>
+        <el-button v-if="templateFile" text type="danger" :icon="Delete" @click="templateFile = null" />
+        <span class="template-tip">比对前自动剔除模板内容，避免“大家都抄了任务书”被误判</span>
+      </div>
 
       <!-- 文件列表(可编辑姓名学号) -->
       <div v-if="parsedFiles.length > 0" class="file-list-section">
@@ -83,7 +99,19 @@
             <div class="summary-label">疑似抄袭</div>
           </el-card>
         </el-col>
-        <el-col :span="6">
+        <el-col :span="6" v-if="result?.codeCheckEnabled">
+          <el-card shadow="hover">
+            <div class="summary-value danger">{{ result?.codeSuspectCount || 0 }}</div>
+            <div class="summary-label">代码疑似</div>
+          </el-card>
+        </el-col>
+        <el-col :span="6" v-if="result?.imageCheckEnabled">
+          <el-card shadow="hover">
+            <div class="summary-value danger">{{ result?.imageSuspectCount || 0 }}</div>
+            <div class="summary-label">图片疑似</div>
+          </el-card>
+        </el-col>
+        <el-col :span="6" v-if="!result?.codeCheckEnabled && !result?.imageCheckEnabled">
           <el-card shadow="hover">
             <div class="summary-value success">{{ (result?.total || 0) - (result?.suspectCount || 0) }}</div>
             <div class="summary-label">合格</div>
@@ -129,8 +157,40 @@
           <el-table-column prop="rate" label="综合重复率" width="120" align="center" sortable>
             <template #default="{ row }">
               <el-tag :type="row.status === '合格' ? 'success' : 'danger'" effect="dark" size="small">
-                {{ row.rate }}%
+                {{ row.rate !== null ? row.rate + '%' : '-' }}
               </el-tag>
+            </template>
+          </el-table-column>
+          <!-- 代码查重列（仅在启用代码查重时显示） -->
+          <el-table-column v-if="result?.codeCheckEnabled" prop="codeRate" label="代码重合度" width="120" align="center" sortable>
+            <template #default="{ row }">
+              <span v-if="row.codeRate !== null && row.codeRate !== undefined" :class="getRateClass(row.codeRate)">{{ row.codeRate }}%</span>
+              <span v-else class="text-gray">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column v-if="result?.codeCheckEnabled" prop="codeStatus" label="代码判定" width="120" align="center">
+            <template #default="{ row }">
+              <el-tag v-if="row.codeStatus && row.codeStatus !== '-'" :type="row.codeStatus === '合格' ? 'success' : 'danger'" size="small">{{ row.codeStatus }}</el-tag>
+              <span v-else class="text-gray">-</span>
+            </template>
+          </el-table-column>
+          <!-- 图片查重列（仅在启用图片查重时显示） -->
+          <el-table-column v-if="result?.imageCheckEnabled" prop="imageRate" label="图片重合度" width="120" align="center" sortable>
+            <template #default="{ row }">
+              <span v-if="row.imageRate !== null && row.imageRate !== undefined" :class="getRateClass(row.imageRate)">{{ row.imageRate }}%</span>
+              <span v-else class="text-gray">-</span>
+            </template>
+          </el-table-column>
+          <el-table-column v-if="result?.imageCheckEnabled" prop="matchedImageCount" label="复制图片" width="100" align="center">
+            <template #default="{ row }">
+              <span v-if="row.matchedImageCount > 0" class="rate-danger">{{ row.matchedImageCount }} 张</span>
+              <span v-else class="text-gray">0</span>
+            </template>
+          </el-table-column>
+          <el-table-column v-if="result?.imageCheckEnabled" prop="imageStatus" label="图片判定" width="120" align="center">
+            <template #default="{ row }">
+              <el-tag v-if="row.imageStatus && row.imageStatus !== '-'" :type="row.imageStatus === '合格' ? 'success' : 'danger'" size="small">{{ row.imageStatus }}</el-tag>
+              <span v-else class="text-gray">-</span>
             </template>
           </el-table-column>
           <el-table-column label="最相似对象" min-width="160">
@@ -139,11 +199,10 @@
               <span v-else class="text-gray">-</span>
             </template>
           </el-table-column>
-          <el-table-column prop="status" label="判定结果" width="140" align="center" fixed="right">
+          <el-table-column prop="suspectReason" label="疑似原因" width="140" align="center" fixed="right">
             <template #default="{ row }">
-              <el-tag :type="row.status === '合格' ? 'success' : 'danger'" size="small">
-                {{ row.status }}
-              </el-tag>
+              <el-tag v-if="row.suspectReason" type="danger" effect="dark" size="small">{{ row.suspectReason }}</el-tag>
+              <el-tag v-else type="success" size="small">合格</el-tag>
             </template>
           </el-table-column>
         </el-table>
@@ -170,7 +229,7 @@
 
 <script setup lang="ts">
 import { ref } from "vue";
-import { UploadFilled, Download, Delete } from "@element-plus/icons-vue";
+import { UploadFilled, Download, Delete, Document } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
 import type { UploadFile } from "element-plus";
 import { adhocCheck, type AdhocCheckResult } from "@/api/plagiarism";
@@ -186,6 +245,15 @@ const step = ref<"upload" | "result">("upload");
 const checking = ref(false);
 const parsedFiles = ref<ParsedFile[]>([]);
 const result = ref<AdhocCheckResult | null>(null);
+const templateFile = ref<File | null>(null);
+
+/** 模板文件选择回调 */
+const handleTemplateChange = (file: any) => {
+  const raw = file.raw || file;
+  if (raw) {
+    templateFile.value = raw;
+  }
+};
 
 /** 文件选择回调 — 支持多选 */
 const handleFileChange = (file: any) => {
@@ -230,7 +298,7 @@ const startCheck = async () => {
   checking.value = true;
   try {
     const files = parsedFiles.value.map((f) => f.raw);
-    result.value = await adhocCheck(files);
+    result.value = await adhocCheck(files, templateFile.value);
     step.value = "result";
     if (result.value.results.length === 0) {
       ElMessage.warning(result.value.message || "查重无结果");
@@ -275,6 +343,7 @@ const resetAll = () => {
   step.value = "upload";
   parsedFiles.value = [];
   result.value = null;
+  templateFile.value = null;
 };
 </script>
 
@@ -301,6 +370,22 @@ const resetAll = () => {
 
 .upload-card {
   margin-bottom: 20px;
+}
+
+.template-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 12px 16px;
+  background: #f0f7ff;
+  border-radius: 8px;
+  border: 1px dashed #a0c4e8;
+}
+
+.template-tip {
+  font-size: 12px;
+  color: #6b7280;
 }
 
 .file-list-section {

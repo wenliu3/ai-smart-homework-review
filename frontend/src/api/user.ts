@@ -1,10 +1,8 @@
 import request from "@/utils/request";
 import type {
   User,
-  UserQueryParams,
   UserListResponse,
   CreateUserDto,
-  UpdateUserDto,
 } from "@/types/user";
 
 /**

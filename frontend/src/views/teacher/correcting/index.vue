@@ -109,7 +109,7 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, reactive, computed, onMounted, watch } from "vue";
+import { ref, reactive, onMounted, watch } from "vue";
 import { ElMessage } from "element-plus";
 import { useStore } from "vuex";
 import { Search, Refresh } from "@element-plus/icons-vue";
@@ -126,12 +126,6 @@ import type { SubmissionQueryParams, SubmissionRecord } from "@/api/correcting";
 
 // Store
 const store = useStore();
-
-// 响应式设计 - 检测设备类型
-const device = computed(() => store.getters["app/device"]);
-const isMobile = computed(
-  () => device.value === "mobile" || device.value === "tablet"
-);
 
 // 搜索表单数据
 const searchForm = reactive({
