@@ -10,14 +10,10 @@ MAX_SUBMISSIONS = 200       # 单次查重最大比对数量，防止 O(n²) 导
 
 # ===================== 文本维度 =====================
 PHRASE_NGRAM = 10           # 片段重合度字符窗口长度
-PHRASE_WEIGHT = 0.6         # 片段重合度权重
-TOPIC_WEIGHT = 0.4          # 主题相似度权重（基于词级别 TF-IDF）
-# 主题相似度仅在同时满足以下两个条件时才参与加权（非线性组合）：
-#   1. 主题相似度 >= TOPIC_SUSPECT_THRESHOLD（词汇几乎完全重叠，疑似改写式抄袭）
-#   2. 片段重合度 >= PHRASE_SUSPECT_THRESHOLD（已有直接重合证据）
-# 否则综合重复率 = 片段重合度，避免同题作业因词汇天然重叠被误判
-TOPIC_SUSPECT_THRESHOLD = 0.90   # 主题相似度警戒线（90%）
-PHRASE_SUSPECT_THRESHOLD = 0.15  # 片段重合度警戒线（15%）
+PHRASE_WEIGHT = 0.6         # 片段重合度权重（默认，前端可覆盖）
+TOPIC_WEIGHT = 0.4          # 主题相似度权重（默认，前端可覆盖）
+# 综合重复率 = 片段重合度 × PHRASE_WEIGHT + 主题相似度 × TOPIC_WEIGHT
+# 权重可由前端动态调整，不传时使用这里的默认值
 MIN_VALID_CHARS = 40        # 有效字符数少于该值视为无效作业
 COMMON_NGRAM_RATIO = 0.6    # n-gram 出现在 >= 60% 提交中即视为公共模板内容
 COMMON_NGRAM_MIN_DOCS = 5   # 提交数 >= 5 份才启用"自动公共片段识别"

@@ -15,7 +15,7 @@ import os
 import tempfile
 from collections import OrderedDict
 from typing import List, Optional
-from fastapi import APIRouter, Depends, UploadFile, File
+from fastapi import APIRouter, Depends, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from ..deps import get_current_user, require_roles
 from ..models import User
@@ -52,6 +52,9 @@ def _clean_cache():
 async def adhoc_check(
     files: List[UploadFile] = File(...),
     template_file: Optional[UploadFile] = File(None),
+    passRate: Optional[int] = Form(None),
+    phraseWeight: Optional[float] = Form(None),
+    topicWeight: Optional[float] = Form(None),
     current_user: User = Depends(require_roles("superadmin", "teacher")),
 ):
     """临时查重 — 上传多个 docx/txt/pdf 文件，内存处理，不落盘不写库
@@ -131,6 +134,7 @@ async def adhoc_check(
         template_text=template_text or None,
         template_images=template_images or None,
         skipped=skipped,
+        pass_rate=passRate, phrase_weight=phraseWeight, topic_weight=topicWeight,
     )
 
     # 存入内存缓存，供下载报告用

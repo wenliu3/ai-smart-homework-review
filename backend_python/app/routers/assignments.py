@@ -3,7 +3,7 @@ import os
 import uuid
 import tempfile
 from typing import Optional
-from fastapi import APIRouter, Depends, Request, UploadFile, File
+from fastapi import APIRouter, Depends, Request, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..deps import get_current_user
@@ -65,6 +65,9 @@ def delete_assignment(assignment_id: int, current_user: User = Depends(get_curre
 async def check_plagiarism(
     assignment_id: int,
     template_file: Optional[UploadFile] = File(None),
+    passRate: Optional[int] = Form(None),
+    phraseWeight: Optional[float] = Form(None),
+    topicWeight: Optional[float] = Form(None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -89,6 +92,7 @@ async def check_plagiarism(
         db, assignment_id, current_user.id,
         template_text=template_text or None,
         template_images=template_images or None,
+        pass_rate=passRate, phrase_weight=phraseWeight, topic_weight=topicWeight,
     ))
 
 

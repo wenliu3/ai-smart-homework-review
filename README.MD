@@ -2,8 +2,6 @@
 
 > 基于 **FastAPI + Vue 3 + LangChain** 的全栈 AI 作业批改与教学辅助平台，支持多大模型接入、AI 自动批改、智能教学助手、文档查重等核心能力。
 
-![首页介绍](./docs/首頁介绍.png)
-
 ---
 
 ## 🏗️ 技术栈
@@ -158,9 +156,19 @@
 
 #### 5. 文档查重
 
-- 两两比对算法（字符 N-gram + TF-IDF 余弦相似度）
-- 提交上限保护（单次最多 200 份）
-- LRU 缓存避免重复计算
+![文档查重](./docs/教师端文档查重.png)
+
+![作业查重](./docs/教师端作业查重.png)
+
+**双维度查重引擎**（文本 + 图片），支持临时上传查重和作业内查重两种模式：
+
+- **文本维度**：字符 N-gram 重叠系数（抓整句照抄）+ jieba 分词 TF-IDF 余弦相似度（抓同义替换/语序打乱）
+- **图片维度**：感知哈希（aHash + dHash）+ 汉明距离，检测截图复制粘贴
+- **综合重复率** = 片段重合度 × 片段权重 + 主题相似度 × 主题权重
+- **参数可调**：教师可在查重界面自定义合格阈值、片段权重、主题权重，支持一键重置默认
+- 模板剔除：上传任务书/模板，比对前自动剔除模板内容
+- 自动公共片段识别：提交 ≥ 5 份时自动剔除全班共有的公共片段
+- 提交上限保护（单次最多 200 份），LRU 缓存避免重复计算
 
 ---
 
@@ -209,8 +217,8 @@
 ### 克隆项目
 
 ```bash
-git clone https://github.com/<your-username>/science_stop.git
-cd science_stop
+git clone https://github.com/wenliu3/ai-smart-homework-review.git
+cd ai-smart-homework-review
 ```
 
 ### 前端启动
@@ -253,7 +261,7 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 83 --reload
 ## 📂 项目结构
 
 ```
-science_stop/
+ai-smart-homework-review/
 ├── frontend/                        # 前端项目 (Vue 3 + TypeScript + Vite)
 │   ├── src/
 │   │   ├── api/                     # API 服务层
@@ -300,8 +308,13 @@ science_stop/
 │   │   │   ├── security.py          # JWT + 密码加密
 │   │   │   ├── response.py          # 统一响应格式
 │   │   │   ├── exceptions.py        # 全局异常处理
-│   │   │   ├── file_parser.py       # Word/PDF 文件解析
-│   │   │   └── plagiarism.py        # 查重算法
+│   │   │   └── ...
+│   │   ├── plagiarism/               # 查重模块（文本+图片双维度）
+│   │   │   ├── text.py              # 文本查重（N-gram + TF-IDF）
+│   │   │   ├── image.py             # 图片查重（感知哈希）
+│   │   │   ├── extractors.py        # 文件解析（Word/PDF）
+│   │   │   ├── aggregator.py        # 双维度结果合并
+│   │   │   └── config.py            # 查重参数配置
 │   │   ├── models/                  # 数据库模型
 │   │   ├── schemas/                 # Pydantic 数据模型
 │   │   ├── crud/                    # 数据库操作层
@@ -353,7 +366,9 @@ science_stop/
 
 ### 3. 文档查重
 
-- 字符 N-gram + TF-IDF 余弦相似度两两比对
+- 文本维度（N-gram + TF-IDF）+ 图片维度（感知哈希）双引擎查重
+- 综合重复率权重可前端动态调整，支持一键重置默认
+- 模板剔除 + 自动公共片段识别，避免同题作业误判
 - 提交数量上限保护（200 份），防止 O(n²) 算法在高并发下阻塞
 - OrderedDict LRU 缓存（maxsize=100），避免重复计算
 

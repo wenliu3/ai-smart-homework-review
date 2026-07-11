@@ -3,7 +3,7 @@
 原理:
   1. 片段重合度: 字符级 N-gram + 重叠系数 —— 抓"整句/整段照抄"
   2. 主题相似度: jieba 分词 + TF-IDF 余弦相似度 —— 抓"同义替换/语序打乱"
-  综合重复率 = 片段重合度 × 0.6 + 主题相似度 × 0.4
+  综合重复率 = 片段重合度 × 片段权重 + 主题相似度 × 主题权重
 
 特性:
   - 显式模板剔除: 传入 template_text，比对前直接从每份提交的 n-gram 集合中减去模板自身的 n-gram
@@ -18,7 +18,6 @@ from collections import Counter
 
 from .config import (
     PHRASE_NGRAM, PHRASE_WEIGHT, TOPIC_WEIGHT,
-    TOPIC_SUSPECT_THRESHOLD, PHRASE_SUSPECT_THRESHOLD,
     MIN_VALID_CHARS, PASS_RATE, MAX_SUBMISSIONS,
     COMMON_NGRAM_RATIO, COMMON_NGRAM_MIN_DOCS, SNIPPET_LIMIT,
 )
@@ -144,21 +143,16 @@ def cosine_similarity(vec_a, vec_b):
     return dot / (norm_a * norm_b)
 
 
-def compute_similarities(phrase_a, topic_vec_a, phrase_b, topic_vec_b):
+def compute_similarities(phrase_a, topic_vec_a, phrase_b, topic_vec_b,
+                         phrase_weight=PHRASE_WEIGHT, topic_weight=TOPIC_WEIGHT):
     """返回 (片段重合度, 主题相似度, 综合相似度)，均为 0~1 小数
 
-    综合相似度采用非线性组合：
-    - 主题相似度(TF-IDF余弦)本质测的是词汇重合度，同题作业天然偏高(70-90%)
-    - 只有当主题相似度极高(>=TOPIC_SUSPECT_THRESHOLD)且片段重合度已超过警戒线时，
-      才说明可能存在"换词不换意"的改写式抄袭，此时主题相似度才参与加权
-    - 否则综合相似度 = 片段重合度，避免同题作业被误判
+    综合相似度 = 片段重合度 × phrase_weight + 主题相似度 × topic_weight
+    权重可由调用方动态传入，默认 0.6 / 0.4
     """
     sim_phrase = overlap_similarity(phrase_a, phrase_b)
     sim_topic = cosine_similarity(topic_vec_a, topic_vec_b)
-    if sim_topic >= TOPIC_SUSPECT_THRESHOLD and sim_phrase >= PHRASE_SUSPECT_THRESHOLD:
-        sim_combined = sim_phrase * PHRASE_WEIGHT + sim_topic * TOPIC_WEIGHT
-    else:
-        sim_combined = sim_phrase
+    sim_combined = sim_phrase * phrase_weight + sim_topic * topic_weight
     return sim_phrase, sim_topic, sim_combined
 
 
@@ -172,7 +166,9 @@ def get_matched_snippets(text_a, text_b, n=PHRASE_NGRAM, exclude_set=None, limit
 
 
 # ===================== 批量查重入口 =====================
-def run_plagiarism_check(submissions: list, template_text: str = None) -> dict:
+def run_plagiarism_check(submissions: list, template_text: str = None,
+                         pass_rate: int = None, phrase_weight: float = None,
+                         topic_weight: float = None) -> dict:
     """
     对一组学生提交进行查重比对。
 
@@ -191,6 +187,9 @@ def run_plagiarism_check(submissions: list, template_text: str = None) -> dict:
     """
     valid = []
     skipped = []
+    pass_rate = pass_rate if pass_rate is not None else PASS_RATE
+    phrase_weight = phrase_weight if phrase_weight is not None else PHRASE_WEIGHT
+    topic_weight = topic_weight if topic_weight is not None else TOPIC_WEIGHT
     for s in submissions:
         text = s.get("content", "") or ""
         if valid_char_count(text) < MIN_VALID_CHARS:
@@ -212,7 +211,7 @@ def run_plagiarism_check(submissions: list, template_text: str = None) -> dict:
             "skipped": skipped,
             "total": n,
             "suspectCount": 0,
-            "passRate": PASS_RATE,
+            "passRate": pass_rate,
             "message": f"有效作业数量({n})超过上限({MAX_SUBMISSIONS}份)，请缩小范围后重试",
         }
 
@@ -254,6 +253,7 @@ def run_plagiarism_check(submissions: list, template_text: str = None) -> dict:
             sim_phrase, sim_topic, sim_combined = compute_similarities(
                 phrase_sets[i], topic_vectors[i],
                 phrase_sets[j], topic_vectors[j],
+                phrase_weight, topic_weight,
             )
             if sim_combined > best_combined:
                 best_combined, best_phrase, best_topic = sim_combined, sim_phrase, sim_topic
@@ -261,7 +261,7 @@ def run_plagiarism_check(submissions: list, template_text: str = None) -> dict:
                 best_match_idx = j
 
         rate = round(best_combined * 100, 2)
-        status = "不合格(疑似抄袭)" if rate > PASS_RATE else "合格"
+        status = "不合格(疑似抄袭)" if rate > pass_rate else "合格"
 
         matched_snippets = []
         if best_match_idx >= 0 and status != "合格":
@@ -291,7 +291,7 @@ def run_plagiarism_check(submissions: list, template_text: str = None) -> dict:
         "skipped": skipped,
         "total": n,
         "suspectCount": sum(1 for r in results if r["status"] != "合格"),
-        "passRate": PASS_RATE,
+        "passRate": pass_rate,
         "templateFiltered": bool(template_text),
         "autoCommonFiltered": n >= COMMON_NGRAM_MIN_DOCS,
     }

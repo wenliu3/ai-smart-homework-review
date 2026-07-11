@@ -65,6 +65,9 @@ def run_full_check(
     template_text: str = None,
     template_images: list = None,
     skipped: list = None,
+    pass_rate: int = None,
+    phrase_weight: float = None,
+    topic_weight: float = None,
 ) -> dict:
     """一站式双维度查重（文本 + 图片）。
 
@@ -86,7 +89,10 @@ def run_full_check(
             "message": "有效文本数量不足2份，无法进行文本查重比对",
         }
     else:
-        text_result = run_plagiarism_check(text_submissions, template_text=template_text or None)
+        text_result = run_plagiarism_check(
+            text_submissions, template_text=template_text or None,
+            pass_rate=pass_rate, phrase_weight=phrase_weight, topic_weight=topic_weight,
+        )
 
     # 图片维度
     image_result = None
@@ -94,4 +100,4 @@ def run_full_check(
         image_result = run_image_plagiarism_check(image_submissions, template_images=template_images or None)
 
     # 合并双维度结果
-    return merge_results(text_result, None, image_result, skipped=skipped)
+    return merge_results(text_result, None, image_result, skipped=skipped, pass_rate=pass_rate)

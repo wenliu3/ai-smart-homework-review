@@ -54,14 +54,19 @@
                 <br /><span class="highlight">图片维度</span>：感知哈希aHash+dHash（抓截图复制粘贴）。
               </p>
             </div>
-            <el-button
-              type="primary"
-              :icon="Search"
-              :loading="plagiarismLoading"
-              @click="runPlagiarismCheck"
-            >
-              {{ plagiarismLoading ? "查重中..." : "开始查重" }}
-            </el-button>
+            <div class="action-buttons">
+              <el-button
+                type="primary"
+                :icon="Search"
+                :loading="plagiarismLoading"
+                @click="runPlagiarismCheck"
+              >
+                {{ plagiarismLoading ? "查重中..." : "开始查重" }}
+              </el-button>
+              <el-button :icon="Setting" @click="configDialogVisible = true">
+                参数设置
+              </el-button>
+            </div>
           </div>
 
           <!-- 模板上传（可选） -->
@@ -251,6 +256,32 @@
             </template>
           </el-empty>
 
+          <!-- 参数配置弹窗 -->
+          <el-dialog v-model="configDialogVisible" title="查重参数设置" width="500px">
+            <el-form label-width="130px" label-position="left">
+              <el-form-item label="合格阈值">
+                <div class="config-row">
+                  <el-slider v-model="configForm.passRate" :min="1" :max="100" :step="1" show-input style="flex: 1" />
+                  <span class="config-unit">%</span>
+                </div>
+              </el-form-item>
+              <el-form-item label="片段重合度权重">
+                <el-slider v-model="configForm.phraseWeight" :min="0" :max="1" :step="0.05" show-input style="width: 100%" />
+              </el-form-item>
+              <el-form-item label="主题相似度权重">
+                <el-slider v-model="configForm.topicWeight" :min="0" :max="1" :step="0.05" show-input style="width: 100%" />
+              </el-form-item>
+            </el-form>
+            <el-alert type="info" :closable="false" style="margin-top: 8px">
+              综合重复率 = 片段重合度 × 片段权重 + 主题相似度 × 主题权重<br />
+              超过合格阈值即判定为"疑似抄袭"
+            </el-alert>
+            <template #footer>
+              <el-button @click="resetConfig">重置默认</el-button>
+              <el-button type="primary" @click="confirmConfig">确认</el-button>
+            </template>
+          </el-dialog>
+
           <!-- 对比预览弹窗 -->
           <el-dialog
             v-model="compareVisible"
@@ -295,12 +326,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, watch } from "vue";
-import { User, CopyDocument, Search, Document, Delete } from "@element-plus/icons-vue";
+import { ref, reactive, nextTick, watch } from "vue";
+import { User, CopyDocument, Search, Document, Delete, Setting } from "@element-plus/icons-vue";
 import type { UploadFile } from "element-plus";
 import { ElMessage } from "element-plus";
 import { renderAsync } from "docx-preview";
-import { checkPlagiarism, compareSubmissions, type PlagiarismResult, type CompareResult, type CompareFileInfo } from "@/api/assignments";
+import { checkPlagiarism, compareSubmissions, type PlagiarismResult, type CompareResult, type CompareFileInfo, type PlagiarismConfig } from "@/api/assignments";
 
 interface Props {
   assignmentId?: string;
@@ -322,6 +353,24 @@ const plagiarismLoading = ref(false);
 const plagiarismResult = ref<PlagiarismResult | null>(null);
 const templateFile = ref<File | null>(null);
 
+// 查重参数配置
+const DEFAULT_CONFIG = { passRate: 30, phraseWeight: 0.6, topicWeight: 0.4 };
+const configDialogVisible = ref(false);
+const configForm = reactive({ ...DEFAULT_CONFIG });
+const plagiarismConfig = ref<PlagiarismConfig | null>(null);
+
+const resetConfig = () => {
+  configForm.passRate = DEFAULT_CONFIG.passRate;
+  configForm.phraseWeight = DEFAULT_CONFIG.phraseWeight;
+  configForm.topicWeight = DEFAULT_CONFIG.topicWeight;
+};
+
+const confirmConfig = () => {
+  plagiarismConfig.value = { ...configForm };
+  configDialogVisible.value = false;
+  ElMessage.success("参数已更新，下次查重将使用新参数");
+};
+
 /** 模板文件选择 */
 const handleTemplateChange = (file: UploadFile) => {
   if (file.raw) {
@@ -337,7 +386,7 @@ const runPlagiarismCheck = async () => {
   }
   plagiarismLoading.value = true;
   try {
-    plagiarismResult.value = await checkPlagiarism(props.assignmentId, templateFile.value);
+    plagiarismResult.value = await checkPlagiarism(props.assignmentId, templateFile.value, plagiarismConfig.value || undefined);
     if (plagiarismResult.value.results.length === 0) {
       ElMessage.warning(plagiarismResult.value.message || "暂无足够的提交进行查重");
     } else {
@@ -851,5 +900,23 @@ defineOptions({
     gap: 12px;
     text-align: center;
   }
+}
+
+.action-buttons {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.config-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.config-unit {
+  font-size: 14px;
+  color: #6b7280;
 }
 </style>

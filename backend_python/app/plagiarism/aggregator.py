@@ -56,6 +56,7 @@ def merge_results(
     code_result: dict = None,
     image_result: dict = None,
     skipped: list = None,
+    pass_rate: int = None,
 ) -> dict:
     """合并文本和图片两个维度的查重结果。
 
@@ -127,7 +128,7 @@ def merge_results(
         "skipped": all_skipped,
         "total": len(merged_results),
         "suspectCount": overall_suspect,
-        "passRate": text_result.get("passRate", PASS_RATE),
+        "passRate": pass_rate if pass_rate is not None else text_result.get("passRate", PASS_RATE),
         "templateFiltered": text_result.get("templateFiltered", False),
         "textResult": {
             "total": text_result.get("total", 0),

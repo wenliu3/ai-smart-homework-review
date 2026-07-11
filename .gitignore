@@ -114,3 +114,11 @@ backend_python/uploads/*
 
 # Backend env (显式路径，根 .env 已覆盖)
 backend_python/.env
+
+# 论文报告生成脚本及输出
+/gen_report.py
+/科研启航设计论文.docx
+
+# WorkBuddy 配置/缓存
+.workbuddy/
+.workbuddy

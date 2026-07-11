@@ -342,6 +342,9 @@ def check_plagiarism(
     db: Session, assignment_id: int, teacher_id: int,
     template_text: str = None,
     template_images: list = None,
+    pass_rate: int = None,
+    phrase_weight: float = None,
+    topic_weight: float = None,
 ) -> dict:
     """对指定作业的所有学生提交进行查重 — 优先读磁盘原始文件，没有文件则用提交文本
     可选传入模板内容（template_text/template_images），比对前自动剔除模板部分。"""
@@ -462,10 +465,13 @@ def check_plagiarism(
             })
 
     # 双维度查重 + 合并（文本 + 图片，支持模板剔除）
-    text_result = run_plagiarism_check(student_data, template_text=template_text)
+    text_result = run_plagiarism_check(
+        student_data, template_text=template_text,
+        pass_rate=pass_rate, phrase_weight=phrase_weight, topic_weight=topic_weight,
+    )
     image_result = run_image_plagiarism_check(image_data, template_images=template_images) if len(image_data) >= 2 else None
 
-    return merge_results(text_result, None, image_result, skipped=skipped)
+    return merge_results(text_result, None, image_result, skipped=skipped, pass_rate=pass_rate)
 
 
 # ========== 对比预览 ==========

@@ -373,15 +373,33 @@ export interface PlagiarismResult {
   autoCommonFiltered?: boolean;
 }
 
+/** 查重参数配置 */
+export interface PlagiarismConfig {
+  passRate?: number;       // 合格阈值(%)
+  phraseWeight?: number;   // 片段重合度权重
+  topicWeight?: number;    // 主题相似度权重
+}
+
 /**
  * 作业查重 — 对该作业所有学生提交进行查重比对
  * @param assignmentId 作业ID
  * @param templateFile 可选，任务书/起始代码模板
+ * @param config 可选，查重参数配置（不传则使用后端默认值）
  */
-export function checkPlagiarism(assignmentId: string, templateFile?: File | null): Promise<PlagiarismResult> {
-  if (templateFile) {
+export function checkPlagiarism(
+  assignmentId: string,
+  templateFile?: File | null,
+  config?: PlagiarismConfig,
+): Promise<PlagiarismResult> {
+  const hasExtra = templateFile || config;
+  if (hasExtra) {
     const formData = new FormData();
-    formData.append("template_file", templateFile);
+    if (templateFile) {
+      formData.append("template_file", templateFile);
+    }
+    if (config?.passRate != null) formData.append("passRate", String(config.passRate));
+    if (config?.phraseWeight != null) formData.append("phraseWeight", String(config.phraseWeight));
+    if (config?.topicWeight != null) formData.append("topicWeight", String(config.topicWeight));
     return request({
       url: `/teacher/assignments/${assignmentId}/plagiarism`,
       method: "post",
