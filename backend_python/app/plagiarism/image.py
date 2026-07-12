@@ -24,14 +24,19 @@ from .config import (
 
 # ===================== 感知哈希 =====================
 def _to_grayscale_pixels(image_bytes: bytes, size: int, extra_col: int = 0):
-    img = Image.open(io.BytesIO(image_bytes)).convert('L')
-    img = img.resize((size + extra_col, size), Image.LANCZOS)
-    return list(img.getdata()), (size + extra_col)
+    try:
+        img = Image.open(io.BytesIO(image_bytes)).convert('L')
+        img = img.resize((size + extra_col, size), Image.LANCZOS)
+        return list(img.getdata()), (size + extra_col)
+    except Exception:
+        return None, 0
 
 
 def average_hash(image_bytes: bytes, hash_size: int = HASH_SIZE) -> int:
     """均值哈希：像素比整体均值亮为1，暗为0"""
     pixels, _ = _to_grayscale_pixels(image_bytes, hash_size)
+    if not pixels:
+        return None
     avg = sum(pixels) / len(pixels)
     bits = ''.join('1' if p > avg else '0' for p in pixels)
     return int(bits, 2)
@@ -40,6 +45,8 @@ def average_hash(image_bytes: bytes, hash_size: int = HASH_SIZE) -> int:
 def difference_hash(image_bytes: bytes, hash_size: int = HASH_SIZE) -> int:
     """差值哈希：每个像素和右边相邻像素比较亮暗，对整体亮度变化更鲁棒"""
     pixels, row_len = _to_grayscale_pixels(image_bytes, hash_size, extra_col=1)
+    if not pixels:
+        return None
     bits = []
     for row in range(hash_size):
         row_pixels = pixels[row * row_len:(row + 1) * row_len]
@@ -67,8 +74,14 @@ def image_similarity(image_a: bytes, image_b: bytes, hash_size: int = HASH_SIZE)
 
 def is_near_duplicate(image_a: bytes, image_b: bytes, hash_size: int = HASH_SIZE,
                        distance_threshold: int = DISTANCE_THRESHOLD) -> bool:
-    a_ahash, b_ahash = average_hash(image_a, hash_size), average_hash(image_b, hash_size)
-    a_dhash, b_dhash = difference_hash(image_a, hash_size), difference_hash(image_b, hash_size)
+    a_ahash = average_hash(image_a, hash_size)
+    b_ahash = average_hash(image_b, hash_size)
+    if a_ahash is None or b_ahash is None:
+        return False
+    a_dhash = difference_hash(image_a, hash_size)
+    b_dhash = difference_hash(image_b, hash_size)
+    if a_dhash is None or b_dhash is None:
+        return False
     dist = max(hamming_distance(a_ahash, b_ahash), hamming_distance(a_dhash, b_dhash))
     return dist <= distance_threshold
 
@@ -91,7 +104,38 @@ def _match_images(images_a: list, images_b: list, hash_size: int = HASH_SIZE,
 
     candidates = []
     for i, (a1, a2) in enumerate(hashes_a):
+        if a1 is None or a2 is None:
+            continue
         for j, (b1, b2) in enumerate(hashes_b):
+            if b1 is None or b2 is None:
+                continue
+            dist = max(hamming_distance(a1, b1), hamming_distance(a2, b2))
+            if dist <= distance_threshold:
+                candidates.append((dist, i, j))
+    candidates.sort(key=lambda c: c[0])
+
+    used_a, used_b = set(), set()
+    matched = []
+    for dist, i, j in candidates:
+        if i in used_a or j in used_b:
+            continue
+        used_a.add(i)
+        used_b.add(j)
+        matched.append((i, j, dist))
+    return matched
+
+
+def _match_hashes(hashes_a: list, hashes_b: list, distance_threshold: int = DISTANCE_THRESHOLD) -> list:
+    """使用预计算的哈希进行一对一贪心匹配（避免重复计算 Image.open）"""
+    if not hashes_a or not hashes_b:
+        return []
+    candidates = []
+    for i, (a1, a2) in enumerate(hashes_a):
+        if a1 is None or a2 is None:
+            continue
+        for j, (b1, b2) in enumerate(hashes_b):
+            if b1 is None or b2 is None:
+                continue
             dist = max(hamming_distance(a1, b1), hamming_distance(a2, b2))
             if dist <= distance_threshold:
                 candidates.append((dist, i, j))
@@ -162,6 +206,20 @@ def run_image_plagiarism_check(submissions: list, template_images: list = None) 
         if len(filtered_images[i]) > MAX_IMAGES_PER_SUBMISSION:
             filtered_images[i] = filtered_images[i][:MAX_IMAGES_PER_SUBMISSION]
 
+    # 预计算所有图片的哈希（一次性计算，避免两两比对中重复 Image.open，性能提升数百倍）
+    all_hashes = []
+    for i in range(n):
+        hashes = []
+        for img in filtered_images[i]:
+            try:
+                a = average_hash(img)
+                d = difference_hash(img)
+                if a is not None and d is not None:
+                    hashes.append((a, d))
+            except Exception:
+                continue
+        all_hashes.append(hashes)
+
     results = []
     for i in range(n):
         best_rate = 0.0
@@ -171,14 +229,14 @@ def run_image_plagiarism_check(submissions: list, template_images: list = None) 
         for j in range(n):
             if i == j:
                 continue
-            if not filtered_images[i] or not filtered_images[j]:
+            if not all_hashes[i] or not all_hashes[j]:
                 continue
-            # 一对一贪心匹配，避免一张图同时命中对方多张图导致重复计数
-            matched_pairs = _match_images(filtered_images[i], filtered_images[j])
+            # 使用预计算的哈希进行一对一贪心匹配
+            matched_pairs = _match_hashes(all_hashes[i], all_hashes[j])
             matched_count = len(matched_pairs)
             # 用"较小图片集合里被命中的比例"作为该学生这一对的相似度；
             # 因为是一对一匹配，matched_count 天然 <= smaller_count，不会再超过100%
-            smaller_count = min(len(filtered_images[i]), len(filtered_images[j])) or 1
+            smaller_count = min(len(all_hashes[i]), len(all_hashes[j])) or 1
             rate = matched_count / smaller_count
             if rate > best_rate:
                 best_rate = rate
@@ -187,7 +245,7 @@ def run_image_plagiarism_check(submissions: list, template_images: list = None) 
                 best_matched_count = matched_count
 
         rate_pct = round(best_rate * 100, 2)
-        total_imgs = len(filtered_images[i])
+        total_imgs = len(all_hashes[i])
         # 单张图片命中时样本量太小，标记低置信度提醒老师
         low_confidence = (total_imgs == 1 and best_matched_count >= 1)
         results.append({

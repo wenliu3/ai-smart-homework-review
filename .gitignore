@@ -1,4 +1,4 @@
-# Logs
+# ===== 日志 =====
 /logs
 *.log
 npm-debug.log*
@@ -7,72 +7,63 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-# Dependencies
+# ===== 依赖 =====
 node_modules
 .pnp
 .pnp.js
 
-# Build outputs
+# ===== 构建输出 =====
 dist
 dist-ssr
 build
 *.local
 
-# Editor directories and files
+# ===== 编辑器 =====
 .vscode/*
 !.vscode/extensions.json
 .idea
-.DS_Store
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
 
-# Environment variables
+# ===== 环境变量 =====
 .env
 .env.local
 .env.*.local
-.env.development.local
-.env.test.local
-.env.production.local
+backend_python/.env
 
-# Testing
+# ===== 测试 =====
 coverage
 *.lcov
 .nyc_output
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
 
-# Temporary files
+# ===== 临时文件 =====
 *.tmp
 *.temp
 .cache
 .temp
 
-# OS files
+# ===== OS 文件 =====
 Thumbs.db
 Desktop.ini
+.DS_Store
 
-# Optional npm cache directory
+# ===== 缓存 =====
 .npm
-
-# Optional eslint cache
 .eslintcache
-
-# Optional stylelint cache
 .stylelintcache
-
-# Vite
 .vite
 
-# TypeScript
+# ===== TypeScript =====
 *.tsbuildinfo
 
-# Package manager lock files (uncomment if needed)
-# package-lock.json
-# yarn.lock
-# pnpm-lock.yaml
-
-# Python
+# ===== Python =====
 __pycache__/
 *.py[cod]
 *$py.class
@@ -88,37 +79,25 @@ venv.bak/
 .eggs/
 develop-eggs/
 
-# Python test / coverage
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-
-# Local databases (如果本地开发/测试用到SQLite)
+# ===== 本地数据库 =====
 *.db
 *.sqlite3
 
-# Certificates / private keys (本地HTTPS或密钥文件，不该进git)
+# ===== 证书/密钥 =====
 *.pem
 *.key
 
-# Backend uploads (可能包含用户上传的敏感数据)
+# ===== 后端上传文件（含学生作业附件 + 查重临时文件）=====
 backend_python/uploads/*
 !backend_python/uploads/.gitkeep
 
-# SpecStory (Cursor AI 会话历史)
+# ===== AI 工具配置 =====
 .specstory/
-
-# Cursor rules
 .cursorrules
-
-# Backend env (显式路径，根 .env 已覆盖)
-backend_python/.env
-
-# 论文报告生成脚本及输出
-/gen_report.py
-/科研启航设计论文.docx
-
-# WorkBuddy 配置/缓存
+.codebuddy/
 .workbuddy/
 .workbuddy
+
+# ===== 论文/报告生成 =====
+/gen_report.py
+/科研启航设计论文.docx

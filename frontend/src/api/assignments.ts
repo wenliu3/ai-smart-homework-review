@@ -404,7 +404,7 @@ export function checkPlagiarism(
       url: `/teacher/assignments/${assignmentId}/plagiarism`,
       method: "post",
       data: formData,
-      timeout: 120000,
+      timeout: 300000,
       headers: { "Content-Type": undefined as any },
     });
   }

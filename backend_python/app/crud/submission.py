@@ -15,6 +15,21 @@ from ..config import settings
 logger = logging.getLogger(__name__)
 
 
+def _delete_attachment_files(attachments: list):
+    """删除附件对应的磁盘文件"""
+    upload_dir = str(settings.upload_path)
+    for att in (attachments or []):
+        file_url = att.get("fileUrl", "")
+        filename = file_url.replace("/uploads/", "")
+        if filename:
+            file_path = os.path.join(upload_dir, filename)
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            except Exception as e:
+                logger.warning("删除附件文件失败: %s: %s", file_path, e)
+
+
 def _max_score(assignment: Assignment) -> int:
     """获取作业的满分值(从 aiRule.maxScore 读取，默认 100)"""
     if assignment.ai_rule and isinstance(assignment.ai_rule, dict):
@@ -144,6 +159,7 @@ def delete_submission(db: Session, submission_id: int, student_id: int) -> dict:
         raise BadRequestException(10007, "无权删除此提交")
     if submission.status != "draft":
         raise BadRequestException(10011, "只能删除草稿")
+    _delete_attachment_files(submission.attachments)
     db.delete(submission)
     db.commit()
     return {"success": True, "message": "删除成功", "resourceId": str(submission_id)}
@@ -159,6 +175,7 @@ def teacher_delete_submission(db: Session, submission_id: int, teacher_id: int) 
         raise NotFoundException(10015, "作业不存在")
     if assignment.teacher_id != teacher_id:
         raise BadRequestException(10007, "无权删除此提交")
+    _delete_attachment_files(submission.attachments)
     db.delete(submission)
     db.commit()
     return {"success": True, "message": "已删除学生提交，学生可重新提交", "resourceId": str(submission_id)}

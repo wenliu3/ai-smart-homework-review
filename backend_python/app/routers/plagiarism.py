@@ -23,9 +23,13 @@ from ..plagiarism import (
     run_full_check,
     extract_all_from_file,
     valid_char_count,
+    file_to_html,
+    get_char_ngram_set,
+    PHRASE_NGRAM,
 )
 from ..core.exceptions import BadRequestException
 from ..core.response import ok
+from ..config import settings
 
 router = APIRouter()
 
@@ -35,14 +39,31 @@ _CACHE_MAX_SIZE = 100  # 缓存最大条目数
 _CACHE_TTL = 1800  # 30分钟
 
 
+def _delete_cache_files(cache_entry):
+    """删除缓存对应的临时文件"""
+    plagiarism_dir = settings.plagiarism_path
+    for f in (cache_entry.get("file_data") or []):
+        file_url = f.get("fileUrl", "")
+        filename = file_url.replace("/uploads/plagiarism_tmp/", "")
+        if filename:
+            file_path = plagiarism_dir / filename
+            try:
+                if file_path.exists():
+                    file_path.unlink()
+            except Exception:
+                pass
+
+
 def _clean_cache():
-    """清理过期的缓存记录，并淘汰超限的最旧条目（LRU）"""
+    """清理过期的缓存记录，并淘汰超限的最旧条目（LRU），同时删除对应的临时文件"""
     now = time.time()
     expired = [k for k, v in _CACHE.items() if now - v["timestamp"] > _CACHE_TTL]
     for k in expired:
+        _delete_cache_files(_CACHE[k])
         del _CACHE[k]
     while len(_CACHE) > _CACHE_MAX_SIZE:
-        _CACHE.popitem(last=False)
+        k, v = _CACHE.popitem(last=False)
+        _delete_cache_files(v)
 
 
 
@@ -82,21 +103,28 @@ async def adhoc_check(
         except Exception:
             pass
 
+    # ---- 生成 checkId（提前，用于文件保存命名） ----
+    check_id = str(uuid.uuid4())
+
     # ---- 提取每份提交的文本和图片 ----
     student_data = []
     image_data = []
     skipped = []
+    upload_dir = settings.plagiarism_path
 
     for f in files:
         filename = f.filename or "unknown.docx"
         try:
             ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
             content_bytes = await f.read()
-            tmp_path = os.path.join(tempfile.gettempdir(), f"plagiarism_tmp_{uuid.uuid4().hex}{ext}")
-            with open(tmp_path, "wb") as tmp:
-                tmp.write(content_bytes)
-            full_text, images = extract_all_from_file(tmp_path, ext)
-            os.remove(tmp_path)
+            # 保存到 uploads 目录（供对比预览用 docx-preview 渲染原始 Word）
+            saved_name = f"plagiarism_{check_id[:8]}_{len(student_data) + 1}{ext}"
+            saved_path = upload_dir / saved_name
+            saved_path.write_bytes(content_bytes)
+            file_url = f"/uploads/plagiarism_tmp/{saved_name}"
+
+            full_text, images = extract_all_from_file(str(saved_path), ext)
+            html_content = file_to_html(str(saved_path), ext)
 
             # 尝试从文件名解析 姓名_学号
             base = filename.rsplit(".", 1)[0]
@@ -107,12 +135,20 @@ async def adhoc_check(
             # 文本查重数据
             if valid_char_count(full_text) < 40:
                 skipped.append({"fileName": filename, "reason": "有效字符数过少，可能是空白文件"})
+                try:
+                    saved_path.unlink()
+                except Exception:
+                    pass
             else:
                 student_data.append({
                     "id": len(student_data) + 1,
                     "studentName": name,
                     "studentNumber": stu_id,
                     "content": full_text,
+                    "html": html_content,
+                    "fileUrl": file_url,
+                    "ext": ext,
+                    "fileName": filename,
                 })
 
             # 图片查重数据
@@ -137,11 +173,48 @@ async def adhoc_check(
         pass_rate=passRate, phrase_weight=phraseWeight, topic_weight=topicWeight,
     )
 
-    # 存入内存缓存，供下载报告用
-    check_id = str(uuid.uuid4())
-    _CACHE[check_id] = {"result": result, "timestamp": time.time()}
+    # 存入内存缓存，供下载报告和对比预览用
+    _CACHE[check_id] = {"result": result, "file_data": student_data, "timestamp": time.time()}
 
     return ok({"checkId": check_id, **result})
+
+
+@router.get("/plagiarism/{check_id}/compare")
+def compare_files(
+    check_id: str,
+    index_a: int,
+    index_b: int,
+    current_user: User = Depends(require_roles("superadmin", "teacher")),
+):
+    """对比预览 — 从内存缓存取两份文件的文本和命中片段，不需要保存文档到数据库"""
+    _clean_cache()
+
+    cached = _CACHE.get(check_id)
+    if not cached:
+        raise BadRequestException(10011, "查重结果已过期(超过30分钟)，请重新查重")
+
+    file_data = cached.get("file_data", [])
+    file_a = next((f for f in file_data if f["id"] == index_a), None)
+    file_b = next((f for f in file_data if f["id"] == index_b), None)
+
+    if not file_a or not file_b:
+        raise BadRequestException(10011, "未找到指定的文件")
+
+    # 计算公共 N-gram 片段
+    set_a = get_char_ngram_set(file_a["content"], PHRASE_NGRAM)
+    set_b = get_char_ngram_set(file_b["content"], PHRASE_NGRAM)
+    common = set_a & set_b
+    snippets = sorted([g for g in common if len(g) >= PHRASE_NGRAM], key=len, reverse=True)[:10]
+
+    return ok({
+        "studentA": {"name": file_a["studentName"], "number": file_a["studentNumber"]},
+        "studentB": {"name": file_b["studentName"], "number": file_b["studentNumber"]},
+        "fileA": {"fileUrl": file_a.get("fileUrl"), "ext": file_a.get("ext", ""), "fileName": file_a.get("fileName", "")},
+        "fileB": {"fileUrl": file_b.get("fileUrl"), "ext": file_b.get("ext", ""), "fileName": file_b.get("fileName", "")},
+        "contentHtmlA": file_a.get("html") or f"<pre>{file_a['content']}</pre>",
+        "contentHtmlB": file_b.get("html") or f"<pre>{file_b['content']}</pre>",
+        "snippets": snippets,
+    })
 
 
 @router.get("/plagiarism/{check_id}/report")

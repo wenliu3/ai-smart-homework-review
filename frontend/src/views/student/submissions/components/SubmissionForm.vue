@@ -338,10 +338,13 @@ defineExpose({
 });
 
 // 监听 submission 变化，填充数据
+// 只在首次加载或 submission ID 变化时重置，避免 loadData（轮询/页面可见性变化）
+// 覆盖用户正在编辑的内容和已上传的文件
 watch(
   () => props.submission,
-  (newSubmission) => {
-    if (newSubmission) {
+  (newSubmission, oldSubmission) => {
+    if (!newSubmission) return;
+    if (!oldSubmission || newSubmission.id !== oldSubmission.id) {
       form.content = newSubmission.content || "";
       uploadedResults.value = newSubmission.attachments || [];
     }

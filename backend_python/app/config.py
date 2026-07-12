@@ -26,5 +26,12 @@ class Settings(BaseSettings):
         p.mkdir(parents=True, exist_ok=True)
         return p
 
+    @property
+    def plagiarism_path(self) -> Path:
+        """文档查重临时文件目录（独立子目录，缓存过期自动清理）"""
+        p = self.upload_path / "plagiarism_tmp"
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+
 
 settings = Settings()

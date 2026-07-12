@@ -208,6 +208,19 @@
               <el-tag v-else type="success" size="small">合格</el-tag>
             </template>
           </el-table-column>
+          <el-table-column label="操作" width="100" align="center" fixed="right">
+            <template #default="{ row }">
+              <el-button
+                v-if="row.matchSubmissionId"
+                type="primary"
+                size="small"
+                link
+                @click="openCompare(row)"
+              >
+                对比
+              </el-button>
+            </template>
+          </el-table-column>
         </el-table>
 
         <!-- 跳过的文件 -->
@@ -227,6 +240,44 @@
         </el-alert>
       </el-card>
     </div>
+
+    <!-- 对比预览弹窗 -->
+    <el-dialog
+      v-model="compareVisible"
+      title="查重对比预览 — 命中片段标黄"
+      width="95%"
+      top="3vh"
+      class="compare-dialog"
+      :close-on-click-modal="false"
+    >
+      <div v-loading="compareLoading" class="compare-container">
+        <div class="compare-hit-count" v-if="compareData">
+          共 {{ compareData.snippets.length }} 个命中片段，黄色标记的句子与对方重合
+        </div>
+        <el-row :gutter="12">
+          <el-col :span="12">
+            <div class="compare-panel">
+              <div class="compare-header">
+                <el-icon><User /></el-icon>
+                <span class="compare-name">{{ compareData?.studentA?.name }}</span>
+                <span class="compare-number">({{ compareData?.studentA?.number || '-' }})</span>
+              </div>
+              <div class="compare-text" ref="compareTextARef"></div>
+            </div>
+          </el-col>
+          <el-col :span="12">
+            <div class="compare-panel">
+              <div class="compare-header">
+                <el-icon><User /></el-icon>
+                <span class="compare-name">{{ compareData?.studentB?.name }}</span>
+                <span class="compare-number">({{ compareData?.studentB?.number || '-' }})</span>
+              </div>
+              <div class="compare-text" ref="compareTextBRef"></div>
+            </div>
+          </el-col>
+        </el-row>
+      </div>
+    </el-dialog>
 
     <!-- 参数配置弹窗 -->
     <el-dialog v-model="configDialogVisible" title="查重参数设置" width="500px">
@@ -257,11 +308,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from "vue";
-import { UploadFilled, Download, Delete, Document, Setting } from "@element-plus/icons-vue";
+import { ref, reactive, watch, computed, nextTick } from "vue";
+import { UploadFilled, Download, Delete, Document, Setting, User } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
 import type { UploadFile } from "element-plus";
-import { adhocCheck, type AdhocCheckResult } from "@/api/plagiarism";
+import { renderAsync } from "docx-preview";
+import { adhocCheck, compareFiles, type AdhocCheckResult, type CompareResult } from "@/api/plagiarism";
 
 interface ParsedFile {
   raw: File;
@@ -292,6 +344,147 @@ const confirmConfig = () => {
   plagiarismConfig.value = { ...configForm };
   configDialogVisible.value = false;
   ElMessage.success("参数已更新，下次查重将使用新参数");
+};
+
+// 权重联动：片段权重 + 主题权重 = 1
+let _weightUpdating = false;
+watch(() => configForm.phraseWeight, (val) => {
+  if (_weightUpdating) return;
+  _weightUpdating = true;
+  configForm.topicWeight = Math.round((1 - val) * 100) / 100;
+  _weightUpdating = false;
+});
+watch(() => configForm.topicWeight, (val) => {
+  if (_weightUpdating) return;
+  _weightUpdating = true;
+  configForm.phraseWeight = Math.round((1 - val) * 100) / 100;
+  _weightUpdating = false;
+});
+
+// ====== 对比预览 ======
+const compareVisible = ref(false);
+const compareLoading = ref(false);
+const compareData = ref<CompareResult | null>(null);
+const compareTextARef = ref<HTMLElement | null>(null);
+const compareTextBRef = ref<HTMLElement | null>(null);
+
+const NGRAM_SIZE = 10;
+const HIT_RATIO_THRESHOLD = 0.6;
+const MIN_HITS = 2;
+
+/** 与后端一致的清洗逻辑 */
+function cleanChars(s: string): string {
+  return s.replace(/[^\u4e00-\u9fff a-zA-Z]/g, "").replace(/\s/g, "").toLowerCase();
+}
+
+/** 与后端一致的 n-gram 生成 */
+function getSentenceNgramSet(text: string, n: number): Set<string> {
+  const grams = new Set<string>();
+  const sentences = text.split(/[。！？；\n\r]+/);
+  for (const sentence of sentences) {
+    const cleaned = cleanChars(sentence);
+    if (cleaned.length < n) continue;
+    for (let i = 0; i <= cleaned.length - n; i++) {
+      grams.add(cleaned.substring(i, i + n));
+    }
+  }
+  return grams;
+}
+
+/** DOM 级标黄：按段落块遍历，命中率达阈值且命中数达最低要求的整块标黄 */
+function applyDomHighlighting(element: HTMLElement | null, snippets: string[]) {
+  if (!element || !snippets || snippets.length === 0) return;
+  const snippetSet = new Set(snippets);
+  const blocks = Array.from(
+    element.querySelectorAll("p, li, td, th, h1, h2, h3, h4, h5, h6, pre, blockquote")
+  );
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const block = blocks[i];
+    if (block.classList.contains("hl-hit")) continue;
+    if (block.querySelector(".hl-hit")) continue;
+    const text = block.textContent || "";
+    if (!text.trim()) continue;
+    const blockNgrams = getSentenceNgramSet(text, NGRAM_SIZE);
+    if (blockNgrams.size === 0) continue;
+    let hitCount = 0;
+    for (const ng of blockNgrams) {
+      if (snippetSet.has(ng)) hitCount++;
+    }
+    const ratio = hitCount / blockNgrams.size;
+    if (ratio >= HIT_RATIO_THRESHOLD && hitCount >= MIN_HITS) {
+      block.classList.add("hl-hit");
+    }
+  }
+}
+
+/** 渲染单个提交内容（docx 用 docx-preview 渲染原始 Word，其他用 innerHTML） */
+async function renderSubmission(
+  container: HTMLElement | null,
+  fileInfo: { fileUrl: string; ext: string; fileName: string } | null,
+  contentHtml: string
+): Promise<void> {
+  if (!container) return;
+  container.innerHTML = "";
+
+  if (fileInfo && fileInfo.ext === ".docx" && fileInfo.fileUrl) {
+    try {
+      const res = await fetch(fileInfo.fileUrl);
+      const blob = await res.blob();
+      await renderAsync(blob, container, undefined, {
+        className: "docx",
+        inWrapper: true,
+        ignoreWidth: false,
+        ignoreHeight: false,
+        breakPages: true,
+      });
+    } catch {
+      container.innerHTML = "<p>Word 渲染失败，显示纯文本：</p>";
+      container.innerHTML += contentHtml || "<p>（无内容）</p>";
+    }
+  } else if (contentHtml) {
+    container.innerHTML = contentHtml;
+  } else {
+    container.innerHTML = "<p>（无内容）</p>";
+  }
+}
+
+/** 数据加载后渲染内容（docx 用 docx-preview）+ 标黄 */
+watch(compareData, async (val) => {
+  if (!val) return;
+  await nextTick();
+  compareLoading.value = true;
+  try {
+    // 并行渲染两侧
+    await Promise.all([
+      renderSubmission(compareTextARef.value, val.fileA, val.contentHtmlA),
+      renderSubmission(compareTextBRef.value, val.fileB, val.contentHtmlB),
+    ]);
+    // 渲染完成后标黄
+    applyDomHighlighting(compareTextARef.value, val.snippets);
+    applyDomHighlighting(compareTextBRef.value, val.snippets);
+  } finally {
+    compareLoading.value = false;
+  }
+});
+
+/** 打开对比预览 */
+const openCompare = async (row: any) => {
+  if (!result.value?.checkId || !row.submissionId || !row.matchSubmissionId) return;
+  compareVisible.value = true;
+  compareLoading.value = true;
+  compareData.value = null;
+  try {
+    compareData.value = await compareFiles(
+      result.value.checkId,
+      Number(row.submissionId),
+      Number(row.matchSubmissionId),
+    );
+  } catch (error: any) {
+    ElMessage.error(error.message || "加载对比数据失败，可能已过期，请重新查重");
+    compareVisible.value = false;
+  } finally {
+    compareLoading.value = false;
+  }
 };
 
 /** 模板文件选择回调 */
@@ -518,5 +711,143 @@ const resetAll = () => {
 .config-unit {
   font-size: 14px;
   color: #6b7280;
+}
+
+/* 对比预览 */
+.compare-dialog .el-dialog__body {
+  padding: 12px 20px;
+}
+
+.compare-container {
+  min-height: 400px;
+}
+
+.compare-hit-count {
+  font-size: 13px;
+  color: #92400e;
+  background: #fef3c7;
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+}
+
+.compare-panel {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+  height: 70vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.compare-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e5e7eb;
+  font-size: 15px;
+}
+
+.compare-name {
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.compare-number {
+  color: #9ca3af;
+  font-size: 13px;
+}
+
+.compare-text {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 24px;
+  font-size: 14px;
+  line-height: 1.8;
+  color: #374151;
+  word-break: break-word;
+}
+
+.compare-text :deep(h1),
+.compare-text :deep(h2),
+.compare-text :deep(h3),
+.compare-text :deep(h4) {
+  margin: 16px 0 8px 0;
+  font-weight: 600;
+  color: #1f2937;
+}
+.compare-text :deep(h1) { font-size: 20px; }
+.compare-text :deep(h2) { font-size: 17px; }
+.compare-text :deep(h3) { font-size: 15px; }
+.compare-text :deep(h4) { font-size: 14px; }
+
+.compare-text :deep(p) {
+  margin: 6px 0;
+}
+
+.compare-text :deep(table) {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8px 0;
+}
+.compare-text :deep(td),
+.compare-text :deep(th) {
+  border: 1px solid #d1d5db;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+.compare-text :deep(th) {
+  background: #f3f4f6;
+  font-weight: 600;
+}
+
+.compare-text :deep(strong) {
+  font-weight: 600;
+}
+
+.compare-text :deep(img) {
+  max-width: 100%;
+  height: auto;
+  margin: 8px 0;
+}
+
+.compare-text :deep(ul),
+.compare-text :deep(ol) {
+  margin: 6px 0;
+  padding-left: 24px;
+}
+
+.compare-text :deep(li) {
+  margin: 3px 0;
+}
+
+.compare-text :deep(pre) {
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 12px;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.compare-text :deep(.hl-hit) {
+  background: #fef08a;
+  box-shadow: inset 4px 0 0 #f59e0b;
+  border-radius: 2px;
+}
+
+/* docx-preview 容器样式 */
+.compare-text :deep(.docx-wrapper) {
+  background: transparent;
+  padding: 0;
+}
+
+.compare-text :deep(.docx-wrapper > .docx) {
+  box-shadow: none;
+  margin: 0 auto;
+  max-width: 100%;
 }
 </style>

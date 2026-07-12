@@ -371,6 +371,21 @@ const confirmConfig = () => {
   ElMessage.success("参数已更新，下次查重将使用新参数");
 };
 
+// 权重联动：片段权重 + 主题权重 = 1
+let _weightUpdating = false;
+watch(() => configForm.phraseWeight, (val) => {
+  if (_weightUpdating) return;
+  _weightUpdating = true;
+  configForm.topicWeight = Math.round((1 - val) * 100) / 100;
+  _weightUpdating = false;
+});
+watch(() => configForm.topicWeight, (val) => {
+  if (_weightUpdating) return;
+  _weightUpdating = true;
+  configForm.phraseWeight = Math.round((1 - val) * 100) / 100;
+  _weightUpdating = false;
+});
+
 /** 模板文件选择 */
 const handleTemplateChange = (file: UploadFile) => {
   if (file.raw) {

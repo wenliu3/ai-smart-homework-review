@@ -102,8 +102,31 @@ export function adhocCheck(
     url: "/plagiarism/adhoc-check",
     method: "post",
     data: formData,
-    timeout: 120000,
+    timeout: 300000,
     headers: { "Content-Type": undefined as any },
+  });
+}
+
+/** 对比预览结果 */
+export interface CompareResult {
+  studentA: { name: string; number: string };
+  studentB: { name: string; number: string };
+  fileA: { fileUrl: string; ext: string; fileName: string } | null;
+  fileB: { fileUrl: string; ext: string; fileName: string } | null;
+  contentHtmlA: string;
+  contentHtmlB: string;
+  snippets: string[];
+}
+
+/**
+ * 对比预览 — 从内存缓存取两份文件的文本和命中片段
+ */
+export function compareFiles(checkId: string, indexA: number, indexB: number): Promise<CompareResult> {
+  return request({
+    url: `/plagiarism/${checkId}/compare`,
+    method: "get",
+    params: { index_a: indexA, index_b: indexB },
+    timeout: 60000,
   });
 }
 
