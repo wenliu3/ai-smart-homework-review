@@ -553,22 +553,33 @@ const startCheck = async () => {
 };
 
 /** 下载报告 */
-const downloadReport = () => {
+const downloadReport = async () => {
   if (!result.value?.checkId) return;
   const url = `/api/plagiarism/${result.value.checkId}/report`;
   const token = localStorage.getItem("token");
-  fetch(url, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-    .then((res) => res.blob())
-    .then((blob) => {
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = `查重报告_${new Date().toLocaleString("zh-CN").replace(/[/\s:]/g, "")}.xlsx`;
-      a.click();
-      URL.revokeObjectURL(a.href);
-    })
-    .catch(() => ElMessage.error("下载失败"));
+  try {
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => null);
+      ElMessage.error(errorData?.message || `下载失败 (HTTP ${res.status})`);
+      return;
+    }
+    const blob = await res.blob();
+    if (blob.size === 0 || blob.type.includes("application/json")) {
+      ElMessage.error("下载失败：服务器未返回有效文件，可能查重结果已过期");
+      return;
+    }
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `查重报告_${new Date().toLocaleString("zh-CN").replace(/[/\s:]/g, "")}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    ElMessage.success("报告下载成功");
+  } catch (error) {
+    ElMessage.error("下载失败，请重试");
+  }
 };
 
 /** 重复率颜色 */

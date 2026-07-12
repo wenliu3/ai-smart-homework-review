@@ -16,7 +16,8 @@ import tempfile
 from collections import OrderedDict
 from typing import List, Optional
 from fastapi import APIRouter, Depends, UploadFile, File, Form
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
+from urllib.parse import quote
 from ..deps import get_current_user, require_roles
 from ..models import User
 from ..plagiarism import (
@@ -253,6 +254,7 @@ def download_report(
         cell.alignment = Alignment(horizontal="center")
 
     red_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+    yellow_fill = PatternFill(start_color="FFF3CD", end_color="FFF3CD", fill_type="solid")
     for idx, r in enumerate(results, 1):
         row_data = [
             idx,
@@ -275,9 +277,19 @@ def download_report(
             r.get("suspectReason", "") or "合格",
         ]
         ws.append(row_data)
-        if r.get("suspectReason"):
-            for cell in ws[ws.max_row]:
+        row = ws[ws.max_row]
+
+        # 文字查重不合格 → 整行标红
+        text_suspect = r.get("status") and r["status"] not in ("合格", "-", None)
+        # 图片查重不合格 → 整行标黄
+        image_suspect = has_image and r.get("imageStatus") and r["imageStatus"] not in ("合格", "-", None)
+
+        if text_suspect:
+            for cell in row:
                 cell.fill = red_fill
+        elif image_suspect:
+            for cell in row:
+                cell.fill = yellow_fill
 
     for col in ws.columns:
         max_len = max(len(str(c.value or "")) for c in col) + 4
@@ -289,8 +301,8 @@ def download_report(
     output.seek(0)
 
     filename = f"查重报告_{time.strftime('%Y%m%d_%H%M%S')}.xlsx"
-    return StreamingResponse(
-        output,
+    return Response(
+        content=output.getvalue(),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
     )
