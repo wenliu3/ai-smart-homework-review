@@ -8,7 +8,6 @@ export {}
 declare module '@vue/runtime-core' {
   export interface GlobalComponents {
     AdaptiveTableContainer: typeof import('./src/components/AdaptiveTableContainer.vue')['default']
-    AdaptiveTableExample: typeof import('./src/components/AdaptiveTableExample.vue')['default']
     AssistantPanel: typeof import('./src/components/AssistantPanel.vue')['default']
     ElAlert: typeof import('element-plus/es')['ElAlert']
     ElAside: typeof import('element-plus/es')['ElAside']
@@ -74,14 +73,11 @@ declare module '@vue/runtime-core' {
     ElTree: typeof import('element-plus/es')['ElTree']
     ElUpload: typeof import('element-plus/es')['ElUpload']
     FilePreviewDialog: typeof import('./src/components/FilePreviewDialog.vue')['default']
-    FlexboxDemo: typeof import('./src/components/FlexboxDemo.vue')['default']
     FloatingAssistantButton: typeof import('./src/components/FloatingAssistantButton.vue')['default']
     JoinClassDialog: typeof import('./src/components/JoinClassDialog.vue')['default']
     PageHeader: typeof import('./src/components/PageHeader.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
-    SearchCard: typeof import('./src/components/SearchCard.vue')['default']
-    SimpleFlexboxExample: typeof import('./src/components/SimpleFlexboxExample.vue')['default']
     WangEditor: typeof import('./src/components/WangEditor.vue')['default']
   }
   export interface ComponentCustomProperties {

@@ -13,7 +13,7 @@ node_modules
 .pnp.js
 
 # ===== 构建输出 =====
-dist
+frontend/dist/
 dist-ssr
 build
 *.local
