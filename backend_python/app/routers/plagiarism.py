@@ -18,7 +18,9 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, UploadFile, File, Form
 from fastapi.responses import StreamingResponse, Response
 from urllib.parse import quote
+from sqlalchemy.orm import Session
 from ..deps import get_current_user, require_roles
+from ..database import get_db
 from ..models import User
 from ..plagiarism import (
     run_full_check,
@@ -28,6 +30,7 @@ from ..plagiarism import (
     get_char_ngram_set,
     PHRASE_NGRAM,
 )
+from ..crud.plagiarism_suggestion import generate_plagiarism_suggestion
 from ..core.exceptions import BadRequestException
 from ..core.response import ok
 from ..config import settings
@@ -306,3 +309,67 @@ def download_report(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
     )
+
+
+@router.post("/plagiarism/{check_id}/ai-suggestion")
+def ai_suggestion(
+    check_id: str,
+    index: int,
+    compare_index: int = None,
+    current_user: User = Depends(require_roles("superadmin", "teacher")),
+    db: Session = Depends(get_db),
+):
+    """AI 建议 — 结合查重结果和大模型，针对学生作业提出分析和建议。
+
+    参数:
+        index: 学生在查重列表中的 id
+        compare_index: 可选，对比模式下对方的 id，传入后生成对比建议
+    """
+    _clean_cache()
+
+    cached = _CACHE.get(check_id)
+    if not cached:
+        raise BadRequestException(10011, "查重结果已过期(超过30分钟)，请重新查重")
+
+    file_data = cached.get("file_data", [])
+    results = cached.get("result", {}).get("results", [])
+
+    file_a = next((f for f in file_data if f["id"] == index), None)
+    if not file_a:
+        raise BadRequestException(10011, "未找到指定的文件")
+
+    # 按姓名+学号匹配查重结果
+    plag_info = next(
+        (r for r in results
+         if r["studentName"] == file_a["studentName"] and r["studentNumber"] == file_a["studentNumber"]),
+        {},
+    )
+
+    compare_name = None
+    compare_content = None
+    snippets = None
+
+    if compare_index:
+        file_b = next((f for f in file_data if f["id"] == compare_index), None)
+        if file_b:
+            compare_name = file_b["studentName"]
+            compare_content = file_b["content"]
+            set_a = get_char_ngram_set(file_a["content"], PHRASE_NGRAM)
+            set_b = get_char_ngram_set(file_b["content"], PHRASE_NGRAM)
+            common = set_a & set_b
+            snippets = sorted(
+                [g for g in common if len(g) >= PHRASE_NGRAM],
+                key=len, reverse=True,
+            )[:10]
+
+    suggestion = generate_plagiarism_suggestion(
+        db,
+        student_name=file_a["studentName"],
+        student_number=file_a["studentNumber"],
+        content=file_a["content"],
+        plagiarism_info=plag_info,
+        compare_name=compare_name,
+        compare_content=compare_content,
+        snippets=snippets,
+    )
+    return ok({"suggestion": suggestion})

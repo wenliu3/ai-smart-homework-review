@@ -141,3 +141,22 @@ export function downloadReport(checkId: string): Promise<Blob> {
     timeout: 60000,
   });
 }
+
+/**
+ * AI 建议 — 结合查重结果和大模型，针对学生作业提出分析和建议
+ * @param checkId 查重任务ID
+ * @param index 学生在查重列表中的序号
+ * @param compareIndex 可选，对比模式下对方的序号
+ */
+export function getAiSuggestion(
+  checkId: string,
+  index: number,
+  compareIndex?: number,
+): Promise<{ suggestion: string }> {
+  return request({
+    url: `/plagiarism/${checkId}/ai-suggestion`,
+    method: "post",
+    params: { index, compare_index: compareIndex },
+    timeout: 120000,
+  });
+}

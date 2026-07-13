@@ -3,6 +3,7 @@ import os
 import uuid
 import tempfile
 from typing import Optional
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, Request, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from ..database import get_db
@@ -105,6 +106,30 @@ def compare_submissions(
 ):
     """对比预览 — 返回两份提交的全文和命中片段，用于前端左右并排展示，命中部分标黄"""
     return ok(assignment_crud.compare_submissions(db, submission_id, match_submission_id, current_user.id))
+
+
+class AiSuggestionRequest(BaseModel):
+    plagiarismInfo: dict
+    matchSubmissionId: int = None
+
+
+@router.post("/teacher/submissions/{submission_id}/ai-suggestion")
+def get_ai_suggestion(
+    submission_id: int,
+    body: AiSuggestionRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """AI 建议 — 结合查重结果和大模型，针对学生作业提出分析和建议。
+
+    请求体: { plagiarismInfo: {查重结果}, matchSubmissionId?: 对比对象ID }
+    """
+    suggestion = assignment_crud.get_ai_suggestion(
+        db, submission_id, current_user.id,
+        plagiarism_info=body.plagiarismInfo,
+        match_submission_id=body.matchSubmissionId,
+    )
+    return ok({"suggestion": suggestion})
 
 
 # ========== 学生端 ==========

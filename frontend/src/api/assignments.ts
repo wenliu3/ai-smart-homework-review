@@ -444,3 +444,22 @@ export function compareSubmissions(submissionId: string, matchSubmissionId: stri
     timeout: 60000,
   });
 }
+
+/**
+ * AI 建议 — 结合查重结果和大模型，针对学生作业提出分析和建议
+ * @param submissionId 提交记录ID
+ * @param plagiarismInfo 查重结果数据（rate/phraseRate/topicRate/status/matchName等）
+ * @param matchSubmissionId 可选，对比模式下对方提交记录ID
+ */
+export function getAiSuggestion(
+  submissionId: string,
+  plagiarismInfo: Record<string, any>,
+  matchSubmissionId?: string,
+): Promise<{ suggestion: string }> {
+  return request({
+    url: `/teacher/submissions/${submissionId}/ai-suggestion`,
+    method: "post",
+    data: { plagiarismInfo, matchSubmissionId },
+    timeout: 120000,
+  });
+}

@@ -208,7 +208,7 @@
               <el-tag v-else type="success" size="small">合格</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="100" align="center" fixed="right">
+          <el-table-column label="操作" width="160" align="center" fixed="right">
             <template #default="{ row }">
               <el-button
                 v-if="row.matchSubmissionId"
@@ -218,6 +218,14 @@
                 @click="openCompare(row)"
               >
                 对比
+              </el-button>
+              <el-button
+                type="warning"
+                size="small"
+                link
+                @click="openSuggestion(row)"
+              >
+                AI建议
               </el-button>
             </template>
           </el-table-column>
@@ -276,6 +284,26 @@
             </div>
           </el-col>
         </el-row>
+        <!-- AI 对比建议 -->
+        <div class="compare-suggestion" v-if="compareData">
+          <el-button type="warning" :loading="compareSuggestionLoading" @click="openCompareSuggestion">
+            AI 对比建议
+          </el-button>
+          <div v-if="compareSuggestionText" class="suggestion-content">
+            {{ compareSuggestionText }}
+          </div>
+        </div>
+      </div>
+    </el-dialog>
+
+    <!-- AI 建议弹窗 -->
+    <el-dialog v-model="suggestionVisible" title="AI 作业建议" width="600px">
+      <div v-loading="suggestionLoading">
+        <div v-if="suggestionStudentName" class="suggestion-header">
+          学生：{{ suggestionStudentName }}
+        </div>
+        <div v-if="suggestionText" class="suggestion-content">{{ suggestionText }}</div>
+        <el-empty v-else-if="!suggestionLoading" description="暂无建议" />
       </div>
     </el-dialog>
 
@@ -313,7 +341,7 @@ import { UploadFilled, Download, Delete, Document, Setting, User } from "@elemen
 import { ElMessage } from "element-plus";
 import type { UploadFile } from "element-plus";
 import { renderAsync } from "docx-preview";
-import { adhocCheck, compareFiles, type AdhocCheckResult, type CompareResult } from "@/api/plagiarism";
+import { adhocCheck, compareFiles, getAiSuggestion, type AdhocCheckResult, type CompareResult } from "@/api/plagiarism";
 
 interface ParsedFile {
   raw: File;
@@ -367,6 +395,17 @@ const compareLoading = ref(false);
 const compareData = ref<CompareResult | null>(null);
 const compareTextARef = ref<HTMLElement | null>(null);
 const compareTextBRef = ref<HTMLElement | null>(null);
+
+// 当前对比的行数据（供对比弹窗 AI 建议使用）
+const compareRowData = ref<any>(null);
+
+// ====== AI 建议 ======
+const suggestionVisible = ref(false);
+const suggestionLoading = ref(false);
+const suggestionText = ref("");
+const suggestionStudentName = ref("");
+const compareSuggestionLoading = ref(false);
+const compareSuggestionText = ref("");
 
 const NGRAM_SIZE = 10;
 const HIT_RATIO_THRESHOLD = 0.6;
@@ -473,6 +512,8 @@ const openCompare = async (row: any) => {
   compareVisible.value = true;
   compareLoading.value = true;
   compareData.value = null;
+  compareRowData.value = row;
+  compareSuggestionText.value = "";
   try {
     compareData.value = await compareFiles(
       result.value.checkId,
@@ -484,6 +525,43 @@ const openCompare = async (row: any) => {
     compareVisible.value = false;
   } finally {
     compareLoading.value = false;
+  }
+};
+
+/** 获取 AI 建议（结果表格） */
+const openSuggestion = async (row: any) => {
+  if (!result.value?.checkId || !row.submissionId) return;
+  suggestionVisible.value = true;
+  suggestionLoading.value = true;
+  suggestionText.value = "";
+  suggestionStudentName.value = row.studentName;
+  try {
+    const res = await getAiSuggestion(result.value.checkId, Number(row.submissionId));
+    suggestionText.value = res.suggestion;
+  } catch (error: any) {
+    ElMessage.error(error.message || "AI 建议生成失败");
+    suggestionVisible.value = false;
+  } finally {
+    suggestionLoading.value = false;
+  }
+};
+
+/** 对比弹窗中获取 AI 建议 */
+const openCompareSuggestion = async () => {
+  if (!result.value?.checkId || !compareRowData.value) return;
+  compareSuggestionLoading.value = true;
+  compareSuggestionText.value = "";
+  try {
+    const res = await getAiSuggestion(
+      result.value.checkId,
+      Number(compareRowData.value.submissionId),
+      Number(compareRowData.value.matchSubmissionId),
+    );
+    compareSuggestionText.value = res.suggestion;
+  } catch (error: any) {
+    ElMessage.error(error.message || "AI 建议生成失败");
+  } finally {
+    compareSuggestionLoading.value = false;
   }
 };
 
@@ -595,6 +673,9 @@ const resetAll = () => {
   parsedFiles.value = [];
   result.value = null;
   templateFile.value = null;
+  suggestionVisible.value = false;
+  suggestionText.value = "";
+  compareSuggestionText.value = "";
 };
 </script>
 
@@ -860,5 +941,38 @@ const resetAll = () => {
   box-shadow: none;
   margin: 0 auto;
   max-width: 100%;
+}
+
+/* ====== AI 建议弹窗 ====== */
+.suggestion-header {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.suggestion-content {
+  font-size: 14px;
+  line-height: 1.8;
+  color: #374151;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #f9fafb;
+  border-radius: 8px;
+  padding: 16px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.compare-suggestion {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.compare-suggestion .suggestion-content {
+  margin-top: 12px;
 }
 </style>

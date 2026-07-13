@@ -212,7 +212,7 @@
                   <el-tag v-else type="success" size="small">合格</el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="操作" width="100" align="center" fixed="right">
+              <el-table-column label="操作" width="160" align="center" fixed="right">
                 <template #default="{ row }">
                   <el-button
                     v-if="row.matchSubmissionId"
@@ -223,6 +223,14 @@
                     @click="openCompare(row)"
                   >
                     对比预览
+                  </el-button>
+                  <el-button
+                    type="warning"
+                    link
+                    size="small"
+                    @click="openSuggestion(row)"
+                  >
+                    AI建议
                   </el-button>
                 </template>
               </el-table-column>
@@ -317,6 +325,26 @@
                   </div>
                 </el-col>
               </el-row>
+              <!-- AI 对比建议 -->
+              <div class="compare-suggestion" v-if="compareData">
+                <el-button type="warning" :loading="compareSuggestionLoading" @click="openCompareSuggestion">
+                  AI 对比建议
+                </el-button>
+                <div v-if="compareSuggestionText" class="suggestion-content">
+                  {{ compareSuggestionText }}
+                </div>
+              </div>
+            </div>
+          </el-dialog>
+
+          <!-- AI 建议弹窗 -->
+          <el-dialog v-model="suggestionVisible" title="AI 作业建议" width="600px">
+            <div v-loading="suggestionLoading">
+              <div v-if="suggestionStudentName" class="suggestion-header">
+                学生：{{ suggestionStudentName }}
+              </div>
+              <div v-if="suggestionText" class="suggestion-content">{{ suggestionText }}</div>
+              <el-empty v-else-if="!suggestionLoading" description="暂无建议" />
             </div>
           </el-dialog>
         </div>
@@ -331,7 +359,7 @@ import { User, CopyDocument, Search, Document, Delete, Setting } from "@element-
 import type { UploadFile } from "element-plus";
 import { ElMessage } from "element-plus";
 import { renderAsync } from "docx-preview";
-import { checkPlagiarism, compareSubmissions, type PlagiarismResult, type CompareResult, type CompareFileInfo, type PlagiarismConfig } from "@/api/assignments";
+import { checkPlagiarism, compareSubmissions, getAiSuggestion, type PlagiarismResult, type CompareResult, type CompareFileInfo, type PlagiarismConfig } from "@/api/assignments";
 
 interface Props {
   assignmentId?: string;
@@ -427,6 +455,17 @@ const compareLoading = ref(false);
 const compareData = ref<CompareResult | null>(null);
 const compareTextARef = ref<HTMLElement | null>(null);
 const compareTextBRef = ref<HTMLElement | null>(null);
+
+// 当前对比的行数据（供对比弹窗 AI 建议使用）
+const compareRowData = ref<any>(null);
+
+// ====== AI 建议 ======
+const suggestionVisible = ref(false);
+const suggestionLoading = ref(false);
+const suggestionText = ref("");
+const suggestionStudentName = ref("");
+const compareSuggestionLoading = ref(false);
+const compareSuggestionText = ref("");
 
 const NGRAM_SIZE = 10; // 与后端 PHRASE_NGRAM 一致
 const HIT_RATIO_THRESHOLD = 0.6; // 段落 n-gram 命中率超过 60% 才标黄
@@ -548,6 +587,8 @@ const openCompare = async (row: any) => {
   compareVisible.value = true;
   compareLoading.value = true;
   compareData.value = null;
+  compareRowData.value = row;
+  compareSuggestionText.value = "";
   try {
     compareData.value = await compareSubmissions(row.submissionId, row.matchSubmissionId);
   } catch (error: any) {
@@ -555,6 +596,69 @@ const openCompare = async (row: any) => {
     compareVisible.value = false;
   } finally {
     compareLoading.value = false;
+  }
+};
+
+/** 获取 AI 建议（结果表格） */
+const openSuggestion = async (row: any) => {
+  if (!row.submissionId) return;
+  suggestionVisible.value = true;
+  suggestionLoading.value = true;
+  suggestionText.value = "";
+  suggestionStudentName.value = row.studentName;
+  try {
+    const plagInfo: Record<string, any> = {
+      rate: row.rate,
+      phraseRate: row.phraseRate,
+      topicRate: row.topicRate,
+      status: row.status,
+      matchName: row.matchName,
+      matchId: row.matchId,
+      suspectReason: row.suspectReason,
+    };
+    if (row.imageRate != null) {
+      plagInfo.imageRate = row.imageRate;
+      plagInfo.matchedImageCount = row.matchedImageCount ?? 0;
+    }
+    const res = await getAiSuggestion(row.submissionId, plagInfo);
+    suggestionText.value = res.suggestion;
+  } catch (error: any) {
+    ElMessage.error(error.message || "AI 建议生成失败");
+    suggestionVisible.value = false;
+  } finally {
+    suggestionLoading.value = false;
+  }
+};
+
+/** 对比弹窗中获取 AI 建议 */
+const openCompareSuggestion = async () => {
+  if (!compareRowData.value) return;
+  compareSuggestionLoading.value = true;
+  compareSuggestionText.value = "";
+  try {
+    const plagInfo: Record<string, any> = {
+      rate: compareRowData.value.rate,
+      phraseRate: compareRowData.value.phraseRate,
+      topicRate: compareRowData.value.topicRate,
+      status: compareRowData.value.status,
+      matchName: compareRowData.value.matchName,
+      matchId: compareRowData.value.matchId,
+      suspectReason: compareRowData.value.suspectReason,
+    };
+    if (compareRowData.value.imageRate != null) {
+      plagInfo.imageRate = compareRowData.value.imageRate;
+      plagInfo.matchedImageCount = compareRowData.value.matchedImageCount ?? 0;
+    }
+    const res = await getAiSuggestion(
+      compareRowData.value.submissionId,
+      plagInfo,
+      compareRowData.value.matchSubmissionId,
+    );
+    compareSuggestionText.value = res.suggestion;
+  } catch (error: any) {
+    ElMessage.error(error.message || "AI 建议生成失败");
+  } finally {
+    compareSuggestionLoading.value = false;
   }
 };
 
@@ -933,5 +1037,38 @@ defineOptions({
 .config-unit {
   font-size: 14px;
   color: #6b7280;
+}
+
+/* ====== AI 建议弹窗 ====== */
+.suggestion-header {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.suggestion-content {
+  font-size: 14px;
+  line-height: 1.8;
+  color: #374151;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #f9fafb;
+  border-radius: 8px;
+  padding: 16px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.compare-suggestion {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.compare-suggestion .suggestion-content {
+  margin-top: 12px;
 }
 </style>

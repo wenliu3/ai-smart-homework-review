@@ -611,3 +611,68 @@ def compare_submissions(db: Session, submission_id: int, match_submission_id: in
         "contentHtmlB": content_html_b,
         "snippets": snippets,
     }
+
+
+# ========== AI 建议 ==========
+
+def get_ai_suggestion(
+    db: Session, submission_id: int, teacher_id: int,
+    plagiarism_info: dict,
+    match_submission_id: int = None,
+) -> str:
+    """生成作业查重 AI 建议。
+
+    从数据库/磁盘提取作业文本，结合前端传来的查重结果数据，
+    调用大模型生成分析和建议。可选传入 match_submission_id 生成对比建议。
+    """
+    import os as _os
+    from ..plagiarism import get_char_ngram_set, PHRASE_NGRAM
+    from ..config import settings
+    from .plagiarism_suggestion import generate_plagiarism_suggestion
+
+    s1 = db.query(Submission).filter(Submission.id == submission_id).first()
+    if not s1:
+        raise NotFoundException(10016, "提交记录不存在")
+
+    a = db.query(Assignment).filter(Assignment.id == s1.assignment_id).first()
+    if not a or a.teacher_id != teacher_id:
+        raise BadRequestException(10007, "无权操作此作业")
+
+    upload_dir = str(settings.upload_path)
+    text_a = _extract_submission_text(s1, upload_dir)
+
+    u1 = db.query(User).filter(User.id == s1.student_id).first()
+    student_name = u1.name if u1 else ""
+    student_number = u1.student_id if u1 else ""
+
+    compare_name = None
+    compare_content = None
+    snippets = None
+
+    if match_submission_id:
+        s2 = db.query(Submission).filter(Submission.id == match_submission_id).first()
+        if s2:
+            text_b = _extract_submission_text(s2, upload_dir)
+            u2 = db.query(User).filter(User.id == s2.student_id).first()
+            compare_name = u2.name if u2 else ""
+            compare_content = text_b
+
+            if text_a and text_b:
+                set_a = get_char_ngram_set(text_a, PHRASE_NGRAM)
+                set_b = get_char_ngram_set(text_b, PHRASE_NGRAM)
+                common = set_a & set_b
+                snippets = sorted(
+                    [g for g in common if len(g) >= PHRASE_NGRAM],
+                    key=len, reverse=True,
+                )[:10]
+
+    return generate_plagiarism_suggestion(
+        db,
+        student_name=student_name,
+        student_number=student_number,
+        content=text_a,
+        plagiarism_info=plagiarism_info,
+        compare_name=compare_name,
+        compare_content=compare_content,
+        snippets=snippets,
+    )
