@@ -4,8 +4,11 @@
 职责更单一。以后要支持 PDF/其他格式，只用改这个文件。
 """
 import os
+import re
 import html
+import zipfile
 import logging
+import xml.etree.ElementTree as ET
 import pdfplumber
 from docx import Document
 
@@ -28,7 +31,11 @@ def extract_file_text(file_path: str, ext: str) -> str:
                 text = "\n".join((p.extract_text() or "") for p in pdf.pages)
                 return text
         if ext == ".docx":
-            return _extract_docx_text(Document(file_path))
+            try:
+                return _extract_docx_text(Document(file_path))
+            except Exception:
+                text, _ = _extract_docx_via_zip(file_path)
+                return text
     except Exception as e:
         logger.warning("提取失败 [%s]: %s: %s", ext, file_path, e)
     return ""
@@ -92,12 +99,105 @@ def extract_images_from_docx(docx_path: str = None, doc=None) -> list:
 
 # ===================== 一次性提取文本+图片（复用 Document 对象） =====================
 
+# ===================== CRC 损坏兜底：用 zipfile 直接读取 docx =====================
+
+# OOXML Word 命名空间
+_W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+_W_P = "{%s}p" % _W_NS
+_W_T = "{%s}t" % _W_NS
+
+
+def _read_zip_member_no_crc(zf: zipfile.ZipFile, name: str) -> bytes:
+    """从 ZipFile 中读取条目内容，绕过 CRC-32 校验。
+
+    docx 内某个文件（如 image1.jpeg）的 CRC 校验和不匹配时，标准
+    zipfile.read() 会抛出 BadZipFile，导致整个文件解析中断。这里通过将
+    ZipExtFile._expected_crc 置 None 来跳过校验，允许读取"损坏"但实际
+    内容仍可用的条目。
+    """
+    try:
+        f = zf.open(name)
+    except (KeyError, Exception):
+        return b""
+    try:
+        f._expected_crc = None  # 禁用 CRC 校验
+        return f.read()
+    except Exception:
+        return b""
+    finally:
+        try:
+            f.close()
+        except Exception:
+            pass
+
+
+def _extract_text_from_ooxml(xml_bytes: bytes) -> str:
+    """从 OOXML（word/document.xml、header*.xml、footer*.xml）中提取纯文本。
+
+    遍历 <w:p> 段落，拼接其下所有 <w:t> 文本节点。
+    XML 解析失败时回退到正则匹配 <w:t> 内容。
+    """
+    if not xml_bytes:
+        return ""
+    try:
+        root = ET.fromstring(xml_bytes)
+        paragraphs = []
+        for p in root.iter(_W_P):
+            texts = [t.text for t in p.iter(_W_T) if t.text]
+            if texts:
+                paragraphs.append("".join(texts))
+        return "\n".join(paragraphs)
+    except Exception:
+        text = xml_bytes.decode("utf-8", errors="ignore")
+        snippets = re.findall(r"<w:t[^>]*>([^<]*)</w:t>", text)
+        return "".join(snippets) if snippets else ""
+
+
+def _extract_docx_via_zip(file_path: str) -> tuple:
+    """兜底方案：当 python-docx 因 CRC-32 等错误无法打开 docx 时，
+    直接用 zipfile 读取文本和图片，绕过 CRC 校验。
+
+    返回: (full_text, images)
+      - full_text: 从 word/document.xml + header/footer 提取的全文文本
+      - images: word/media/ 下所有图片的原始二进制列表 [bytes, ...]
+    """
+    full_text_parts = []
+    images = []
+    try:
+        zf = zipfile.ZipFile(file_path, "r")
+    except Exception as e:
+        logger.warning("zipfile 也无法打开: %s: %s", file_path, e)
+        return "", []
+    try:
+        for info in zf.infolist():
+            name = info.filename
+            # 文本：主文档 + 页眉页脚
+            if name == "word/document.xml" or re.match(r"word/(header|footer)\d+\.xml$", name):
+                data = _read_zip_member_no_crc(zf, name)
+                if data:
+                    text = _extract_text_from_ooxml(data)
+                    if text:
+                        full_text_parts.append(text)
+            # 图片：word/media/ 下的所有文件
+            elif name.startswith("word/media/"):
+                data = _read_zip_member_no_crc(zf, name)
+                if data:
+                    images.append(data)
+    finally:
+        zf.close()
+    logger.info("zip 兜底解析完成: %s, 文本%d字符, 图片%d张", file_path, len("\n".join(full_text_parts)), len(images))
+    return "\n".join(full_text_parts), images
+
+
 def extract_all_from_docx(file_path: str) -> tuple:
     """从 docx 中同时提取全文文本和内嵌图片，复用同一个 Document 对象。
 
     返回: (full_text, images)
       - full_text: 全文文本（段落 + 表格 + 页眉页脚）
       - images: docx 内所有内嵌图片的原始二进制内容列表 [bytes, ...]
+
+    当 python-docx 因 CRC-32 校验失败等错误无法打开时，自动回退到
+    zipfile 直接读取（绕过 CRC 校验），确保文本和图片仍可提取。
     """
     try:
         doc = Document(file_path)
@@ -105,8 +205,8 @@ def extract_all_from_docx(file_path: str) -> tuple:
         images = extract_images_from_docx(doc=doc)
         return full_text, images
     except Exception as e:
-        logger.warning("docx文本+图片提取失败: %s: %s", file_path, e)
-        return "", []
+        logger.warning("docx 常规解析失败，尝试 zip 兜底: %s: %s", file_path, e)
+        return _extract_docx_via_zip(file_path)
 
 
 def extract_all_from_file(tmp_path: str, ext: str) -> tuple:
@@ -134,7 +234,10 @@ def docx_to_html(file_path: str) -> str:
             return result.value
     except Exception as e:
         logger.warning("mammoth 转换失败，回退纯文本: %s: %s", file_path, e)
-        text = _extract_docx_text(Document(file_path))
+        try:
+            text = _extract_docx_text(Document(file_path))
+        except Exception:
+            text, _ = _extract_docx_via_zip(file_path)
         return "<pre>" + html.escape(text) + "</pre>"
 
 
