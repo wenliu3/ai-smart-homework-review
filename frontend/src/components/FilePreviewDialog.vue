@@ -8,6 +8,7 @@
     top="5vh"
     class="file-preview-dialog"
     @close="handleClose"
+    @opened="onDialogOpened"
   >
     <div v-loading="loading" class="preview-container" :style="{ height: previewHeight }">
       <!-- 图片预览 -->
@@ -55,7 +56,9 @@ const fileName = ref("");
 const fileExt = ref("");
 const currentFileUrl = ref("");
 const currentFileName = ref("");
+const docxBlob = ref<Blob | null>(null); // 暂存 docx blob，等弹窗就绪后渲染
 const docxContainerRef = ref<HTMLElement | null>(null);
+const dialogReady = ref(false);  // 弹窗动画完成后置 true
 
 const dialogWidth = computed(() => {
   return window.innerWidth < 768 ? "95%" : "80%";
@@ -67,6 +70,8 @@ const previewHeight = computed(() => {
 
 const open = async (att: any) => {
   visible.value = true;
+  dialogReady.value = false;
+  docxBlob.value = null;
   loading.value = true;
   blobUrl.value = "";
   textContent.value = "";
@@ -111,20 +116,14 @@ const open = async (att: any) => {
       return;
     }
 
-    // docx 类型 — 使用 docx-preview 渲染
+    // docx 类型 — 先保存 blob，等 dialog opened 后再渲染
     if (ext === "docx" || contentType.includes("wordprocessingml")) {
-      const blob = await resp.blob();
+      docxBlob.value = await resp.blob();
       previewType.value = "docx";
-      await nextTick();
-      if (docxContainerRef.value) {
-        await renderAsync(blob, docxContainerRef.value, undefined, {
-          className: "docx-preview-content",
-          inWrapper: true,
-          ignoreWidth: false,
-          ignoreHeight: false,
-          breakPages: true,
-          experimental: true,
-        });
+      // 如果弹窗已就绪则直接渲染，否则等 @opened
+      if (dialogReady.value) {
+        await nextTick();
+        await renderDocx();
       }
       return;
     }
@@ -171,6 +170,8 @@ const handleDownload = () => {
 };
 
 const handleClose = () => {
+  dialogReady.value = false;
+  docxBlob.value = null;
   if (blobUrl.value) {
     URL.revokeObjectURL(blobUrl.value);
     blobUrl.value = "";
@@ -181,7 +182,86 @@ const handleClose = () => {
   previewType.value = "";
 };
 
+/** 渲染 docx 文件 */
+async function renderDocx(): Promise<void> {
+  if (!docxBlob.value || !docxContainerRef.value) return;
+  const container = docxContainerRef.value;
+  container.innerHTML = "";
+  try {
+    console.log("[docx-preview:FilePreview] 开始渲染，大小:", docxBlob.value.size);
+    console.log("[docx-preview:FilePreview] 容器宽度:", container.offsetWidth);
+    await renderAsync(docxBlob.value, container, undefined, {
+      className: "docx-preview-content",
+      inWrapper: true,
+      ignoreWidth: true,           // 自适应容器宽度
+      ignoreHeight: false,
+      breakPages: true,
+      useBase64URL: true,
+      experimental: true,
+      trimXmlDeclaration: true,
+      renderHeaders: true,
+      renderFooters: true,
+      renderFootnotes: true,
+      renderEndnotes: true,
+      debug: true,
+    });
+    // 调试 & EMF/WMF 检测
+    const imgs = container.querySelectorAll("img");
+    console.log("[docx-preview:FilePreview] 渲染完成，图片数量:", imgs.length);
+    imgs.forEach((img, i) => {
+      const src = img.getAttribute("src") || "";
+      const srcType = src.startsWith("data:") ? "base64" : src.startsWith("blob:") ? "blob" : "other/empty";
+      console.log(`[docx-preview:FilePreview] 图片[${i}]: src类型=${srcType}, 可见=${img.offsetWidth > 0 && img.offsetHeight > 0}`);
+    });
+    patchImagesAfterRender(container);
+  } catch (e) {
+    console.error("[docx-preview:FilePreview] 渲染失败:", e);
+    container.innerHTML = "<p>Word 文档渲染失败，请下载查看</p>";
+  }
+}
+
+/** 弹窗动画完成后渲染 docx */
+function onDialogOpened(): void {
+  dialogReady.value = true;
+  nextTick(() => {
+    setTimeout(() => renderDocx(), 100);
+  });
+}
+
 defineExpose({ open });
+
+/** EMF/WMF 占位图 SVG */
+const UNSUPPORTED_IMG_PLACEHOLDER = `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="200" height="80"><rect width="200" height="80" fill="#fef2f2" stroke="#ef4444" stroke-width="1.5" rx="4"/><text x="100" y="35" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#991b1b">⚠ 浏览器不支持此图片格式</text><text x="100" y="55" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#b91c1c">建议用 PNG/JPG 替代后重新上传</text></svg>`)}`;
+
+function getImageIssue(img: HTMLImageElement): string {
+  const src = img.getAttribute("src") || "";
+  if (!src) return "src 为空";
+  const lower = src.toLowerCase();
+  if (lower.includes("image/x-emf") || lower.includes("image/emf") || lower.includes(".emf")) {
+    return "EMF 矢量图 — 浏览器不支持此格式";
+  }
+  if (lower.includes("image/x-wmf") || lower.includes("image/wmf") || lower.includes(".wmf")) {
+    return "WMF 矢量图 — 浏览器不支持此格式";
+  }
+  return "";
+}
+
+function patchImagesAfterRender(container: HTMLElement): void {
+  const imgs = container.querySelectorAll("img");
+  imgs.forEach((img) => {
+    const issue = getImageIssue(img);
+    if (issue) {
+      img.src = UNSUPPORTED_IMG_PLACEHOLDER;
+      img.style.border = "2px dashed #ef4444";
+      img.style.padding = "4px";
+      img.style.background = "#fef2f2";
+      img.style.minWidth = "200px";
+      img.style.minHeight = "80px";
+      img.title = issue;
+      console.warn("[docx-preview:FilePreview] 图片已替换为占位图:", issue);
+    }
+  });
+}
 </script>
 
 <style scoped>
@@ -189,8 +269,8 @@ defineExpose({ open });
   width: 100%;
   display: flex;
   justify-content: center;
-  align-items: center;
-  overflow: hidden;
+  align-items: flex-start;         /* 顶部对齐，避免大文档居中 */
+  overflow: auto;                  /* 允许滚动 */
   background: #f5f5f5;
   border-radius: 4px;
 }
@@ -244,6 +324,45 @@ defineExpose({ open });
   background: white;
   margin: 0 auto;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* docx-wrapper 内部 CSS 隔离 — 修复 Tailwind v4 preflight 覆盖 */
+.docx-preview-wrapper :deep(.docx-wrapper) {
+  background: transparent;
+  padding: 0;
+}
+
+.docx-preview-wrapper :deep(.docx-wrapper img) {
+  max-width: 100%;
+  height: auto;
+  display: inline;
+  vertical-align: baseline;
+}
+
+.docx-preview-wrapper :deep(.docx-wrapper table) {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.docx-preview-wrapper :deep(.docx-wrapper td),
+.docx-preview-wrapper :deep(.docx-wrapper th) {
+  border: 1px solid #d1d5db;
+  padding: 6px 10px;
+}
+
+.docx-preview-wrapper :deep(.docx-wrapper th) {
+  background: #f3f4f6;
+  font-weight: 600;
+}
+
+.docx-preview-wrapper :deep(.docx-wrapper ul),
+.docx-preview-wrapper :deep(.docx-wrapper ol) {
+  margin: 6px 0;
+  padding-left: 24px;
+}
+
+.docx-preview-wrapper :deep(.docx-wrapper li) {
+  margin: 3px 0;
 }
 
 .unsupported-preview {

@@ -428,6 +428,8 @@ export interface CompareResult {
   studentB: { name: string; number: string };
   fileA: CompareFileInfo | null;
   fileB: CompareFileInfo | null;
+  pdfUrlA: string | null;   // 标黄 PDF（后端生成，优先用它预览）
+  pdfUrlB: string | null;
   contentHtmlA: string;
   contentHtmlB: string;
   snippets: string[];

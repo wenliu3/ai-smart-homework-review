@@ -113,6 +113,8 @@ export interface CompareResult {
   studentB: { name: string; number: string };
   fileA: { fileUrl: string; ext: string; fileName: string } | null;
   fileB: { fileUrl: string; ext: string; fileName: string } | null;
+  pdfUrlA: string | null;   // 标黄 PDF（后端生成，优先用它预览）
+  pdfUrlB: string | null;
   contentHtmlA: string;
   contentHtmlB: string;
   snippets: string[];
@@ -158,5 +160,17 @@ export function getAiSuggestion(
     method: "post",
     params: { index, compare_index: compareIndex },
     timeout: 120000,
+  });
+}
+
+/**
+ * 清理临时查重文件 — 页面退出时调用，删除该 checkId 的原始 word + 标黄 PDF + 内存缓存
+ * 仅用于临时查重工具。学生正式提交的 docx 不走此接口。
+ */
+export function cleanupCheckFiles(checkId: string): Promise<any> {
+  return request({
+    url: `/plagiarism/${checkId}/files`,
+    method: "delete",
+    timeout: 30000,
   });
 }

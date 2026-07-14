@@ -560,7 +560,10 @@ def compare_submissions(db: Session, submission_id: int, match_submission_id: in
 
     import os as _os
     import json as _json
-    from ..plagiarism import get_char_ngram_set, PHRASE_NGRAM
+    from ..plagiarism import (
+        get_char_ngram_set, PHRASE_NGRAM,
+        safe_build_highlight_pdf, make_highlight_cache_key,
+    )
     from ..config import settings
 
     upload_dir = str(settings.upload_path)
@@ -602,11 +605,17 @@ def compare_submissions(db: Session, submission_id: int, match_submission_id: in
     u1 = db.query(User).filter(User.id == s1.student_id).first()
     u2 = db.query(User).filter(User.id == s2.student_id).first()
 
+    # 标黄改由前端 HTML + DOM 标黄实现，后端不再生成 PDF（保留字段为 null，前端忽略）
+    pdf_url_a = None
+    pdf_url_b = None
+
     return {
         "studentA": {"name": u1.name if u1 else "", "number": u1.student_id if u1 else ""},
         "studentB": {"name": u2.name if u2 else "", "number": u2.student_id if u2 else ""},
         "fileA": file_a,
         "fileB": file_b,
+        "pdfUrlA": pdf_url_a,
+        "pdfUrlB": pdf_url_b,
         "contentHtmlA": content_html_a,
         "contentHtmlB": content_html_b,
         "snippets": snippets,

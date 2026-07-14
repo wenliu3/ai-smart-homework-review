@@ -2,7 +2,7 @@
 FROM nginx:1.25-alpine AS production-stage
 
 # 安装 curl 用于健康检查
-RUN apk add --no-cache curl
+#RUN apk add --no-cache curl
 
 # 直接复制服务器上已经打包好的 dist 文件夹
 COPY ./dist /usr/share/nginx/html

@@ -56,6 +56,13 @@ from .extractors import (
     docx_to_html,
     file_to_html,
 )
+from .highlight import (
+    highlight_docx,
+    convert_docx_to_pdf,
+    get_highlighted_pdf,
+    safe_build_highlight_pdf,
+    make_highlight_cache_key,
+)
 from .aggregator import merge_results
 
 

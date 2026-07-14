@@ -257,6 +257,7 @@
       top="3vh"
       class="compare-dialog"
       :close-on-click-modal="false"
+      @opened="onCompareDialogOpened"
     >
       <div v-loading="compareLoading" class="compare-container">
         <div class="compare-hit-count" v-if="compareData">
@@ -336,12 +337,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, watch, computed, nextTick } from "vue";
+import { ref, reactive, watch, computed, nextTick, onBeforeUnmount } from "vue";
 import { UploadFilled, Download, Delete, Document, Setting, User } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
 import type { UploadFile } from "element-plus";
-import { renderAsync } from "docx-preview";
-import { adhocCheck, compareFiles, getAiSuggestion, type AdhocCheckResult, type CompareResult } from "@/api/plagiarism";
+import { adhocCheck, compareFiles, getAiSuggestion, cleanupCheckFiles, type AdhocCheckResult, type CompareResult } from "@/api/plagiarism";
 
 interface ParsedFile {
   raw: File;
@@ -395,6 +395,7 @@ const compareLoading = ref(false);
 const compareData = ref<CompareResult | null>(null);
 const compareTextARef = ref<HTMLElement | null>(null);
 const compareTextBRef = ref<HTMLElement | null>(null);
+const dialogReady = ref(false);  // true 表示弹窗动画完成、容器宽度已稳定
 
 // 当前对比的行数据（供对比弹窗 AI 建议使用）
 const compareRowData = ref<any>(null);
@@ -449,81 +450,128 @@ function applyDomHighlighting(element: HTMLElement | null, snippets: string[]) {
     for (const ng of blockNgrams) {
       if (snippetSet.has(ng)) hitCount++;
     }
-    const ratio = hitCount / blockNgrams.size;
-    if (ratio >= HIT_RATIO_THRESHOLD && hitCount >= MIN_HITS) {
+    // 命中数达标即标黄（段落含 >=2 个重合 ngram 说明有重合内容）
+    if (hitCount >= MIN_HITS) {
       block.classList.add("hl-hit");
     }
   }
 }
 
-/** 渲染单个提交内容（docx 用 docx-preview 渲染原始 Word，其他用 innerHTML） */
+/**
+ * 检测图片是否是不可渲染格式（EMF/WMF 等浏览器不支持的矢量图）或加载失败
+ * 返回描述文本，返回空字符串表示图片正常
+ */
+function getImageIssue(img: HTMLImageElement): string {
+  const src = img.getAttribute("src") || "";
+  if (!src) return "src 为空，可能 rel 关系缺失或图片文件损坏";
+  const lower = src.toLowerCase();
+  if (lower.includes("image/x-emf") || lower.includes("image/emf") || lower.includes(".emf")) {
+    return "EMF 矢量图 — 浏览器不支持此格式，建议用 PNG/JPG 替代";
+  }
+  if (lower.includes("image/x-wmf") || lower.includes("image/wmf") || lower.includes(".wmf")) {
+    return "WMF 矢量图 — 浏览器不支持此格式，建议用 PNG/JPG 替代";
+  }
+  return "";
+}
+
+/** EMF/WMF 占位图 SVG data URI */
+const UNSUPPORTED_IMG_PLACEHOLDER = `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="200" height="80"><rect width="200" height="80" fill="#fef2f2" stroke="#ef4444" stroke-width="1.5" rx="4"/><text x="100" y="35" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#991b1b">⚠ 浏览器不支持此图片格式</text><text x="100" y="55" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#b91c1c">建议用 PNG/JPG 替代后重新上传</text></svg>`)}`;
+
+/**
+ * 渲染完成后处理图片：检测 EMF/WMF 并替换占位图，
+ * 为无法正常显示的图片添加提示标题
+ */
+function patchImagesAfterRender(container: HTMLElement): void {
+  const imgs = container.querySelectorAll("img");
+  imgs.forEach((img) => {
+    const issue = getImageIssue(img);
+    if (issue) {
+      // EMF/WMF 或 src 为空的图片：换占位图 + 警告样式
+      img.src = UNSUPPORTED_IMG_PLACEHOLDER;
+      img.style.border = "2px dashed #ef4444";
+      img.style.padding = "4px";
+      img.style.background = "#fef2f2";
+      img.style.minWidth = "200px";
+      img.style.minHeight = "80px";
+      img.title = issue;
+      console.warn("[docx-preview] 图片已替换为占位图:", issue);
+    }
+  });
+}
+
+/** 渲染单个提交内容 — 直接用 contentHtml（mammoth 转的 HTML），稳定且支持 DOM 标黄 */
 async function renderSubmission(
   container: HTMLElement | null,
   fileInfo: { fileUrl: string; ext: string; fileName: string } | null,
   contentHtml: string
 ): Promise<void> {
   if (!container) return;
-  container.innerHTML = "";
-
-  if (fileInfo && fileInfo.ext === ".docx" && fileInfo.fileUrl) {
-    try {
-      const res = await fetch(fileInfo.fileUrl);
-      const blob = await res.blob();
-      await renderAsync(blob, container, undefined, {
-        className: "docx",
-        inWrapper: true,
-        ignoreWidth: false,
-        ignoreHeight: false,
-        breakPages: true,
-      });
-    } catch {
-      container.innerHTML = "<p>Word 渲染失败，显示纯文本：</p>";
-      container.innerHTML += contentHtml || "<p>（无内容）</p>";
-    }
-  } else if (contentHtml) {
-    container.innerHTML = contentHtml;
-  } else {
-    container.innerHTML = "<p>（无内容）</p>";
-  }
+  container.innerHTML = contentHtml || "<p>（无内容）</p>";
 }
 
-/** 数据加载后渲染内容（docx 用 docx-preview）+ 标黄 */
-watch(compareData, async (val) => {
-  if (!val) return;
-  await nextTick();
+/** 弹窗动画完成后渲染对比内容 — 直接用 HTML 排版 + 命中片段 DOM 标黄 */
+async function renderCompareContent(): Promise<void> {
+  if (!compareData.value || !dialogReady.value) return;
+  const val = compareData.value;
   compareLoading.value = true;
   try {
-    // 并行渲染两侧
+    await nextTick();
     await Promise.all([
       renderSubmission(compareTextARef.value, val.fileA, val.contentHtmlA),
       renderSubmission(compareTextBRef.value, val.fileB, val.contentHtmlB),
     ]);
-    // 渲染完成后标黄
     applyDomHighlighting(compareTextARef.value, val.snippets);
     applyDomHighlighting(compareTextBRef.value, val.snippets);
   } finally {
     compareLoading.value = false;
+  }
+}
+
+/** 弹窗动画完成后触发渲染 */
+function onCompareDialogOpened(): void {
+  dialogReady.value = true;
+  renderCompareContent();
+}
+
+/** 弹窗关闭时重置状态 */
+watch(compareVisible, (v) => {
+  if (!v) {
+    dialogReady.value = false;
+  }
+});
+
+/** 数据加载完成后，如果弹窗已就绪则直接渲染 */
+watch(compareData, async (val) => {
+  if (val && dialogReady.value) {
+    await nextTick();
+    renderCompareContent();
   }
 });
 
 /** 打开对比预览 */
 const openCompare = async (row: any) => {
   if (!result.value?.checkId || !row.submissionId || !row.matchSubmissionId) return;
-  compareVisible.value = true;
+  dialogReady.value = false;
   compareLoading.value = true;
   compareData.value = null;
   compareRowData.value = row;
   compareSuggestionText.value = "";
+  compareVisible.value = true;
   try {
     compareData.value = await compareFiles(
       result.value.checkId,
       Number(row.submissionId),
       Number(row.matchSubmissionId),
     );
+    // 数据就绪后，如果弹窗已打开（@opened 已触发），直接渲染
+    // 否则等待 @opened 触发 renderCompareContent
+    if (dialogReady.value) {
+      await nextTick();
+      renderCompareContent();
+    }
   } catch (error: any) {
     ElMessage.error(error.message || "加载对比数据失败，可能已过期，请重新查重");
     compareVisible.value = false;
-  } finally {
     compareLoading.value = false;
   }
 };
@@ -826,10 +874,11 @@ const resetAll = () => {
 .compare-panel {
   border: 1px solid #e5e7eb;
   border-radius: 8px;
-  overflow: hidden;
+  overflow: auto;                  /* 改为 auto：内容不会裁剪，允许水平和垂直滚动 */
   height: 70vh;
   display: flex;
   flex-direction: column;
+  min-width: 0;                    /* flex 容器内防止内容撑破 */
 }
 
 .compare-header {
@@ -854,12 +903,21 @@ const resetAll = () => {
 
 .compare-text {
   flex: 1;
-  overflow-y: auto;
+  overflow: auto;                  /* 改为 auto：允许水平和垂直滚动 */
   padding: 16px 24px;
   font-size: 14px;
   line-height: 1.8;
   color: #374151;
   word-break: break-word;
+}
+
+/* 标黄 PDF 内嵌渲染 */
+.compare-text :deep(.pdf-embed) {
+  width: 100%;
+}
+.compare-text :deep(.pdf-embed canvas) {
+  width: 100% !important;
+  height: auto !important;
 }
 
 .compare-text :deep(h1),
@@ -931,16 +989,69 @@ const resetAll = () => {
   border-radius: 2px;
 }
 
-/* docx-preview 容器样式 */
+/* docx-preview 容器样式 — 修复 Tailwind v4 preflight 对 .docx-wrapper 内部的样式覆盖 */
+/* Tailwind preflight 会重置 img 为 display:block、border-collapse 等，需显式恢复 */
 .compare-text :deep(.docx-wrapper) {
   background: transparent;
   padding: 0;
+  container-type: inline-size;
 }
 
 .compare-text :deep(.docx-wrapper > .docx) {
   box-shadow: none;
   margin: 0 auto;
   max-width: 100%;
+}
+
+/* 恢复 docx-wrapper 内部被 Tailwind preflight 覆盖的样式 */
+.compare-text :deep(.docx-wrapper img) {
+  max-width: 100%;
+  height: auto;
+  margin: 8px 0;
+  display: inline;                /* Tailwind preflight img { display: block } 会把内联图片撑坏 */
+  vertical-align: baseline;
+}
+
+.compare-text :deep(.docx-wrapper table) {
+  border-collapse: collapse;      /* Tailwind preflight 可能覆盖为 separate */
+  width: 100%;
+  margin: 8px 0;
+}
+
+.compare-text :deep(.docx-wrapper td),
+.compare-text :deep(.docx-wrapper th) {
+  border: 1px solid #d1d5db;      /* Tailwind preflight border-width: 0 会抹掉表格边框 */
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.compare-text :deep(.docx-wrapper th) {
+  background: #f3f4f6;
+  font-weight: 600;
+}
+
+.compare-text :deep(.docx-wrapper strong) {
+  font-weight: 600;
+}
+
+.compare-text :deep(.docx-wrapper ul),
+.compare-text :deep(.docx-wrapper ol) {
+  margin: 6px 0;
+  padding-left: 24px;
+}
+
+.compare-text :deep(.docx-wrapper li) {
+  margin: 3px 0;
+}
+
+.compare-text :deep(.docx-wrapper pre) {
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 12px;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 /* ====== AI 建议弹窗 ====== */

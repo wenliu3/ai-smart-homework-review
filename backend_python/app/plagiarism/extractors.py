@@ -226,19 +226,36 @@ def extract_all_from_file(tmp_path: str, ext: str) -> tuple:
 
 def docx_to_html(file_path: str) -> str:
     """用 mammoth 将 docx 转换为保留排版的 HTML（标题/表格/加粗/图片等）。
-    mammoth 未安装或转换失败时回退为 <pre> 纯文本。"""
+    mammoth 失败（如 docx 内图片 CRC-32 损坏）时，用 zip 兜底提取纯文本，
+    并把图片以 base64 内联追加到末尾（位置无法还原，但至少能显示）。"""
     try:
         import mammoth
         with open(file_path, "rb") as f:
             result = mammoth.convert_to_html(f)
             return result.value
     except Exception as e:
-        logger.warning("mammoth 转换失败，回退纯文本: %s: %s", file_path, e)
-        try:
-            text = _extract_docx_text(Document(file_path))
-        except Exception:
-            text, _ = _extract_docx_via_zip(file_path)
-        return "<pre>" + html.escape(text) + "</pre>"
+        logger.warning("mammoth 转换失败，回退 zip 兜底: %s: %s", file_path, e)
+        text, images = _extract_docx_via_zip(file_path)
+        # 按段落拆成 <p>（而非整篇一个 <pre>），前端 applyDomHighlighting 才能按段落标黄命中片段
+        parts = []
+        for _line in text.split("\n"):
+            _line = _line.strip()
+            if _line:
+                parts.append(f"<p>{html.escape(_line)}</p>")
+        # CRC 损坏等场景下，zip 兜底能绕过校验读到图片字节，内联成 base64 显示
+        for img_bytes in images:
+            try:
+                import base64 as _b64
+                import io as _io
+                from PIL import Image as _PILImage
+                im = _PILImage.open(_io.BytesIO(img_bytes))
+                fmt = (im.format or "PNG").lower()
+                mime = "image/jpeg" if fmt in ("jpg", "jpeg") else f"image/{fmt}"
+                b64 = _b64.b64encode(img_bytes).decode("ascii")
+                parts.append(f'<img src="data:{mime};base64,{b64}" style="max-width:100%;margin:8px 0" />')
+            except Exception:
+                continue
+        return "\n".join(parts)
 
 
 def file_to_html(file_path: str, ext: str) -> str:

@@ -28,6 +28,8 @@ from ..plagiarism import (
     valid_char_count,
     file_to_html,
     get_char_ngram_set,
+    safe_build_highlight_pdf,
+    make_highlight_cache_key,
     PHRASE_NGRAM,
 )
 from ..crud.plagiarism_suggestion import generate_plagiarism_suggestion
@@ -68,6 +70,37 @@ def _clean_cache():
     while len(_CACHE) > _CACHE_MAX_SIZE:
         k, v = _CACHE.popitem(last=False)
         _delete_cache_files(v)
+
+    # 清理过期的标黄 PDF/docx 产物（hl_ 前缀，含临时查重与作业查重），按文件 mtime 判过期
+    _plag_dir = settings.plagiarism_path
+    if _plag_dir.exists():
+        for _f in _plag_dir.iterdir():
+            if _f.name.startswith("hl_") and _f.suffix in (".pdf", ".docx"):
+                try:
+                    if now - _f.stat().st_mtime > _CACHE_TTL:
+                        _f.unlink()
+                except Exception:
+                    pass
+
+
+def _plagiarism_docx_disk_path(file_url):
+    """从临时查重 fileUrl 还原 docx 磁盘路径（/uploads/plagiarism_tmp/x.docx → plagiarism_path/x.docx）"""
+    if not file_url:
+        return None
+    filename = file_url.replace("/uploads/plagiarism_tmp/", "")
+    p = settings.plagiarism_path / filename
+    return str(p) if p.exists() else None
+
+
+def _build_highlight_pdf_url(namespace, self_id, other_id, docx_path, snippets):
+    """生成标黄 PDF 的访问 URL；docx 为空/无 snippets/生成失败 → 返回 None（前端可回退）"""
+    if not docx_path or not snippets:
+        return None
+    key = make_highlight_cache_key(namespace, self_id, other_id)
+    pdf_path = safe_build_highlight_pdf(docx_path, snippets, key, str(settings.plagiarism_path))
+    if not pdf_path:
+        return None
+    return f"/uploads/plagiarism_tmp/{os.path.basename(pdf_path)}"
 
 
 
@@ -121,14 +154,19 @@ async def adhoc_check(
         try:
             ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
             content_bytes = await f.read()
-            # 保存到 uploads 目录（供对比预览用 docx-preview 渲染原始 Word）
-            saved_name = f"plagiarism_{check_id[:8]}_{len(student_data) + 1}{ext}"
-            saved_path = upload_dir / saved_name
-            saved_path.write_bytes(content_bytes)
-            file_url = f"/uploads/plagiarism_tmp/{saved_name}"
-
-            full_text, images = extract_all_from_file(str(saved_path), ext)
-            html_content = file_to_html(str(saved_path), ext)
+            # 写临时文件提取文本/图片/HTML，提取完即删（不再落盘 plagiarism_tmp，
+            # 前端对比预览用 contentHtml，不需要原始 docx 的 URL）
+            tmp_path = os.path.join(tempfile.gettempdir(), f"plagiarism_{uuid.uuid4().hex}{ext}")
+            with open(tmp_path, "wb") as tmp:
+                tmp.write(content_bytes)
+            try:
+                full_text, images = extract_all_from_file(tmp_path, ext)
+                html_content = file_to_html(tmp_path, ext)
+            finally:
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
 
             # 尝试从文件名解析 姓名_学号
             base = filename.rsplit(".", 1)[0]
@@ -139,10 +177,6 @@ async def adhoc_check(
             # 文本查重数据
             if valid_char_count(full_text) < 40:
                 skipped.append({"fileName": filename, "reason": "有效字符数过少，可能是空白文件"})
-                try:
-                    saved_path.unlink()
-                except Exception:
-                    pass
             else:
                 student_data.append({
                     "id": len(student_data) + 1,
@@ -150,7 +184,7 @@ async def adhoc_check(
                     "studentNumber": stu_id,
                     "content": full_text,
                     "html": html_content,
-                    "fileUrl": file_url,
+                    "fileUrl": "",
                     "ext": ext,
                     "fileName": filename,
                 })
@@ -204,21 +238,56 @@ def compare_files(
     if not file_a or not file_b:
         raise BadRequestException(10011, "未找到指定的文件")
 
-    # 计算公共 N-gram 片段
+    # 计算公共 N-gram 片段（全量返回，供前端 DOM 标黄；只取 top10 会漏标命中段落）
     set_a = get_char_ngram_set(file_a["content"], PHRASE_NGRAM)
     set_b = get_char_ngram_set(file_b["content"], PHRASE_NGRAM)
     common = set_a & set_b
-    snippets = sorted([g for g in common if len(g) >= PHRASE_NGRAM], key=len, reverse=True)[:10]
+    snippets = [g for g in common if len(g) >= PHRASE_NGRAM]
+
+    # 标黄改由前端 HTML + DOM 标黄实现，后端不再生成 PDF（保留字段为 null，前端忽略）
+    pdf_url_a = None
+    pdf_url_b = None
 
     return ok({
         "studentA": {"name": file_a["studentName"], "number": file_a["studentNumber"]},
         "studentB": {"name": file_b["studentName"], "number": file_b["studentNumber"]},
         "fileA": {"fileUrl": file_a.get("fileUrl"), "ext": file_a.get("ext", ""), "fileName": file_a.get("fileName", "")},
         "fileB": {"fileUrl": file_b.get("fileUrl"), "ext": file_b.get("ext", ""), "fileName": file_b.get("fileName", "")},
+        "pdfUrlA": pdf_url_a,
+        "pdfUrlB": pdf_url_b,
         "contentHtmlA": file_a.get("html") or f"<pre>{file_a['content']}</pre>",
         "contentHtmlB": file_b.get("html") or f"<pre>{file_b['content']}</pre>",
         "snippets": snippets,
     })
+
+
+@router.delete("/plagiarism/{check_id}/files")
+def cleanup_check_files(
+    check_id: str,
+    current_user: User = Depends(require_roles("superadmin", "teacher")),
+):
+    """页面退出时清理临时查重文件：删除该 checkId 的原始 word + 标黄 PDF + 内存缓存。
+
+    只用于临时查重工具（adhoc）。学生正式提交的 docx 不走此接口，
+    其标黄 PDF 靠 _clean_cache 的 TTL 过期清理。
+    """
+    cached = _CACHE.pop(check_id, None)
+    if cached:
+        _delete_cache_files(cached)
+
+    # 删除标黄 PDF/docx 中间产物（前缀 hl_{check_id}_）
+    plagiarism_dir = settings.plagiarism_path
+    prefix = f"hl_{check_id}_"
+    removed = 0
+    if plagiarism_dir.exists():
+        for f in plagiarism_dir.iterdir():
+            if f.name.startswith(prefix) and f.suffix in (".pdf", ".docx"):
+                try:
+                    f.unlink()
+                    removed += 1
+                except Exception:
+                    pass
+    return ok({"message": "已清理", "removedFiles": removed})
 
 
 @router.get("/plagiarism/{check_id}/report")
