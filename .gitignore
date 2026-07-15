@@ -101,3 +101,6 @@ backend_python/uploads/*
 # ===== 论文/报告生成 =====
 /gen_report.py
 /科研启航设计论文.docx
+
+.claude/
+CLAUDE.md

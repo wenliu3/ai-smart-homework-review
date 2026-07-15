@@ -15,13 +15,39 @@ def _generate_code() -> str:
 
 def get_list(db: Session, page: int = 1, limit: int = 10, status: str | None = None,
              search: str | None = None, teacher_id: int | None = None,
-             sort_field: str = "createdAt", sort_order: str = "desc") -> dict:
-    """分页查询班级列表 — 支持状态/教师过滤、名称/邀请码搜索，并填充教师姓名"""
+             sort_field: str = "createdAt", sort_order: str = "desc",
+             user_id: int | None = None, user_role: str | None = None) -> dict:
+    """分页查询班级列表 — 支持状态/教师过滤、名称/邀请码搜索，并填充教师姓名。
+
+    数据隔离:
+      - 学生(user_role='student'): 仅返回通过 ClassStudent 加入的班级
+      - 教师(user_role='teacher'): 若未显式指定 teacher_id，默认仅返回自己创建的班级
+      - 管理员(user_role='superadmin'): 不做额外过滤
+    """
     query = db.query(Class)
+
+    # === 按角色做数据隔离 ===
+    if user_role == "student" and user_id:
+        # 学生只能看自己加入的班级
+        joined_ids = db.query(ClassStudent.class_id).filter(
+            ClassStudent.student_id == user_id,
+            ClassStudent.status == "active",
+        ).subquery()
+        query = query.filter(Class.id.in_(joined_ids))
+    elif user_role == "teacher":
+        if teacher_id:
+            # 显式指定了 teacher_id（如管理员查看某教师的班级），按指定值过滤
+            query = query.filter(Class.teacher_id == teacher_id)
+        elif user_id:
+            # 教师默认只看自己创建的班级
+            query = query.filter(Class.teacher_id == user_id)
+    else:
+        # 管理员或其他角色：按 teacher_id 过滤（如有）
+        if teacher_id:
+            query = query.filter(Class.teacher_id == teacher_id)
+
     if status:
         query = query.filter(Class.status == status)
-    if teacher_id:
-        query = query.filter(Class.teacher_id == teacher_id)
     if search:
         kw = f"%{search}%"
         query = query.filter(Class.name.ilike(kw) | Class.code.ilike(kw))

@@ -21,6 +21,10 @@ def _get_model_config(db: Session) -> AiModel:
         config = db.query(AiModel).filter(AiModel.status == "active").first()
     if not config:
         raise ValueError("未配置可用的 AI 模型，请先在系统设置中添加")
+    if not (config.api_key or "").strip():
+        raise ValueError(f"AI 模型「{config.name}」未配置 API Key，请在系统设置中补充")
+    if not (config.base_url or "").strip():
+        raise ValueError(f"AI 模型「{config.name}」未配置 Base URL，请在系统设置中补充")
     return config
 
 

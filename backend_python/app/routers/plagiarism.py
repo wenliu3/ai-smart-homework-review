@@ -431,14 +431,17 @@ def ai_suggestion(
                 key=len, reverse=True,
             )[:10]
 
-    suggestion = generate_plagiarism_suggestion(
-        db,
-        student_name=file_a["studentName"],
-        student_number=file_a["studentNumber"],
-        content=file_a["content"],
-        plagiarism_info=plag_info,
-        compare_name=compare_name,
-        compare_content=compare_content,
-        snippets=snippets,
-    )
+    try:
+        suggestion = generate_plagiarism_suggestion(
+            db,
+            student_name=file_a["studentName"],
+            student_number=file_a["studentNumber"],
+            content=file_a["content"],
+            plagiarism_info=plag_info,
+            compare_name=compare_name,
+            compare_content=compare_content,
+            snippets=snippets,
+        )
+    except ValueError as e:
+        raise BadRequestException(10011, str(e))
     return ok({"suggestion": suggestion})

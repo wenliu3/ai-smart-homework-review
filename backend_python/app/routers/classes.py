@@ -13,13 +13,14 @@ router = APIRouter()
 
 @router.get("/classes/list")
 def get_list(request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """分页查询班级列表 — 支持状态/教师过滤、名称/邀请码搜索"""
+    """分页查询班级列表 — 支持状态/教师过滤、名称/邀请码搜索，自动按角色做数据隔离"""
     q = request.query_params
     return ok(class_crud.get_list(
         db, page=int(q.get("page", 1)), limit=int(q.get("limit", 10)),
         status=q.get("status"), search=q.get("search"),
         teacher_id=int(q["teacherId"]) if q.get("teacherId") else None,
         sort_field=q.get("sortField", "createdAt"), sort_order=q.get("sortOrder", "desc"),
+        user_id=current_user.id, user_role=current_user.role,
     ))
 
 
