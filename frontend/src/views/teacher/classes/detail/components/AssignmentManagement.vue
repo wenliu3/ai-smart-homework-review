@@ -392,10 +392,10 @@ const handleAssignmentCommand = async (
 ) => {
   switch (command) {
     case "view":
-      router.push(`/teacher/assignments/${assignment.id}`);
+      router.push({ path: "/teacher/assignments/detail", query: { id: assignment.id } });
       break;
     case "submissions":
-      router.push(`/teacher/assignments/${assignment.id}/submissions`);
+      router.push({ path: "/teacher/correcting", query: { assignmentId: assignment.id } });
       break;
     case "edit":
       router.push(`/teacher/assignmentsEdit?id=${assignment.id}`);
