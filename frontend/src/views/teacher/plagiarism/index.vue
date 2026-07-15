@@ -357,7 +357,7 @@ const result = ref<AdhocCheckResult | null>(null);
 const templateFile = ref<File | null>(null);
 
 // 查重参数配置
-const DEFAULT_CONFIG = { passRate: 30, phraseWeight: 0.6, topicWeight: 0.4 };
+const DEFAULT_CONFIG = { passRate: 80, phraseWeight: 0.6, topicWeight: 0.4 };
 const configDialogVisible = ref(false);
 const configForm = reactive({ ...DEFAULT_CONFIG });
 const plagiarismConfig = ref<{ passRate?: number; phraseWeight?: number; topicWeight?: number } | null>(null);

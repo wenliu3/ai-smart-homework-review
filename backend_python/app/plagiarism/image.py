@@ -248,12 +248,15 @@ def run_image_plagiarism_check(submissions: list, template_images: list = None) 
         total_imgs = len(all_hashes[i])
         # 单张图片命中时样本量太小，标记低置信度提醒老师
         low_confidence = (total_imgs == 1 and best_matched_count >= 1)
+        # 图片判定：只要有图片哈希匹配（汉明距离 ≤ DISTANCE_THRESHOLD）即判定为疑似抄袭，
+        # 不使用百分比阈值（感知哈希本身已经是高置信度的"同一张图"判定）
+        image_status = "不合格(疑似抄袭)" if best_matched_count > 0 else "合格"
         results.append({
             "submissionId": valid[i]["id"],
             "studentName": valid[i]["studentName"],
             "studentNumber": valid[i]["studentNumber"],
             "imageRate": rate_pct,
-            "status": "不合格(疑似抄袭)" if rate_pct > PASS_RATE else "合格",
+            "status": image_status,
             "matchName": best_match["studentName"] if best_match else "-",
             "matchId": best_match["studentNumber"] if best_match else "-",
             "matchSubmissionId": valid[best_match_idx]["id"] if best_match_idx >= 0 else None,
