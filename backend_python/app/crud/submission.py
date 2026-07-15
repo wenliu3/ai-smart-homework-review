@@ -1,6 +1,7 @@
 """提交 CRUD + AI 批改触发"""
 import os
 import re
+import base64
 import logging
 import httpx
 from sqlalchemy.orm import Session
@@ -8,7 +9,7 @@ from ..database import SessionLocal
 from ..models import User, Assignment, Submission, AiModel
 from ..core.exceptions import BadRequestException, NotFoundException
 from ..core.utils import now
-from ..plagiarism.extractors import extract_file_text
+from ..plagiarism.extractors import extract_file_text, extract_all_from_docx, extract_all_from_file
 from ..plagiarism import get_word_tokens
 from ..config import settings
 
@@ -183,8 +184,23 @@ def teacher_delete_submission(db: Session, submission_id: int, teacher_id: int) 
 
 # ===== AI 批改后台任务 =====
 
+def _encode_image_to_data_uri(image_bytes: bytes) -> str | None:
+    """将图片二进制编码为 data URI（用于多模态 AI 调用）"""
+    try:
+        from PIL import Image
+        import io as _io
+        im = Image.open(_io.BytesIO(image_bytes))
+        fmt = (im.format or "PNG").lower()
+        mime = "image/jpeg" if fmt in ("jpg", "jpeg") else f"image/{fmt}"
+        b64 = base64.b64encode(image_bytes).decode("ascii")
+        return f"data:{mime};base64,{b64}"
+    except Exception as e:
+        logger.warning("图片编码失败: %s", e)
+        return None
+
+
 def trigger_ai_review(submission_id: int):
-    """后台任务: 提取作业文本(含附件)，调用 AI 模型接口进行自动批改，写入得分和评语"""
+    """后台任务: 提取作业文字+图片(多模态)，调用 AI 模型进行自动批改"""
     db = SessionLocal()
     try:
         submission = db.query(Submission).filter(Submission.id == submission_id).first()
@@ -197,30 +213,160 @@ def trigger_ai_review(submission_id: int):
         prompt = ai_rule.get("prompt", "")
         model_type = ai_rule.get("modelType", "deepseek")
 
+        # 构建多模态内容列表 [{"type":"text","text":"..."}, {"type":"image_url","image_url":{"url":"data:..."}}]
+        media_items = []
+        upload_dir = str(settings.upload_path)
+
+        # ---- 0. 老师的作业要求 + 参考附件 ----
+        if assignment.description:
+            desc = re.sub(r"<[^>]*>", "", assignment.description or "").strip()
+            if desc:
+                media_items.append({
+                    "type": "text",
+                    "text": "【老师布置的作业要求】\n" + desc,
+                })
+        teacher_attachments = assignment.attachments or []
+        if teacher_attachments:
+            media_items.append({"type": "text", "text": "\n\n【老师提供的参考附件】"})
+            for t_att in teacher_attachments:
+                t_file_url = t_att.get("fileUrl", "")
+                t_filename = t_file_url.replace("/uploads/", "")
+                t_file_name = t_att.get("fileName", "unknown")
+                t_file_type = str(t_att.get("fileType", ""))
+                t_ext = os.path.splitext(t_file_name)[1].lower()
+
+                if not t_filename:
+                    continue
+
+                t_file_path = os.path.join(upload_dir, t_filename)
+                if not os.path.exists(t_file_path):
+                    continue
+
+                # 老师参考图片
+                if t_file_type.startswith("image/"):
+                    with open(t_file_path, "rb") as f:
+                        img_bytes = f.read()
+                    data_uri = _encode_image_to_data_uri(img_bytes)
+                    if data_uri:
+                        media_items.append({"type": "text", "text": f"\n[参考附件：{t_file_name}]"})
+                        media_items.append({
+                            "type": "image_url",
+                            "image_url": {"url": data_uri},
+                        })
+                    continue
+
+                # 老师参考 docx（含图片）
+                if t_ext == ".docx":
+                    try:
+                        ref_text, ref_images = extract_all_from_docx(t_file_path)
+                        if ref_text and ref_text.strip():
+                            media_items.append({
+                                "type": "text",
+                                "text": f"\n--- 参考「{t_file_name}」文本内容 ---\n{ref_text}",
+                            })
+                        for r_i, r_bytes in enumerate(ref_images):
+                            data_uri = _encode_image_to_data_uri(r_bytes)
+                            if data_uri:
+                                media_items.append({
+                                    "type": "text",
+                                    "text": f"\n[参考「{t_file_name}」内嵌图片 {r_i+1}]",
+                                })
+                                media_items.append({
+                                    "type": "image_url",
+                                    "image_url": {"url": data_uri},
+                                })
+                        if ref_text and ref_text.strip():
+                            continue
+                    except Exception as e:
+                        logger.warning("[AI] 参考docx解析失败: %s: %s", t_file_path, e)
+
+                # 其他参考文件
+                ref_text = extract_file_text(t_file_path, t_ext)
+                if ref_text and ref_text.strip():
+                    media_items.append({
+                        "type": "text",
+                        "text": f"\n--- 参考「{t_file_name}」文本内容 ---\n{ref_text}",
+                    })
+
+        # ---- 1. 学生富文本编辑器内容 ----
+        editor_text = re.sub(r"<[^>]*>", "", submission.content or "").strip()
+        if editor_text:
+            media_items.append({"type": "text", "text": "【学生作业正文】\n" + editor_text})
+
+        # 2. 附件（docx/pdf/txt/图片）
         attachments = submission.attachments or []
-        content_text = re.sub(r"<[^>]*>", "", submission.content or "").strip()
         if attachments:
-            content_text += "\n\n【附件内容】"
-            upload_dir = str(settings.upload_path)
+            media_items.append({"type": "text", "text": "\n\n【附件内容】"})
             for att in attachments:
-                text = ""
                 file_url = att.get("fileUrl", "")
                 filename = file_url.replace("/uploads/", "")
-                if filename:
-                    file_path = os.path.join(upload_dir, filename)
-                    if not os.path.exists(file_path):
-                        logger.warning("[AI] 附件文件不存在: %s, 回退到 textContent", file_path)
-                    ext = os.path.splitext(att.get("fileName", ""))[1].lower()
+                file_type = str(att.get("fileType", ""))
+                file_name = att.get("fileName", "unknown")
+                ext = os.path.splitext(file_name)[1].lower()
+
+                if not filename:
+                    continue
+
+                file_path = os.path.join(upload_dir, filename)
+                file_exists = os.path.exists(file_path)
+
+                # --- 图片附件：直接编码为 base64 送给 AI ---
+                if file_type.startswith("image/"):
+                    if file_exists:
+                        with open(file_path, "rb") as f:
+                            img_bytes = f.read()
+                        data_uri = _encode_image_to_data_uri(img_bytes)
+                        if data_uri:
+                            media_items.append({"type": "text", "text": f"\n[图片附件：{file_name}]"})
+                            media_items.append({
+                                "type": "image_url",
+                                "image_url": {"url": data_uri},
+                            })
+                            continue
+                    media_items.append({"type": "text", "text": f"\n[已上传图片：{file_name}]"})
+                    continue
+
+                # --- docx：同时提取文字和图片 ---
+                if ext == ".docx" and file_exists:
+                    try:
+                        doc_text, doc_images = extract_all_from_docx(file_path)
+                        if doc_text and doc_text.strip():
+                            media_items.append({
+                                "type": "text",
+                                "text": f"\n--- 附件「{file_name}」文本内容 ---\n{doc_text}",
+                            })
+                        for i, img_bytes in enumerate(doc_images):
+                            data_uri = _encode_image_to_data_uri(img_bytes)
+                            if data_uri:
+                                media_items.append({
+                                    "type": "text",
+                                    "text": f"\n[文档「{file_name}」内嵌图片 {i+1}]",
+                                })
+                                media_items.append({
+                                    "type": "image_url",
+                                    "image_url": {"url": data_uri},
+                                })
+                        if doc_text and doc_text.strip():
+                            continue  # 已处理完文字+图片，跳过下面的纯文本提取
+                    except Exception as e:
+                        logger.warning("[AI] docx多模态提取失败: %s: %s", file_path, e)
+
+                # --- 其他文件：仅提取文字 ---
+                text = ""
+                if file_exists:
                     text = extract_file_text(file_path, ext)
-                # 文件不存在或提取失败时，回退到上传时已存储的 textContent
                 if not text or not text.strip():
                     text = att.get("textContent", "")
                 if text and text.strip():
-                    content_text += f"\n--- 附件「{att.get('fileName')}」文本内容 ---\n{text}"
+                    media_items.append({
+                        "type": "text",
+                        "text": f"\n--- 附件「{file_name}」文本内容 ---\n{text}",
+                    })
                 else:
-                    label = "图片" if str(att.get("fileType", "")).startswith("image/") else "文档"
-                    size_kb = (att.get("fileSize") or 0) / 1024
-                    content_text += f"\n[已上传{label}：{att.get('fileName')}，{size_kb:.1f}KB]"
+                    media_items.append({
+                        "type": "text",
+                        "text": f"\n[已上传文件：{file_name}]",
+                    })
 
         model_config = db.query(AiModel).filter(AiModel.code == model_type).first()
         if not model_config or not (model_config.api_key or "").strip():
@@ -228,12 +374,10 @@ def trigger_ai_review(submission_id: int):
             return
 
         try:
-            score, content, tokens = _call_ai_api(model_config, prompt, content_text)
-            # 分数为 None 表示 AI 回复格式不规范，无法提取总分
+            score, content, tokens = _call_ai_api(model_config, prompt, media_items)
             if score is None:
                 submission.ai_review_content = content
                 submission.ai_score = None
-                # 保持 submitted 状态，等待教师人工批改
                 logger.warning("[AI] 分数解析失败: 作业%s, 提交%s", assignment.id, submission.id)
             else:
                 submission.ai_score = score
@@ -245,10 +389,10 @@ def trigger_ai_review(submission_id: int):
                 model_config.total_tokens = (model_config.total_tokens or 0) + (tokens or 100)
                 model_config.last_used_at = now()
                 db.commit()
-            logger.info("[AI] 批改完成: 作业%s, 得分%s", assignment.id, score)
+            logger.info("[AI] 批改完成: 作业%s, 得分%s, 图片数%s", assignment.id, score,
+                        sum(1 for m in media_items if m.get("type") == "image_url"))
         except Exception as e:
             logger.error("[AI] 批改失败: %s", e, exc_info=True)
-            # 标记 AI 批改异常，保留 submitted 状态等待教师人工批改
             try:
                 submission.ai_review_content = f"⚠️ AI批改失败，请教师人工批改。\n\n错误信息：{e}"
                 submission.ai_score = None
@@ -259,24 +403,32 @@ def trigger_ai_review(submission_id: int):
         db.close()
 
 
-def _call_ai_api(model_config: AiModel, system_prompt: str, user_content: str):
-    """调用 OpenAI 兼容格式的 AI 接口(chat/completions) — 从回复中正则提取总分"""
+def _call_ai_api(model_config: AiModel, system_prompt: str, media_items: list[dict]):
+    """调用多模态 AI 接口(OpenAI 兼容 vision format) — 支持文字+图片混合输入"""
     format_instructions = (
         "\n【输出格式要求】\n1. 请使用中文进行批改回答\n"
         "2. 在开头用 **【总分：XX分】** 标明总分\n"
         "3. 每个评分维度用 **1. 维度名：XX分** 格式加粗标注\n"
         "4. 优点用 ✅ 开头，改进建议用 📝 开头\n5. 关键分数和评语用 **粗体** 突出显示\n"
-        "6. 整体评价用简短总结，不要过长"
+        "6. 整体评价用简短总结，不要过长\n"
+        "7. 请结合学生上传的图片内容进行评判（图表、截图、手写内容等）\n"
+        "8. 请对照上方「老师布置的作业要求」和「老师提供的参考附件」，判断学生是否达到要求"
     )
-    full_prompt = f"{system_prompt}\n\n{format_instructions}\n\n【学生作业内容】\n{user_content}"
+
+    # 构建多模态消息内容
+    message_content = [
+        {"type": "text", "text": f"{system_prompt}\n\n{format_instructions}\n\n【学生作业内容】"}
+    ]
+    message_content.extend(media_items)
+
     api_url = f"{model_config.base_url}/chat/completions"
-    with httpx.Client(timeout=60) as client:
+    with httpx.Client(timeout=120) as client:  # 多模态可能较慢，放宽超时
         resp = client.post(api_url, headers={
             "Content-Type": "application/json",
             "Authorization": f"Bearer {model_config.api_key}",
         }, json={
             "model": model_config.model_name,
-            "messages": [{"role": "user", "content": full_prompt}],
+            "messages": [{"role": "user", "content": message_content}],
             "temperature": 0.7, "max_tokens": 2000,
         })
         resp.raise_for_status()
@@ -287,7 +439,6 @@ def _call_ai_api(model_config: AiModel, system_prompt: str, user_content: str):
     if m:
         score = int(m.group(1))
     else:
-        # 分数解析失败：不随机给分，返回 None 让调用方决定处理方式
         score = None
         ai_text = (
             "⚠️ AI 评分解析失败，请教师人工复核。\n\n"

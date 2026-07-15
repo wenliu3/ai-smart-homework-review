@@ -48,6 +48,9 @@ def get_list(db: Session, page: int = 1, limit: int = 10, status: str | None = N
 
     if status:
         query = query.filter(Class.status == status)
+    else:
+        # 无状态筛选时默认排除已解散的班级
+        query = query.filter(Class.status != "disbanded")
     if search:
         kw = f"%{search}%"
         query = query.filter(Class.name.ilike(kw) | Class.code.ilike(kw))
