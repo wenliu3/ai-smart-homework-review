@@ -77,9 +77,54 @@ def update_profile(db: Session, user: User, data: dict) -> dict:
     return user.to_dict(exclude={"password"})
 
 
+def _cleanup_user_relations(db: Session, user_id: int) -> None:
+    """删除用户相关的所有关联记录（外键约束的表），并同步更新班级人数"""
+    from ..models import (
+        RefreshToken, ClassStudent, Submission,
+        AgentChatMessage, Class as ClassModel,
+    )
+    # 先查出该学生所在的班级 ID（用于后续更新 student_count）
+    affected_class_ids = [
+        row[0] for row in
+        db.query(ClassStudent.class_id).filter(ClassStudent.student_id == user_id).all()
+    ]
+    # 刷新令牌
+    db.query(RefreshToken).filter(RefreshToken.user_id == user_id).delete()
+    # 聊天记录
+    db.query(AgentChatMessage).filter(AgentChatMessage.teacher_id == user_id).delete()
+    # 班级-学生关联
+    db.query(ClassStudent).filter(ClassStudent.student_id == user_id).delete()
+    # 提交记录
+    db.query(Submission).filter(Submission.student_id == user_id).delete()
+    db.flush()
+    # 同步更新每个受影响班级的学生人数
+    for cid in affected_class_ids:
+        actual = db.query(ClassStudent).filter(
+            ClassStudent.class_id == cid,
+            ClassStudent.status == "active",
+        ).count()
+        db.query(ClassModel).filter(ClassModel.id == cid).update(
+            {ClassModel.student_count: actual}
+        )
+
+
 def delete_user(db: Session, user_id: int) -> dict:
-    """删除用户"""
+    """删除用户 — 先清理关联数据（刷新令牌/聊天/班级关联/提交），再删用户"""
     user = get_user_by_id(db, user_id)
+
+    # 检查是否有不可自动清理的数据
+    from ..models import Assignment, Class as ClassModel
+    classes_count = db.query(ClassModel).filter(ClassModel.teacher_id == user_id).count()
+    assignments_count = db.query(Assignment).filter(Assignment.teacher_id == user_id).count()
+
+    if classes_count > 0 or assignments_count > 0:
+        raise BadRequestException(
+            10016,
+            f"该用户关联了 {classes_count} 个班级和 {assignments_count} 个作业，"
+            "请先将班级转移给其他教师或删除班级/作业后再删除此用户"
+        )
+
+    _cleanup_user_relations(db, user_id)
     db.delete(user)
     db.commit()
     return {"success": True, "message": "删除成功"}
@@ -149,7 +194,8 @@ def import_users_batch(db: Session, users: list[dict]) -> dict:
 
 
 def delete_users_batch(db: Session, user_ids: list[str]) -> dict:
-    """批量删除用户 — 超级管理员不可删除"""
+    """批量删除用户 — 超级管理员不可删除，有班级/作业的教师不可删除"""
+    from ..models import Assignment, Class as ClassModel
     results = {"success": True, "total": len(user_ids), "successCount": 0, "failureCount": 0, "failures": []}
     for uid in user_ids:
         try:
@@ -162,6 +208,17 @@ def delete_users_batch(db: Session, user_ids: list[str]) -> dict:
                 results["failureCount"] += 1
                 results["failures"].append({"userId": uid, "reason": "不能删除超级管理员"})
                 continue
+            # 检查教师关联
+            classes_count = db.query(ClassModel).filter(ClassModel.teacher_id == user.id).count()
+            assignments_count = db.query(Assignment).filter(Assignment.teacher_id == user.id).count()
+            if classes_count > 0 or assignments_count > 0:
+                results["failureCount"] += 1
+                results["failures"].append({
+                    "userId": uid,
+                    "reason": f"关联了 {classes_count} 个班级和 {assignments_count} 个作业，请先处理",
+                })
+                continue
+            _cleanup_user_relations(db, user.id)
             db.delete(user)
             db.commit()
             results["successCount"] += 1

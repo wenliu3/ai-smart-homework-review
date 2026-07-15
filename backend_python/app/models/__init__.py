@@ -9,8 +9,10 @@ from .ai_rule import AiRule
 from .menu import Menu
 from .role import Role
 from .agent_chat_message import AgentChatMessage
+from .operation_log import OperationLog
 
 __all__ = [
     "User", "RefreshToken", "Class", "ClassStudent", "Assignment",
-    "Submission", "AiModel", "AiRule", "Menu", "Role", "AgentChatMessage"
+    "Submission", "AiModel", "AiRule", "Menu", "Role", "AgentChatMessage",
+    "OperationLog",
 ]

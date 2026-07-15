@@ -12,8 +12,9 @@ from .core.exceptions import BizException
 from .routers import (
     auth, users, classes, assignments, submissions,
     correcting, dashboard, permissions, ai_models, ai_rules, upload,
-    plagiarism, chat,
+    plagiarism, chat, logs,
 )
+from .middleware.operation_log import OperationLogMiddleware
 
 # 启动时自动建表（开发期便捷；生产建议用 alembic 迁移）
 Base.metadata.create_all(bind=engine)
@@ -35,6 +36,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 操作日志中间件（自动记录管理操作）
+app.add_middleware(OperationLogMiddleware)
 
 
 # ===== 全局异常处理（对齐 NestJS HttpExceptionFilter 的 { code, message } 格式）=====
@@ -66,7 +70,7 @@ app.mount("/uploads", StaticFiles(directory=str(settings.upload_path)), name="up
 # ===== 注册路由（全局前缀 /api）=====
 for r in (auth, users, classes, assignments, submissions,
           correcting, dashboard, permissions, ai_models, ai_rules, upload,
-          plagiarism, chat):
+          plagiarism, chat, logs):
     app.include_router(r.router, prefix="/api")
 
 

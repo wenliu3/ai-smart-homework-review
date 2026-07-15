@@ -105,6 +105,19 @@ def update_class(db: Session, class_id: int, teacher_id: int, data: dict) -> dic
     return {"message": "更新成功"}
 
 
+def update_class_admin(db: Session, class_id: int, data: dict) -> dict:
+    """管理员更新班级信息 — 可修改任意班级，可更换授课教师"""
+    cls = db.query(Class).filter(Class.id == class_id).first()
+    if not cls:
+        raise NotFoundException(10015, "班级不存在")
+    for k, v in data.items():
+        col = camel_to_snake(k)
+        if hasattr(cls, col) and col not in ("id", "code"):
+            setattr(cls, col, v)
+    db.commit()
+    return {"message": "更新成功"}
+
+
 def disband_class(db: Session, class_id: int, teacher_id: int) -> dict:
     """解散班级 — 状态置为 disbanded，所有学生状态置为 left"""
     cls = db.query(Class).filter(Class.id == class_id).first()

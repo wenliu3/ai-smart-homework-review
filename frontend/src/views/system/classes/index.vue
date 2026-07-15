@@ -1,295 +1,315 @@
+<!-- 管理员班级管理页面 -->
 <template>
-  <div class="student-classes-page">
+  <div class="classes-management">
+    <!-- 页面头部 -->
+    <div class="page-header-bar">
+      <div>
+        <h1 class="text-2xl font-bold text-gray-800">班级管理</h1>
+        <p class="text-gray-600 mt-1">管理所有班级，可代任意教师创建/编辑/解散班级</p>
+      </div>
+      <div class="header-actions">
+        <el-button
+          type="primary"
+          :icon="Plus"
+          @click="handleCreateClass"
+          size="default"
+        >
+          创建班级
+        </el-button>
+        <el-button
+          :icon="Refresh"
+          @click="refreshData"
+          :loading="loading"
+          size="default"
+        >
+          刷新
+        </el-button>
+      </div>
+    </div>
+
     <!-- 搜索和筛选 -->
-    <div class="filter-section mb-6">
-      <el-form
-        :inline="true"
-        :model="searchForm"
-        class="flex flex-wrap items-center gap-4"
-      >
-        <el-form-item label="班级名称" class="mb-0 w-64">
-          <el-input
-            v-model="searchForm.search"
-            placeholder="搜索班级名称"
-            :prefix-icon="Search"
-            clearable
-            size="default"
-            @keyup.enter="handleSearch"
-          />
-        </el-form-item>
-        <el-form-item label="班级状态" class="mb-0 w-64">
-          <el-select
-            v-model="searchForm.status"
-            placeholder="选择状态"
-            clearable
-            size="default"
-            class="w-full"
-          >
-            <el-option label="活跃" value="active" />
-            <el-option label="暂停" value="inactive" />
-          </el-select>
-        </el-form-item>
-        <el-form-item class="mb-0">
-          <el-button
-            type="primary"
-            :icon="Search"
-            size="default"
-            @click="handleSearch"
-          >
-            搜索
-          </el-button>
-          <el-button size="default" @click="resetSearch"> 重置 </el-button>
-        </el-form-item>
-        <el-form-item class="mb-0 ml-auto">
-          <!-- 布局切换 -->
-          <el-button-group class="mr-3">
-            <el-button
-              :type="viewMode === 'grid' ? 'primary' : 'default'"
-              :icon="Operation"
-              size="default"
-              @click="viewMode = 'grid'"
-              title="网格模式"
+    <div class="search-section">
+      <el-form :inline="true" :model="searchForm" class="search-form">
+        <div class="search-row">
+          <el-form-item label="班级名称">
+            <el-input
+              v-model="searchForm.search"
+              placeholder="搜索班级名称"
+              :prefix-icon="Search"
+              clearable
+              style="width: 200px"
+              @keyup.enter="handleSearch"
             />
-            <el-button
-              :type="viewMode === 'list' ? 'primary' : 'default'"
-              :icon="Menu"
-              size="default"
-              @click="viewMode = 'list'"
-              title="列表模式"
-            />
-          </el-button-group>
-          <el-button
-            type="primary"
-            :icon="Plus"
-            size="default"
-            @click="showJoinDialog = true"
-          >
-            加入班级
-          </el-button>
-        </el-form-item>
+          </el-form-item>
+          <el-form-item label="状态">
+            <el-select
+              v-model="searchForm.status"
+              placeholder="选择状态"
+              clearable
+              style="width: 120px"
+            >
+              <el-option label="活跃" value="active" />
+              <el-option label="暂停" value="inactive" />
+              <el-option label="已解散" value="disbanded" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="教师">
+            <el-select
+              v-model="searchForm.teacherId"
+              placeholder="选择教师"
+              clearable
+              filterable
+              style="width: 160px"
+            >
+              <el-option
+                v-for="t in teacherList"
+                :key="t.id"
+                :label="t.name"
+                :value="t.id"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" :icon="Search" @click="handleSearch">搜索</el-button>
+            <el-button @click="resetSearch">重置</el-button>
+          </el-form-item>
+          <el-form-item class="ml-auto">
+            <el-button-group>
+              <el-button
+                :type="viewMode === 'grid' ? 'primary' : 'default'"
+                :icon="Operation"
+                size="default"
+                @click="viewMode = 'grid'"
+              />
+              <el-button
+                :type="viewMode === 'list' ? 'primary' : 'default'"
+                :icon="Menu"
+                size="default"
+                @click="viewMode = 'list'"
+              />
+            </el-button-group>
+          </el-form-item>
+        </div>
       </el-form>
     </div>
 
     <!-- 班级列表 -->
-    <div
-      v-loading="loading"
-      element-loading-text="加载中..."
-      class="classes-list"
-    >
-      <!-- 空状态 -->
-      <div v-if="classList.length === 0" class="empty-state text-center py-12">
-        <div class="text-6xl mb-4">📚</div>
-        <h3 class="text-lg font-medium text-gray-900 mb-2">暂无班级</h3>
-        <p class="text-gray-500 mb-6">
-          您还没有加入任何班级，点击"加入班级"按钮通过邀请码加入班级
-        </p>
-        <el-button type="primary" :icon="Plus" @click="showJoinDialog = true">
-          加入班级
-        </el-button>
+    <div class="content-section" v-loading="loading" element-loading-text="加载中...">
+      <div v-if="classList.length === 0" class="empty-state">
+        <div class="empty-icon">📚</div>
+        <h3 class="empty-title">暂无班级</h3>
+        <p class="empty-desc">点击"创建班级"按钮开始管理班级</p>
+        <el-button type="primary" :icon="Plus" @click="handleCreateClass">创建班级</el-button>
       </div>
 
-      <!-- 网格模式 -->
-      <div
-        v-else-if="viewMode === 'grid'"
-        class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4"
-      >
-        <ClassCard
-          v-for="classItem in classList"
-          :key="classItem._id"
-          :class-data="classItem"
+      <!-- 使用教师端的 ClassCard 组件 -->
+      <div v-else-if="viewMode === 'grid'" class="classes-grid">
+        <TeacherClassCard
+          v-for="item in classList"
+          :key="item._id"
+          :class-data="item"
           view-mode="grid"
           @view="handleViewClass"
-          @leave="handleLeaveClass"
+          @edit="handleEditClass"
+          @disband="handleDeleteClass"
+          @regenerate-code="handleRegenerateCode"
         />
       </div>
 
-      <!-- 列表模式 -->
-      <div v-else class="space-y-3">
-        <ClassCard
-          v-for="classItem in classList"
-          :key="classItem._id"
-          :class-data="classItem"
+      <div v-else class="classes-list">
+        <TeacherClassCard
+          v-for="item in classList"
+          :key="item._id"
+          :class-data="item"
           view-mode="list"
           @view="handleViewClass"
-          @leave="handleLeaveClass"
+          @edit="handleEditClass"
+          @disband="handleDeleteClass"
+          @regenerate-code="handleRegenerateCode"
         />
       </div>
     </div>
 
     <!-- 分页 -->
-    <div v-if="pagination.total > 0" class="flex justify-center mt-6">
+    <div v-if="pagination.total > 0" class="pagination-section">
       <el-pagination
         :current-page="pagination.page"
         :page-size="pagination.limit"
-        :page-sizes="[6, 12, 18, 24]"
+        :page-sizes="[3, 6, 10, 24, 48]"
         :total="pagination.total"
         background
-        size="default"
         layout="total, sizes, prev, pager, next, jumper"
         @size-change="handleSizeChange"
         @current-change="handleCurrentChange"
       />
     </div>
 
-    <!-- 加入班级对话框 -->
-    <JoinClassDialog v-model="showJoinDialog" @success="handleJoinSuccess" />
+    <!-- 创建/编辑班级对话框（管理员版，可选教师） -->
+    <AdminCreateClassDialog
+      v-model="showCreateDialog"
+      :class-data="editingClass"
+      :teachers="teacherList"
+      @success="handleCreateSuccess"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { Plus, Search, Operation, Menu } from "@element-plus/icons-vue";
+import { Plus, Refresh, Search, Operation, Menu } from "@element-plus/icons-vue";
 import { useRouter } from "vue-router";
-import { getClassList, leaveClass } from "../../../api/classes";
-import type { Class, ClassQueryParams } from "../../../types/classes";
-import ClassCard from "./components/ClassCard.vue";
-import JoinClassDialog from "../../../components/JoinClassDialog.vue";
+import {
+  getClassList,
+  disbandClass,
+  regenerateClassCode,
+} from "../../../api/classes";
+import { getUsers } from "@/api/user";
+import type { Class } from "../../../types/classes";
+import TeacherClassCard from "../../teacher/classes/components/ClassCard.vue";
+import AdminCreateClassDialog from "./components/AdminCreateClassDialog.vue";
 
 const router = useRouter();
 
-// 数据状态
+// 状态
 const loading = ref(false);
 const classList = ref<Class[]>([]);
-const showJoinDialog = ref(false);
+const teacherList = ref<{ id: number; name: string }[]>([]);
+const showCreateDialog = ref(false);
+const editingClass = ref<Class | null>(null);
 const viewMode = ref<"grid" | "list">("grid");
 
-// 搜索表单
-const searchForm = reactive<ClassQueryParams>({
+const searchForm = reactive({
   search: "",
-  status: undefined,
-  sortField: "createdAt",
-  sortOrder: "desc",
+  status: "" as string,
+  teacherId: null as number | null,
 });
 
-// 分页数据
-const pagination = reactive({
-  page: 1,
-  limit: 12,
-  total: 0,
-});
+const pagination = reactive({ page: 1, limit: 10, total: 0 });
+
+// 加载教师列表
+const loadTeachers = async () => {
+  try {
+    const res = await getUsers({ role: "teacher", limit: 100, page: 1 });
+    // 适配后端返回格式
+    const items = (res as any).items || res || [];
+    teacherList.value = items.map((u: any) => ({ id: parseInt(u._id) || u.id, name: u.name }));
+  } catch (e) {
+    console.error("加载教师列表失败:", e);
+  }
+};
 
 // 加载班级列表
 const loadClassList = async () => {
   loading.value = true;
   try {
-    const params: ClassQueryParams = {
+    const params: any = {
       page: pagination.page,
       limit: pagination.limit,
-      ...searchForm,
     };
-
-    // 过滤空值
-    Object.keys(params).forEach((key) => {
-      if (
-        params[key] === "" ||
-        params[key] === undefined ||
-        params[key] === null
-      ) {
-        delete params[key];
-      }
-    });
+    if (searchForm.search) params.search = searchForm.search;
+    if (searchForm.status) params.status = searchForm.status;
+    if (searchForm.teacherId) params.teacherId = searchForm.teacherId;
 
     const response = await getClassList(params);
-    classList.value = response.items;
-    pagination.total = response.total;
+    classList.value = (response as any).items || [];
+    pagination.total = (response as any).total || 0;
   } catch (error) {
     console.error("加载班级列表失败:", error);
-    // 错误提示已在统一请求层处理，此处不重复弹出
   } finally {
     loading.value = false;
   }
 };
 
-// 搜索处理
-const handleSearch = () => {
-  pagination.page = 1;
-  loadClassList();
-};
-
-// 重置搜索
+// 搜索
+const handleSearch = () => { pagination.page = 1; loadClassList(); };
 const resetSearch = () => {
-  Object.assign(searchForm, {
-    search: "",
-    status: undefined,
-    sortField: "createdAt",
-    sortOrder: "desc",
-  });
+  searchForm.search = "";
+  searchForm.status = "";
+  searchForm.teacherId = null;
   pagination.page = 1;
   loadClassList();
 };
+const refreshData = () => loadClassList();
 
-// 分页处理
-const handleSizeChange = (size: number) => {
-  pagination.limit = size;
-  loadClassList();
+// 分页
+const handleSizeChange = (size: number) => { pagination.limit = size; loadClassList(); };
+const handleCurrentChange = (page: number) => { pagination.page = page; loadClassList(); };
+
+// 创建班级
+const handleCreateClass = () => {
+  editingClass.value = null;
+  showCreateDialog.value = true;
 };
 
-const handleCurrentChange = (page: number) => {
-  pagination.page = page;
-  loadClassList();
+// 查看
+const handleViewClass = (classData: Class) => {
+  router.push({ path: "/teacher/classes/detail", query: { id: (classData as any)._id } });
 };
 
-// 查看班级详情
-const handleViewClass = (classItem: Class) => {
-  router.push(`/student/classes/${classItem._id}`);
+// 编辑
+const handleEditClass = (classData: Class) => {
+  editingClass.value = classData;
+  showCreateDialog.value = true;
 };
 
-// 退出班级
-const handleLeaveClass = async (classItem: Class) => {
+// 删除/解散
+const handleDeleteClass = async (classData: Class) => {
   try {
     await ElMessageBox.confirm(
-      `确定要退出班级"${classItem.name}"吗？退出后将无法查看班级内容。`,
-      "确认退出",
-      {
-        confirmButtonText: "确定",
-        cancelButtonText: "取消",
-        type: "warning",
-      }
+      `确定要解散班级"${classData.name}"吗？此操作不可撤销，班级内的学生将无法再查看该班级。`,
+      "确认解散",
+      { confirmButtonText: "确定", cancelButtonText: "取消", type: "warning" }
     );
-
-    await leaveClass(classItem._id);
-    ElMessage.success("已成功退出班级");
+    await disbandClass((classData as any)._id);
+    ElMessage.success("班级已解散");
     loadClassList();
-  } catch (error) {
-    if (error !== "cancel") {
-      console.error("退出班级失败:", error);
-      // 错误提示已在统一请求层处理，此处不重复弹出
-    }
+  } catch (error: any) {
+    if (error !== "cancel") console.error("解散班级失败:", error);
   }
 };
 
-// 加入班级成功回调
-const handleJoinSuccess = () => {
+// 刷新邀请码
+const handleRegenerateCode = async (classData: Class) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要刷新班级"${classData.name}"的邀请码吗？旧邀请码将失效。`,
+      "确认刷新",
+      { confirmButtonText: "确定", cancelButtonText: "取消", type: "warning" }
+    );
+    const response: any = await regenerateClassCode((classData as any)._id);
+    ElMessage.success(`新邀请码：${response.inviteCode || response.code}`);
+    loadClassList();
+  } catch (error: any) {
+    if (error !== "cancel") console.error("刷新邀请码失败:", error);
+  }
+};
+
+const handleCreateSuccess = () => {
+  showCreateDialog.value = false;
+  editingClass.value = null;
   loadClassList();
 };
 
-// 初始化
 onMounted(() => {
+  loadTeachers();
   loadClassList();
 });
 </script>
 
 <style scoped>
-.student-classes-page {
-  background-color: #f8fafc;
-}
-
-.filter-section {
-  background: white;
-  padding: 20px;
-  border-radius: 8px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-}
-
-.classes-list {
-  min-height: 400px;
-}
-
-.empty-state {
-  background: white;
-  border-radius: 8px;
-  padding: 48px 24px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-}
+.classes-management { padding: 20px; background: #fff; border-radius: 8px; }
+.page-header-bar { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid #e4e7ed; }
+.header-actions { display: flex; gap: 12px; }
+.search-section { margin-bottom: 20px; }
+.search-form { background: #fafafa; padding: 16px 20px; border-radius: 8px; border: 1px solid #e5e7eb; }
+.search-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+.content-section { min-height: 400px; background: white; border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+.classes-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px; }
+.classes-list { display: flex; flex-direction: column; gap: 12px; }
+.empty-state { text-align: center; padding: 80px 20px; }
+.empty-icon { font-size: 64px; margin-bottom: 20px; }
+.empty-title { font-size: 20px; font-weight: 600; color: #1f2937; margin: 0 0 12px 0; }
+.empty-desc { font-size: 14px; color: #6b7280; margin: 0 0 24px 0; }
+.pagination-section { margin-top: 24px; display: flex; justify-content: center; }
 </style>

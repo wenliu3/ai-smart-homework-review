@@ -200,10 +200,15 @@ const componentModules = import.meta.glob("../views/**/*.vue");
 function loadComponent(componentPath: string) {
   return async () => {
     // 处理组件路径，去掉开头的斜杠（如果有的话）
-    const cleanComponentPath = componentPath.startsWith('/') 
-      ? componentPath.slice(1) 
+    let cleanComponentPath = componentPath.startsWith('/')
+      ? componentPath.slice(1)
       : componentPath;
-    
+
+    // 种子数据中的路径可能已包含 "views/" 前缀，去掉避免双重拼接
+    if (cleanComponentPath.startsWith('views/')) {
+      cleanComponentPath = cleanComponentPath.slice(6);
+    }
+
     try {
       // 构建完整的模块路径
       const modulePath = `../views/${cleanComponentPath}.vue`;

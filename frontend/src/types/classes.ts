@@ -53,6 +53,7 @@ export interface UpdateClassParams {
   description?: string;
   status?: ClassStatus;
   maxStudents?: number; // 班级最大学生数量，可选
+  teacherId?: number; // 管理员更换授课教师
 }
 
 // 班级查询参数

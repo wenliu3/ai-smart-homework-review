@@ -55,6 +55,20 @@ export function createClass(
 }
 
 /**
+ * 管理员代教师创建班级
+ * @param data 班级信息（含 teacherId）
+ */
+export function createClassForTeacher(
+  data: CreateClassParams & { teacherId: number }
+): Promise<CreateClassApiResponse> {
+  return request({
+    url: "/classes/create",
+    method: "post",
+    data,
+  });
+}
+
+/**
  * 更新班级信息
  * @param id 班级ID
  * @param data 更新数据

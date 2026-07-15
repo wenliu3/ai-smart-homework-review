@@ -72,6 +72,10 @@ export interface ConnectionTestResult {
 
 // 更新模型配置数据
 export interface UpdateAiModelData {
+  name?: string;
+  provider?: string;
+  modelName?: string;
+  baseUrl?: string;
   apiKey?: string;
   accessKey?: string;
   secretKey?: string;

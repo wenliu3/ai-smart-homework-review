@@ -30,10 +30,21 @@
       <!-- DeepSeek 配置标签页 -->
       <el-tab-pane label="🤖 DeepSeek" name="deepseek">
         <div class="model-config-form" v-loading="loading">
-          <!-- 基本信息展示 -->
+          <!-- 基本信息展示/编辑 -->
           <div class="model-info-section mb-6">
-            <h3 class="text-lg font-semibold mb-3">基本信息</h3>
-            <el-descriptions :column="2" border v-if="deepseekModel">
+            <div class="section-header">
+              <h3 class="text-lg font-semibold mb-0">基本信息</h3>
+              <el-button
+                size="small"
+                :type="editingBasic.deepseek ? 'warning' : 'primary'"
+                @click="toggleEditBasic('deepseek')"
+              >
+                {{ editingBasic.deepseek ? "取消编辑" : "编辑" }}
+              </el-button>
+            </div>
+
+            <!-- 查看模式 -->
+            <el-descriptions :column="2" border v-if="deepseekModel && !editingBasic.deepseek">
               <el-descriptions-item label="模型名称">{{
                 deepseekModel.name
               }}</el-descriptions-item>
@@ -47,6 +58,44 @@
                 deepseekModel.baseUrl
               }}</el-descriptions-item>
             </el-descriptions>
+
+            <!-- 编辑模式 -->
+            <el-form
+              :model="deepseekBasicForm"
+              label-width="100px"
+              v-if="deepseekModel && editingBasic.deepseek"
+            >
+              <el-row :gutter="20">
+                <el-col :span="12">
+                  <el-form-item label="模型名称">
+                    <el-input v-model="deepseekBasicForm.name" />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="12">
+                  <el-form-item label="提供商">
+                    <el-input v-model="deepseekBasicForm.provider" />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="12">
+                  <el-form-item label="模型版本">
+                    <el-input v-model="deepseekBasicForm.modelName" />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="12">
+                  <el-form-item label="API地址">
+                    <el-input v-model="deepseekBasicForm.baseUrl" />
+                  </el-form-item>
+                </el-col>
+              </el-row>
+              <el-button
+                type="primary"
+                size="small"
+                @click="saveBasicInfo('deepseek')"
+                :loading="savingBasic"
+              >
+                保存基本信息
+              </el-button>
+            </el-form>
           </div>
 
           <!-- 配置表单 -->
@@ -158,10 +207,21 @@
       <!-- 小米 配置标签页 -->
       <el-tab-pane label="📱 小米" name="mimo">
         <div class="model-config-form" v-loading="loading">
-          <!-- 基本信息展示 -->
+          <!-- 基本信息展示/编辑 -->
           <div class="model-info-section mb-6">
-            <h3 class="text-lg font-semibold mb-3">基本信息</h3>
-            <el-descriptions :column="2" border v-if="mimoModel">
+            <div class="section-header">
+              <h3 class="text-lg font-semibold mb-0">基本信息</h3>
+              <el-button
+                size="small"
+                :type="editingBasic.mimo ? 'warning' : 'primary'"
+                @click="toggleEditBasic('mimo')"
+              >
+                {{ editingBasic.mimo ? "取消编辑" : "编辑" }}
+              </el-button>
+            </div>
+
+            <!-- 查看模式 -->
+            <el-descriptions :column="2" border v-if="mimoModel && !editingBasic.mimo">
               <el-descriptions-item label="模型名称">{{
                 mimoModel.name
               }}</el-descriptions-item>
@@ -175,6 +235,44 @@
                 mimoModel.baseUrl
               }}</el-descriptions-item>
             </el-descriptions>
+
+            <!-- 编辑模式 -->
+            <el-form
+              :model="mimoBasicForm"
+              label-width="100px"
+              v-if="mimoModel && editingBasic.mimo"
+            >
+              <el-row :gutter="20">
+                <el-col :span="12">
+                  <el-form-item label="模型名称">
+                    <el-input v-model="mimoBasicForm.name" />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="12">
+                  <el-form-item label="提供商">
+                    <el-input v-model="mimoBasicForm.provider" />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="12">
+                  <el-form-item label="模型版本">
+                    <el-input v-model="mimoBasicForm.modelName" />
+                  </el-form-item>
+                </el-col>
+                <el-col :span="12">
+                  <el-form-item label="API地址">
+                    <el-input v-model="mimoBasicForm.baseUrl" />
+                  </el-form-item>
+                </el-col>
+              </el-row>
+              <el-button
+                type="primary"
+                size="small"
+                @click="saveBasicInfo('mimo')"
+                :loading="savingBasic"
+              >
+                保存基本信息
+              </el-button>
+            </el-form>
           </div>
 
           <!-- 配置表单 -->
@@ -293,6 +391,7 @@ import { aiModelApi, type AiModel, type ModelBalance } from "@/api/ai-models";
 const activeTab = ref("deepseek");
 const loading = ref(false);
 const saving = ref(false);
+const savingBasic = ref(false);
 const balanceLoading = reactive({ deepseek: false, mimo: false });
 const testLoading = reactive({ deepseek: false, mimo: false });
 
@@ -300,6 +399,9 @@ const deepseekModel = ref<AiModel | null>(null);
 const mimoModel = ref<AiModel | null>(null);
 const deepseekBalance = ref<ModelBalance | null>(null);
 const mimoBalance = ref<ModelBalance | null>(null);
+
+// 基本信息编辑状态
+const editingBasic = reactive({ deepseek: false, mimo: false });
 
 // 表单数据
 const deepseekForm = reactive({
@@ -312,6 +414,21 @@ const mimoForm = reactive({
   apiKey: "",
   status: "active" as "active" | "inactive",
   isDefault: false,
+});
+
+// 基本信息编辑表单
+const deepseekBasicForm = reactive({
+  name: "",
+  provider: "",
+  modelName: "",
+  baseUrl: "",
+});
+
+const mimoBasicForm = reactive({
+  name: "",
+  provider: "",
+  modelName: "",
+  baseUrl: "",
 });
 
 // 计算属性
@@ -340,6 +457,10 @@ const loadModelData = async () => {
       deepseekForm.apiKey = deepseek.apiKey;
       deepseekForm.status = deepseek.status;
       deepseekForm.isDefault = deepseek.isDefault;
+      deepseekBasicForm.name = deepseek.name;
+      deepseekBasicForm.provider = deepseek.provider;
+      deepseekBasicForm.modelName = deepseek.modelName;
+      deepseekBasicForm.baseUrl = deepseek.baseUrl;
     }
 
     if (mimo) {
@@ -347,6 +468,10 @@ const loadModelData = async () => {
       mimoForm.apiKey = mimo.apiKey;
       mimoForm.status = mimo.status;
       mimoForm.isDefault = mimo.isDefault;
+      mimoBasicForm.name = mimo.name;
+      mimoBasicForm.provider = mimo.provider;
+      mimoBasicForm.modelName = mimo.modelName;
+      mimoBasicForm.baseUrl = mimo.baseUrl;
     }
 
     // 加载余额信息
@@ -388,6 +513,12 @@ const saveConfig = async (code: "deepseek" | "mimo") => {
 
   saving.value = true;
   try {
+    // 如果设为默认，前端先清除另一个模型的 isDefault
+    if (form.isDefault) {
+      const other = code === "deepseek" ? mimoForm : deepseekForm;
+      other.isDefault = false;
+    }
+
     const updateData: any = {
       apiKey: form.apiKey,
       status: form.status,
@@ -403,10 +534,15 @@ const saveConfig = async (code: "deepseek" | "mimo") => {
       mimoModel.value = updatedModel;
     }
 
+    // 如果设为默认，也调用专门的 setDefault 接口确保后端互斥
+    if (form.isDefault) {
+      await aiModelApi.setDefault(code);
+    }
+
     ElMessage.success("配置保存成功");
 
-    // 自动测试连接
-    await testConnection(code);
+    // 重新加载所有数据以同步状态
+    await loadModelData();
   } catch (error: any) {
     console.error("保存配置失败:", error);
     ElMessage.error(error.message || "保存配置失败");
@@ -460,6 +596,57 @@ const testConnection = async (code: "deepseek" | "mimo") => {
     ElMessage.error(error.message || "连接测试失败");
   } finally {
     testLoading[code] = false;
+  }
+};
+
+const toggleEditBasic = (code: "deepseek" | "mimo") => {
+  const editing = editingBasic[code];
+  if (!editing) {
+    // 进入编辑模式时，用当前模型数据填充表单
+    const model = code === "deepseek" ? deepseekModel.value : mimoModel.value;
+    const form = code === "deepseek" ? deepseekBasicForm : mimoBasicForm;
+    if (model) {
+      form.name = model.name;
+      form.provider = model.provider;
+      form.modelName = model.modelName;
+      form.baseUrl = model.baseUrl;
+    }
+  }
+  editingBasic[code] = !editing;
+};
+
+const saveBasicInfo = async (code: "deepseek" | "mimo") => {
+  const form = code === "deepseek" ? deepseekBasicForm : mimoBasicForm;
+
+  if (!form.name.trim() || !form.baseUrl.trim()) {
+    ElMessage.warning("模型名称和API地址不能为空");
+    return;
+  }
+
+  savingBasic.value = true;
+  try {
+    const updateData = {
+      name: form.name,
+      provider: form.provider,
+      modelName: form.modelName,
+      baseUrl: form.baseUrl,
+    };
+
+    const updatedModel = await aiModelApi.updateConfig(code, updateData);
+
+    if (code === "deepseek") {
+      deepseekModel.value = updatedModel;
+    } else {
+      mimoModel.value = updatedModel;
+    }
+
+    editingBasic[code] = false;
+    ElMessage.success("基本信息保存成功");
+  } catch (error: any) {
+    console.error("保存基本信息失败:", error);
+    ElMessage.error(error.message || "保存基本信息失败");
+  } finally {
+    savingBasic.value = false;
   }
 };
 
@@ -584,6 +771,13 @@ onUnmounted(() => {
   padding: 16px;
   border-radius: 6px;
   border: 1px solid #e4e7ed;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
 }
 
 .form-actions {

@@ -32,14 +32,22 @@ def get_detail(class_id: int, current_user: User = Depends(get_current_user), db
 
 @router.post("/classes/create")
 def create_class(body: ClassCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """创建班级 — 自动生成唯一邀请码"""
-    return ok(class_crud.create_class(db, current_user.id, body.model_dump()))
+    """创建班级 — 管理员可指定 teacherId 代教师创建，教师则自动使用自身ID"""
+    data = body.model_dump()
+    # 管理员代创建：若指定了 teacherId 且当前用户为 superadmin，则替该教师创建
+    if current_user.role == "superadmin" and data.get("teacherId"):
+        return ok(class_crud.create_class(db, data["teacherId"], data))
+    return ok(class_crud.create_class(db, current_user.id, data))
 
 
 @router.post("/classes/{class_id}/edit")
 def update_class(class_id: int, body: ClassUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """更新班级信息 — 仅班级创建教师可操作"""
-    return ok(class_crud.update_class(db, class_id, current_user.id, body.model_dump(exclude_unset=True)))
+    """更新班级信息 — 教师本人或管理员可操作，管理员可更换授课教师"""
+    data = body.model_dump(exclude_unset=True)
+    # 管理员可指定新教师
+    if current_user.role == "superadmin":
+        return ok(class_crud.update_class_admin(db, class_id, data))
+    return ok(class_crud.update_class(db, class_id, current_user.id, data))
 
 
 @router.post("/classes/{class_id}/close")
