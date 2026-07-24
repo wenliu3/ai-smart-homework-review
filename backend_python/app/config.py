@@ -9,6 +9,8 @@ class Settings(BaseSettings):
 
     # 数据库
     DATABASE_URL: str = "mysql+pymysql://root:123456@localhost:3306/ai_smart_review?charset=utf8mb4"
+    # AI 助手会话库（PostgreSQL）：存储 AI 聊天历史；业务数据仍在 MySQL
+    ASSISTANT_DATABASE_URL: str = "postgresql://langgraph_user:123456@localhost:5432/ai_smart_review?sslmode=disable"
 
     # JWT
     JWT_SECRET: str = "ai-smart-review-secret-key-2026"

@@ -1,42 +1,58 @@
-"""pytest 全局夹具：隔离 SQLite 测试库、TestClient、用户/令牌/AI 模型工厂。
+"""pytest 全局夹具：双库（MySQL/PG 均用 SQLite 替身）隔离、TestClient、工厂夹具。
 
-DATABASE_URL 必须在导入任何 app 模块之前设置：
-settings 在 app.config 导入时读取环境变量；sqlite URL 会让
-app.database._ensure_database() 正则不匹配直接跳过，完全不触达 MySQL。
+DATABASE_URL / ASSISTANT_DATABASE_URL 必须在导入任何 app 模块之前设置：
+settings 在 app.config 导入时读取环境变量；sqlite URL 会让两个
+_ensure_database() 正则不匹配直接跳过，完全不触达 MySQL/PostgreSQL。
 """
 import os
 from pathlib import Path
 
-_TEST_DB_PATH = Path(__file__).parent / ".pytest.db"
-os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_DB_PATH.as_posix()}"
+_TEST_DIR = Path(__file__).parent
+os.environ["DATABASE_URL"] = f"sqlite:///{(_TEST_DIR / '.pytest_biz.db').as_posix()}"
+os.environ["ASSISTANT_DATABASE_URL"] = f"sqlite:///{(_TEST_DIR / '.pytest_assistant.db').as_posix()}"
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app.assistant_database import AssistantBase, AssistantSessionLocal, assistant_engine
 from app.core.security import create_access_token, hash_password
 from app.database import Base, SessionLocal, engine
 from app.models import AiModel, User
 
 
-def _truncate_all_tables() -> None:
-    """清空全部表（按外键反向顺序），避免重复书写 setup/teardown 清空逻辑。"""
-    with engine.begin() as conn:
-        for table in reversed(Base.metadata.sorted_tables):
+def _truncate_all(engine_, metadata) -> None:
+    """清空指定库的全部表（按外键反向顺序），setup/teardown 复用。"""
+    with engine_.begin() as conn:
+        for table in reversed(metadata.sorted_tables):
             conn.execute(table.delete())
 
 
 @pytest.fixture(autouse=True)
 def _clean_db():
-    """每个测试前建表+清空、测试后再清空，保证用例隔离（含上次 pytest 中断残留）。"""
+    """每个测试前建表+清空、测试后再清空（双库），保证用例隔离（含上次中断残留）。"""
     Base.metadata.create_all(bind=engine)
-    _truncate_all_tables()
+    AssistantBase.metadata.create_all(bind=assistant_engine)
+    _truncate_all(engine, Base.metadata)
+    _truncate_all(assistant_engine, AssistantBase.metadata)
     yield
-    _truncate_all_tables()
+    _truncate_all(engine, Base.metadata)
+    _truncate_all(assistant_engine, AssistantBase.metadata)
 
 
 @pytest.fixture()
 def db():
+    """业务库（MySQL）会话。"""
     session = SessionLocal()
+    try:
+        yield session
+    finally:
+        session.close()
+
+
+@pytest.fixture()
+def assistant_db():
+    """会话库（PostgreSQL）会话。"""
+    session = AssistantSessionLocal()
     try:
         yield session
     finally:
