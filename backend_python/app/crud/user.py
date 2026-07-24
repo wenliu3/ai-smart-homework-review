@@ -78,7 +78,13 @@ def update_profile(db: Session, user: User, data: dict) -> dict:
 
 
 def _cleanup_user_relations(db: Session, user_id: int) -> None:
-    """删除用户相关的所有关联记录（外键约束的表），并同步更新班级人数"""
+    """删除用户相关的所有关联记录（外键约束的表），并同步更新班级人数。
+
+    注意：AgentChatMessage 已迁移到 PostgreSQL 会话库（AssistantBase），
+    MySQL 业务库中没有该表，需用独立的 AssistantSessionLocal 清理；
+    RefreshToken/ClassStudent/Submission/班级人数同步仍走 MySQL 业务库 db。
+    """
+    from ..assistant_database import AssistantSessionLocal
     from ..models import (
         RefreshToken, ClassStudent, Submission,
         AgentChatMessage, Class as ClassModel,
@@ -90,8 +96,10 @@ def _cleanup_user_relations(db: Session, user_id: int) -> None:
     ]
     # 刷新令牌
     db.query(RefreshToken).filter(RefreshToken.user_id == user_id).delete()
-    # 聊天记录
-    db.query(AgentChatMessage).filter(AgentChatMessage.teacher_id == user_id).delete()
+    # 聊天记录（AgentChatMessage 已迁到 PostgreSQL 会话库，用独立 PG session 清理）
+    with AssistantSessionLocal() as sdb:
+        sdb.query(AgentChatMessage).filter(AgentChatMessage.teacher_id == user_id).delete()
+        sdb.commit()
     # 班级-学生关联
     db.query(ClassStudent).filter(ClassStudent.student_id == user_id).delete()
     # 提交记录
