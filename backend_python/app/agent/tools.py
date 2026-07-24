@@ -1,4 +1,5 @@
 """教师助手 Agent 工具集 — 每个工具封装一个数据库查询能力"""
+import functools
 from dataclasses import dataclass
 from langchain.tools import tool, ToolRuntime
 from sqlalchemy import func
@@ -19,9 +20,22 @@ class TeacherContext:
     teacher_id: int
 
 
+def _safe_tool(fn):
+    """工具异常友好降级：DB 抖动等异常时返回友好提示，
+    避免 traceback 经 ToolMessage 泄露给 LLM 导致奇怪回答。"""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except Exception:
+            return "查询暂时失败，请稍后再试。"
+    return wrapper
+
+
 # ========== 班级相关 ==========
 
 @tool(parse_docstring=True, error_on_invalid_docstring=False)
+@_safe_tool
 def get_teacher_classes(runtime: ToolRuntime[TeacherContext]) -> str:
     """查询当前教师的所有班级列表，包含班级名称、学生人数、状态；当教师询问"我有几个班级"或"班级情况"时使用。"""
     teacher_id = runtime.context.teacher_id
@@ -39,6 +53,7 @@ def get_teacher_classes(runtime: ToolRuntime[TeacherContext]) -> str:
 
 
 @tool(parse_docstring=True, error_on_invalid_docstring=False)
+@_safe_tool
 def get_class_students(class_id: int, runtime: ToolRuntime[TeacherContext]) -> str:
     """查询指定班级的学生列表，包含姓名、学号、状态；只能查询当前教师自己名下的班级，当教师询问"某班有哪些学生"时使用。
 
@@ -83,6 +98,7 @@ def get_class_students(class_id: int, runtime: ToolRuntime[TeacherContext]) -> s
 # ========== 作业相关 ==========
 
 @tool(parse_docstring=True, error_on_invalid_docstring=False)
+@_safe_tool
 def get_teacher_assignments(runtime: ToolRuntime[TeacherContext]) -> str:
     """查询当前教师的所有作业列表，包含标题、状态、截止时间；当教师询问"我的作业"或"发布了几个作业"时使用。"""
     teacher_id = runtime.context.teacher_id
@@ -104,6 +120,7 @@ def get_teacher_assignments(runtime: ToolRuntime[TeacherContext]) -> str:
 
 
 @tool(parse_docstring=True, error_on_invalid_docstring=False)
+@_safe_tool
 def get_assignment_submissions(assignment_id: int, runtime: ToolRuntime[TeacherContext]) -> str:
     """查询某作业下所有学生的提交情况，包含提交状态、AI分数、教师分数；只能查询当前教师自己创建的作业，当教师询问"这个作业交了多少人"或"批改进度"时使用。
 
@@ -151,6 +168,7 @@ def get_assignment_submissions(assignment_id: int, runtime: ToolRuntime[TeacherC
 # ========== 学生相关 ==========
 
 @tool(parse_docstring=True, error_on_invalid_docstring=False)
+@_safe_tool
 def get_student_info(student_name_or_id: str, runtime: ToolRuntime[TeacherContext]) -> str:
     """按姓名或学号查询学生信息及其提交记录；只能查询当前教师所带班级中的学生，当教师询问"某学生的信息"或"某某的成绩"时使用。
 
@@ -211,6 +229,7 @@ def get_student_info(student_name_or_id: str, runtime: ToolRuntime[TeacherContex
 # ========== 统计相关 ==========
 
 @tool(parse_docstring=True, error_on_invalid_docstring=False)
+@_safe_tool
 def get_teacher_dashboard_stats(runtime: ToolRuntime[TeacherContext]) -> str:
     """查询教师看板统计数据，包含班级数、学生数、作业数、待批改数等；当教师询问"我的教学概况"或"整体数据"时使用。"""
     teacher_id = runtime.context.teacher_id
@@ -248,6 +267,7 @@ def get_teacher_dashboard_stats(runtime: ToolRuntime[TeacherContext]) -> str:
 
 
 @tool(parse_docstring=True, error_on_invalid_docstring=False)
+@_safe_tool
 def get_pending_reviews(runtime: ToolRuntime[TeacherContext]) -> str:
     """查询当前教师的待批改提交列表；当教师询问"有哪些待批改"或"还没改的作业"时使用。"""
     teacher_id = runtime.context.teacher_id

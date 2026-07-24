@@ -1,4 +1,5 @@
 import logging
+import re
 
 from fastapi import APIRouter, Depends
 from fastapi.sse import EventSourceResponse, ServerSentEvent
@@ -13,8 +14,14 @@ from ..models import AgentChatMessage, User
 from ..deps import get_current_user
 from ..database import SessionLocal, get_db
 from ..core.response import ok
+from ..core.exceptions import BadRequestException
 
 router = APIRouter()
+
+# session_id 格式：8-64 位字母数字/下划线/连字符
+# 前端用 Date.now().toString(36) + Math.random().toString(36) 生成，符合此格式
+# 校验防止同一教师用任意字符串拼接历史，也避免特殊字符注入
+_SESSION_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{8,64}$")
 
 
 class ChatRequest(BaseModel):
@@ -27,6 +34,9 @@ def chat_stream(
     req: ChatRequest,
     teacher: User = Depends(get_current_user),
 ):
+    # 校验 session_id 格式，防止任意字符串拼接历史
+    if not _SESSION_ID_PATTERN.match(req.session_id):
+        raise BadRequestException(10011, "session_id 格式非法，需为 8-64 位字母数字/下划线/连字符")
     # 用短事务查历史 + 构建 agent，查询完成后立即释放连接池连接。
     # SSE 流式生成可能耗时 30s+，不能让 get_db 在此期间持有连接。
     with SessionLocal() as db:
