@@ -22,3 +22,6 @@ class Submission(Base, TimestampMixin, ModelMixin):
     teacher_reviewed_at = Column(DateTime, nullable=True)
     is_draft = Column(Boolean, default=False)
     submission_count = Column(Integer, default=1)
+    # 最近一次 AI 批改运行（PG agent_runs.id，sha256 hex）；
+    # 学生轮询进度、教师查分维度产物都经由它定位 run
+    grading_run_id = Column(String(64), nullable=True, index=True)

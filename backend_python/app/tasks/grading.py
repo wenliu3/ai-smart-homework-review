@@ -3,20 +3,37 @@ from __future__ import annotations
 
 import hashlib
 
+from celery.exceptions import SoftTimeLimitExceeded
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from ..agent.graphs.grading import build_grading_graph
+from ..agent.runtime import BudgetExceeded, grading_run_budget
 from ..agent.subagents import grading, grading_review
-from ..agent.tools.content import normalize_submission_content
+from ..agent.tools.content import (
+    extract_reference_materials,
+    normalize_submission_content,
+)
 from ..assistant_database import AssistantSessionLocal
-from ..agent.contracts import GradingRubric, RubricCriterion
+from ..agent.contracts import (
+    AGENT_GRADING_TIMEOUT,
+    GradingRubric,
+    RubricCriterion,
+)
 from ..config import settings
 from ..crud import agent_run, agent_session
-from ..crud.submission import apply_ai_grading_result
+from ..crud.submission import (
+    apply_ai_grading_result,
+    mark_submission_needs_manual_grading,
+)
 from ..database import SessionLocal
 from ..models import AgentRun, AgentSession, Assignment, Submission
 from .celery_app import celery_app
+
+# 降级转人工时写给教师端的提示（服务端文案，不经模型）
+MANUAL_GRADING_NOTE = (
+    "⚠️ AI 批改未能生成有效的结构化评分，本次提交需要教师人工批改。"
+)
 
 
 def build_grading_idempotency_key(
@@ -144,6 +161,7 @@ def enqueue_grading_job(
         .first()
     )
     if existing is not None:
+        _record_grading_run_id(business_db, submission, existing.id)
         return existing.id
 
     deterministic_run_id = hashlib.sha256(key.encode("utf-8")).hexdigest()
@@ -162,6 +180,7 @@ def enqueue_grading_job(
         run = agent_run.get_run(run_db, deterministic_run_id, user_id)
         if run is None:
             raise
+        _record_grading_run_id(business_db, submission, run.id)
         return run.id
     try:
         run_grading_task.delay(
@@ -179,7 +198,41 @@ def enqueue_grading_job(
             "AGENT_QUEUE_UNAVAILABLE",
         )
         raise
+    _record_grading_run_id(business_db, submission, run.id)
     return run.id
+
+
+def _record_grading_run_id(
+    business_db: Session,
+    submission: Submission,
+    run_id: str,
+) -> None:
+    """把批改 run 记到提交行：学生轮询进度、教师查产物都由此定位。"""
+    if submission.grading_run_id == run_id:
+        return
+    submission.grading_run_id = run_id
+    business_db.commit()
+
+
+def build_grading_state(
+    submission: Submission,
+    assignment: Assignment,
+    rubric: GradingRubric,
+    upload_dir=None,
+) -> dict:
+    """构造批改图初始状态：作业要求 + 参考资料 + 预算（规划 3B.1 / 3B.2）。"""
+    base = upload_dir if upload_dir is not None else settings.upload_path
+    return {
+        "submission_id": submission.id,
+        "submission_count": submission.submission_count,
+        "rubric": rubric,
+        "assignment_description": (assignment.description or "").strip(),
+        "reference_materials": extract_reference_materials(
+            assignment.attachments or [],
+            base,
+        ),
+        "runtime_budget": grading_run_budget(),
+    }
 
 
 def _run_production_workflow(
@@ -202,11 +255,7 @@ def _run_production_workflow(
         grading.create_node(business_db),
         grading_review.create_node(business_db),
     )
-    return graph.invoke({
-        "submission_id": submission.id,
-        "submission_count": submission.submission_count,
-        "rubric": rubric,
-    })
+    return graph.invoke(build_grading_state(submission, assignment, rubric))
 
 
 def execute_grading_job(
@@ -290,8 +339,18 @@ def execute_grading_job(
             raise ValueError("评分量表版本已变化")
 
         runner = workflow_runner or _run_production_workflow
-        graph_result = runner(biz, submission, assignment, rubric)
-        outcome = graph_result["outcome"]
+        try:
+            graph_result = runner(biz, submission, assignment, rubric)
+        except BudgetExceeded as exc:
+            # 预算耗尽与结构化失败同等处理：转人工，不丢结果不炸任务
+            graph_result = {
+                "grading_failure": {
+                    "stage": "budget",
+                    "error": str(exc),
+                    "raw_response": "",
+                },
+                "visited_nodes": [],
+            }
         for node_name in graph_result.get("visited_nodes", []):
             agent_run.append_step(
                 audit,
@@ -306,6 +365,30 @@ def execute_grading_job(
         if current_run is None or current_run.status == "cancelled":
             return {"status": "cancelled", "run_id": run_id}
 
+        failure = graph_result.get("grading_failure")
+        if failure:
+            # 降级转人工：原始草案留证到 Artifact，教师端拿到明确提示；
+            # run 记为 completed——这是受控降级，不是任务失败
+            mark_submission_needs_manual_grading(
+                biz,
+                submission_id=submission_id,
+                expected_submission_count=submission_count,
+                note=MANUAL_GRADING_NOTE,
+            )
+            agent_run.finalize_run(
+                audit,
+                run_id,
+                user_id,
+                final_output="AI 批改未通过结构化校验，已转教师人工批改。",
+                artifacts=[{
+                    "artifact_type": "grading_raw_draft",
+                    "schema_version": "v1",
+                    "payload": failure,
+                }],
+            )
+            return {"status": "completed", "run_id": run_id}
+
+        outcome = graph_result["outcome"]
         applied = apply_ai_grading_result(
             biz,
             submission_id=submission_id,
@@ -334,6 +417,23 @@ def execute_grading_job(
             }],
         )
         return {"status": status, "run_id": run_id}
+    except SoftTimeLimitExceeded:
+        # Celery 软超时：预算应先于它触发，走到这里说明 worker 卡死，
+        # 用独立错误码标记以便与普通失败区分（运营排查队列拥塞）
+        try:
+            existing = agent_run.get_run(audit, run_id, user_id)
+            if (
+                existing is not None
+                and existing.status in {"running", "processing"}
+            ):
+                agent_run.fail_run(
+                    audit,
+                    run_id,
+                    user_id,
+                    AGENT_GRADING_TIMEOUT,
+                )
+        finally:
+            raise
     except Exception:
         try:
             existing = agent_run.get_run(audit, run_id, user_id)
@@ -361,6 +461,10 @@ def execute_grading_job(
     name="agent.grading.run",
     acks_late=True,
     reject_on_worker_lost=True,
+    # 与 grading_run_budget 的 120s 对齐：预算超时优先走结构化降级，
+    # soft_time_limit 是 worker 卡死时的最后兜底；hard limit 再留 30s 清理余量
+    soft_time_limit=120,
+    time_limit=150,
 )
 def run_grading_task(
     self,

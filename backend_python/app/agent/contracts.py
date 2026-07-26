@@ -244,6 +244,17 @@ class GradingDraft(BaseModel):
     items: list[CriterionGrade] = Field(min_length=1)
     summary: str = Field(min_length=1, max_length=8000)
     limitations: list[str] = Field(default_factory=list)
+    # 模型自评置信度（0-1）；None 表示模型未给出（规格 §8.2）
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    # 模型主动请求人工复核时必须说明原因，供教师端展示
+    requires_human_review: bool = False
+    review_reasons: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def require_reason_when_requesting_review(self):
+        if self.requires_human_review and not self.review_reasons:
+            raise ValueError("请求人工复核时必须说明原因")
+        return self
 
     @computed_field
     @property
@@ -282,6 +293,8 @@ class GradingOutcome(BaseModel):
     review: GradingDraft
     score_difference: float = Field(ge=0)
     needs_human_review: bool
+    # 转人工的机器可读原因清单（分差超限/证据缺失/模型自报低置信等）
+    review_reasons: list[str] = Field(default_factory=list)
 
 
 class SubmissionTextBlock(BaseModel):
@@ -392,6 +405,8 @@ AGENT_CHAT_ERROR = "AGENT_CHAT_ERROR"
 AGENT_MODEL_TIMEOUT = "AGENT_MODEL_TIMEOUT"
 AGENT_BUDGET_EXCEEDED = "AGENT_BUDGET_EXCEEDED"
 AGENT_RUN_CANCELLED = "AGENT_RUN_CANCELLED"
+# 批改任务被 Celery 软超时打断（区别于普通失败，供运营排查队列拥塞）
+AGENT_GRADING_TIMEOUT = "AGENT_GRADING_TIMEOUT"
 
 # 兜底安全消息：绝不携带异常类型与内部细节
 SAFE_CHAT_ERROR_MESSAGE = "AI 服务暂时不可用，请稍后重试"

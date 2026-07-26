@@ -24,9 +24,12 @@ class RunCancelled(RuntimeError):
 class RunBudget:
     max_nodes: int = 8
     max_tool_calls: int = 12
+    # 模型调用次数上限（每次 agent.invoke 记一次；含格式修复重试）
+    max_model_calls: int = 12
     timeout_seconds: int = 45
     node_count: int = 0
     tool_call_count: int = 0
+    model_call_count: int = 0
     started_at: float = field(default_factory=monotonic)
 
     @property
@@ -41,11 +44,17 @@ class RunBudget:
         self.tool_call_count += 1
         self._validate()
 
+    def consume_model_call(self) -> None:
+        self.model_call_count += 1
+        self._validate()
+
     def _validate(self) -> None:
         if self.node_count > self.max_nodes:
             raise BudgetExceeded("Agent 节点数超过限制")
         if self.tool_call_count > self.max_tool_calls:
             raise BudgetExceeded("工具调用次数超过限制")
+        if self.model_call_count > self.max_model_calls:
+            raise BudgetExceeded("模型调用次数超过限制")
         if monotonic() - self.started_at > self.timeout_seconds:
             raise BudgetExceeded("Agent 运行超时")
 
@@ -53,6 +62,20 @@ class RunBudget:
 def default_run_budget() -> RunBudget:
     """生产运行使用的固定安全预算。"""
     return RunBudget(max_nodes=8, max_tool_calls=12, timeout_seconds=45)
+
+
+def grading_run_budget() -> RunBudget:
+    """批改任务预算（规格 §15.2）：模型调用 ≤6 次、任务 ≤120s。
+
+    与 celery 任务的 soft_time_limit=120 对齐——预算先于软超时触发时
+    走结构化降级（转人工），而不是被 SoftTimeLimitExceeded 打断。
+    """
+    return RunBudget(
+        max_nodes=8,
+        max_tool_calls=12,
+        max_model_calls=6,
+        timeout_seconds=120,
+    )
 
 
 def build_actor_context(user: User, request_id: str, session_id: str) -> ActorContext:
@@ -81,5 +104,6 @@ __all__ = [
     "RunCancelled",
     "build_actor_context",
     "default_run_budget",
+    "grading_run_budget",
     "tool_budget_middleware",
 ]

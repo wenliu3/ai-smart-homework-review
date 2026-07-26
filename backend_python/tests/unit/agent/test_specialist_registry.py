@@ -31,7 +31,9 @@ def test_registered_specialists_have_distinct_names():
         "final_reviewer",
         "grading",
         "grading_review",
+        "grading_review_vision",
         "plagiarism_analysis",
+        "plagiarism_review",
         "learning_coach",
         "feedback_explainer",
         "learning_planner",
@@ -55,7 +57,7 @@ def test_all_specialists_have_distinct_prompt_names():
     """所有 specialist 使用互不混淆的 Prompt 名称。"""
     specs = {spec.name: spec for spec in SpecialistRegistry.default_specs()}
     versions = {spec.prompt_name for spec in specs.values()}
-    assert len(versions) == 15
+    assert len(versions) == 16
     assert "teacher_data_specialist" in versions
     assert "teacher_strategy_specialist" in versions
     assert "teacher_action_specialist" in versions

@@ -33,9 +33,13 @@ def apply_ai_grading_result(
     primary = outcome.primary
     review_note = ""
     if outcome.needs_human_review:
-        review_note = (
-            "\n\n⚠️ 两次独立评分差异超过满分 10%，需要教师人工复核。"
+        reasons = list(getattr(outcome, "review_reasons", []) or [])
+        reason_text = (
+            "；".join(reasons)
+            if reasons
+            else "两次独立评分差异超过满分 10%"
         )
+        review_note = f"\n\n⚠️ 需要教师人工复核：{reason_text}。"
     content = primary.summary + review_note
     statement = (
         update(Submission)
@@ -56,6 +60,42 @@ def apply_ai_grading_result(
                     if outcome.needs_human_review
                     else "ai_reviewed"
                 ),
+            ),
+        )
+    )
+    result = db.execute(statement)
+    if result.rowcount != 1:
+        db.rollback()
+        return False
+    db.commit()
+    return True
+
+
+def mark_submission_needs_manual_grading(
+    db: Session,
+    submission_id: int,
+    expected_submission_count: int,
+    note: str,
+) -> bool:
+    """AI 批改降级转人工：只写提示文案，不写任何分数（规划 3B.2）。
+
+    与 apply_ai_grading_result 同样按提交版本条件更新；
+    教师已人工批改的提交保持 teacher_reviewed 状态不动。
+    """
+    statement = (
+        update(Submission)
+        .where(
+            Submission.id == submission_id,
+            Submission.submission_count == expected_submission_count,
+        )
+        .values(
+            ai_review_content=note,
+            status=case(
+                (
+                    Submission.status == "teacher_reviewed",
+                    Submission.status,
+                ),
+                else_="submitted",
             ),
         )
     )
@@ -199,6 +239,7 @@ def get_my_submission(db: Session, assignment_id: int, student_id: int) -> dict:
             "updatedAt": submission.updated_at.isoformat() if submission.updated_at else None,
             "createdAt": submission.created_at.isoformat() if submission.created_at else None,
             "isDraft": submission.is_draft, "submissionCount": submission.submission_count,
+            "gradingRunId": submission.grading_run_id,  # 批改进度轮询入口（规划 3B.3）
         }
         if submission.ai_score is not None:
             result["aiReview"] = {
