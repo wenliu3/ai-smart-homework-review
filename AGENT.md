@@ -9,8 +9,10 @@
 
 - 仓库：`git@github.com:wenliu3/ai-smart-homework-review.git`（SSH）
 - 后端端口：83，API 文档：`http://localhost:83/api/docs`
-- 前端端口：5173
-- 数据库：MySQL `localhost:3306/ai_smart_review`（root/123456）
+- 前端端口：8080（vite dev server，代理 `/api` → `localhost:83`）
+- 数据库（双库架构）：
+  - 业务库：MySQL `localhost:3306/ai_smart_review`
+  - AI 会话库：PostgreSQL（`ASSISTANT_DATABASE_URL`，`app/assistant_database.py`），存放多智能体会话/运行/审批数据，由 `alembic_assistant/` 管理迁移
 
 ## 技术栈
 
@@ -35,8 +37,12 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 83 --reload
 # 编译检查（验证后端语法）
 python -m compileall -q backend_python/app
 
-# 前端类型检查
+# 后端测试（双库均用 sqlite 替身，无需真实数据库）
+cd backend_python && python -m pytest -q
+
+# 前端类型检查 + 单元测试
 cd frontend && npx vue-tsc --noEmit
+cd frontend && npx vitest run
 ```
 
 ## 项目结构
@@ -64,9 +70,22 @@ backend_python/
 │   │   ├── extractors.py    # 文件解析（docx/pdf/txt → 文本+图片）
 │   │   ├── aggregator.py    # 双维度结果合并
 │   │   └── __init__.py      # 统一入口 run_full_check()
-│   └── agent/               # LangChain AI Agent
-│       ├── agent.py         # Agent 构建 + SSE 流式输出
-│       └── tools.py         # 教学数据查询工具集
+│   ├── assistant_database.py # AI 会话库（PostgreSQL）引擎与会话
+│   ├── tasks/               # Celery 任务（AI 批改异步执行）
+│   └── agent/               # 多智能体运行时（LangGraph）
+│       ├── service.py       # 编排入口 + SSE 流式输出（教师/学生/管理员三路径）
+│       ├── runtime.py       # 运行时预算/取消控制
+│       ├── gateway.py       # 统一模型网关（缓存 + 密钥脱敏）
+│       ├── registry.py      # Prompt/Agent 注册表
+│       ├── checkpointer.py  # LangGraph checkpoint（生产 PG / 测试内存）
+│       ├── contracts.py     # 稳定错误码与事件契约
+│       ├── graphs/          # 各角色 StateGraph（teacher/student/admin/grading/plagiarism/approval）
+│       ├── supervisors/     # 角色主管节点
+│       ├── subagents/       # 专业子智能体节点
+│       └── tools/           # 角色查询工具集（每个工具独立 SessionLocal）
+├── alembic/                 # 业务库（MySQL）迁移
+├── alembic_assistant/       # AI 会话库（PostgreSQL）迁移
+├── tests/                   # pytest（unit / integration / security / evals）
 ├── uploads/                 # 上传文件目录
 ├── requirements.txt
 └── .env.example
@@ -161,7 +180,9 @@ def handler(current_user: User = Depends(require_roles("teacher", "superadmin"))
 | `Menu` | menus | 菜单（RBAC） |
 | `Role` | roles | 角色 |
 | `RefreshToken` | refresh_tokens | 刷新令牌 |
-| `AgentChatMessage` | agent_chat_messages | AI 助手对话记录 |
+| `AgentActionExecution` | agent_action_executions | 审批动作执行幂等账本（MySQL 侧） |
+
+**AI 会话库（PostgreSQL，`AssistantBase`）**：`AgentChatMessage`（旧版对话记录）、`AgentSession` / `AgentRun` / `AgentStep` / `AgentArtifact` / `AgentMessage`（多智能体运行时）、`AgentApproval`（人工审批）。批改任务会话 id 以 `grading-` 为前缀，属系统会话，不出现在用户会话列表、不可被聊天/取消接口操作。
 
 模型基类：`TimestampMixin`（created_at/updated_at）+ `ModelMixin`（to_dict 方法）。
 
@@ -235,9 +256,9 @@ export function getAssignmentList(params) {
 
 ### 新增数据库模型
 
-1. `models/xxx.py` 定义模型类，继承 `Base, TimestampMixin, ModelMixin`
+1. `models/xxx.py` 定义模型类：业务库继承 `Base, TimestampMixin, ModelMixin`；AI 会话库继承 `AssistantBase`
 2. `models/__init__.py` 注册导出
-3. `main.py` 中 `Base.metadata.create_all()` 会自动建表（开发期）
+3. 开发期 `main.py` 的 `Base.metadata.create_all()` 会自动建业务表；正式迁移需补 alembic revision（业务库 `alembic/`，会话库 `alembic_assistant/`）
 
 ### 修改查重参数
 
@@ -252,6 +273,8 @@ export function getAssignmentList(params) {
 - **camelCase/snake_case**转换通过 `core/utils.py` 的 `camel_to_snake()` 和模型的 `to_dict()` 自动处理
 - **查重模块**已从 `core/` 迁移到独立的 `plagiarism/` 包，不要引用旧路径 `app.core.plagiarism`
 - **allow_attachments** 字段是 `Boolean` 类型（非 JSON），数据库列类型为 `TINYINT(1)`
-- **前端**同时安装了 Vuex 和 Pinia，但实际使用的是 Vuex
-- **后端**未使用 Alembic 迁移，改模型后需手动 ALTER TABLE 或删除重建表
+- **状态管理**使用 Vuex 4（Pinia 依赖已移除）
+- **迁移**：业务库（MySQL）用 `alembic/`，AI 会话库（PostgreSQL）用 `alembic_assistant/`（`alembic -c alembic_assistant.ini`）；容器 entrypoint 在 `RUN_MIGRATIONS=1` 时自动执行，并对旧版 create_all 建出的既有库先 stamp 基线再 upgrade
+- **双库边界**：业务数据只走 `SessionLocal`（MySQL），AI 会话数据只走 `AssistantSessionLocal`（PostgreSQL），交汇点在 `app/agent/service.py` 与 `crud/user.py` 的删除清理；不要在同一事务里混用两库
+- **敏感配置**：`.env.docker` 已从 git 移除，复制 `.env.docker.example` 并改强密钥后使用
 - Git 远程使用 **SSH 协议**（`git@github.com:...`），HTTPS 会被网络干扰

@@ -25,11 +25,15 @@ cd frontend && npx vue-tsc --noEmit
 # Syntax-check backend
 python -m compileall -q backend_python/app
 
-# Docker (frontend :80, backend :8000, MySQL :3306)
-docker compose up -d
+# Backend / frontend tests
+D:\miniforge\envs\scientific_research\python.exe -m pytest backend_python/tests -q
+cd frontend && npm test
+
+# Docker (frontend :80, backend :8000; data services bind localhost only)
+docker compose --env-file .env.docker up -d
 ```
 
-No test suite exists yet. No Alembic migrations — `Base.metadata.create_all()` runs on startup for dev; production needs manual ALTER TABLE or drop-recreate.
+The repository has backend pytest and frontend Vitest suites. MySQL uses `backend_python/alembic/`; the assistant PostgreSQL database uses `backend_python/alembic_assistant/`. In Docker, only the backend service runs both migrations (`RUN_MIGRATIONS=1`) before seeding and starting Uvicorn; the Celery worker does not run migrations.
 
 ## Architecture
 
@@ -80,7 +84,7 @@ Stored in `uploads/` (configurable via `UPLOAD_DIR`). Served at `/uploads/<filen
 
 ## Gotchas
 
-- **No Alembic**: changing a model requires manual DB migration. `Base.metadata.create_all()` only creates new tables.
+- **Dual Alembic histories**: business schema changes go to `alembic/`; assistant runtime schema changes go to `alembic_assistant/`. Keep both at head in deployment.
 - **Vuex, not Pinia**: Pinia is in `package.json` but unused. All state management is Vuex 4.
 - **Thread safety in Agent tools**: each tool creates its own `SessionLocal()` session — do NOT pass the request's `db` session into agent tools. pymysql connections are not thread-safe and LangGraph runs tools in background threads.
 - **SSE streaming**: `agent/agent.py:chat_with_agent()` yields only `AIMessageChunk.text` — filters out ToolMessage and tool-call chunks so raw tool results never leak to frontend.

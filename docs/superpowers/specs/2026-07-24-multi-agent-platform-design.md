@@ -20,6 +20,7 @@
 - 读取操作可自动执行；所有由 Agent 发起的业务写操作先生成操作草案，经用户确认后由后端执行。
 - 专业 Agent 使用结构化输入输出，禁止依靠自然语言拼接传递关键状态。
 - 最终回答必须经过事实、安全和权限审核。
+- MySQL 保存用户、班级、作业、提交和模型配置；PostgreSQL 保存聊天、会话和 Agent 运行状态，两套数据库分别迁移和运维。
 - 第一阶段只实现教师端，但公共运行时从一开始支持三种角色。
 
 ## 3. 当前系统分析
@@ -134,7 +135,9 @@ flowchart TD
     MG --> TOOL
 
     TOOL --> CRUD["现有 CRUD 与查重引擎"]
-    CRUD --> DB["MySQL 与上传文件"]
+    CRUD --> MYSQL["MySQL 业务库"]
+    CRUD --> PG["PostgreSQL Agent 状态库"]
+    CRUD --> FILES["上传文件"]
 
     TS --> REVIEW["事实与安全审核"]
     SS --> REVIEW
@@ -520,7 +523,18 @@ class AgentState(TypedDict):
 
 ## 12. 会话、记忆与持久化
 
-### 12.1 记忆策略
+### 12.1 存储边界
+
+| 存储 | 数据范围 | 约束 |
+|---|---|---|
+| MySQL | 用户、班级、作业、提交、AI 模型和业务规则 | 业务事实的唯一来源 |
+| PostgreSQL | 聊天消息、会话摘要、Agent Run、Step、Artifact、Approval 和 Feedback | Agent 运行与记忆的唯一来源 |
+| Redis | Celery 队列、短期任务协调和限流 | 不作为业务或会话的最终存储 |
+| 文件存储 | 作业附件、参考资料和查重临时文件 | 数据库只保存受控资源引用 |
+
+两套关系数据库之间不建立物理外键。PostgreSQL 中的 `user_id` 只是经过服务端鉴权的逻辑引用；读取业务事实时仍需访问 MySQL 并执行对象权限校验。
+
+### 12.2 记忆策略
 
 - 短期记忆：最近十条消息。
 - 长期会话记忆：经过审核的会话摘要。
@@ -530,7 +544,7 @@ class AgentState(TypedDict):
 
 摘要更新发生在一轮运行成功结束后。摘要失败不影响本轮回答，下一轮仍可使用最近消息。
 
-### 12.2 数据表
+### 12.3 PostgreSQL 数据表
 
 #### `agent_sessions`
 
@@ -577,10 +591,10 @@ class AgentState(TypedDict):
 
 保存用户评分、采纳状态、教师修正分数、修正原因和关联运行，用于离线评测。
 
-### 12.3 历史数据迁移
+### 12.4 历史数据迁移
 
-1. 引入 Alembic，并基于当前数据库建立基线版本。
-2. 创建新的 Agent 数据表。
+1. 为 MySQL 业务库和 PostgreSQL Agent 状态库分别建立 Alembic 配置与基线版本。
+2. 在 PostgreSQL 迁移链中创建新的 Agent 数据表，停止依赖应用启动时 `create_all()` 建表。
 3. 将 `agent_chat_messages` 按 `teacher_id + session_id` 迁移到新会话和消息表。
 4. 新旧读取接口并行一个发布周期。
 5. 确认数据数量和会话归属一致后，停止写入旧表。
@@ -713,7 +727,7 @@ data: {"code":"AGENT_MODEL_TIMEOUT","message":"AI 服务响应超时，请稍后
 
 - FastAPI 只创建 `AgentRun` 并提交任务。
 - Celery Worker 执行内容提取和批改图。
-- MySQL 保存业务状态与产物，Redis 只承担队列和短期任务协调。
+- MySQL 保存批改后的业务字段，PostgreSQL 保存运行状态与结构化 Artifact，Redis 只承担队列和短期任务协调。
 - Worker 更新运行状态，前端通过运行接口或 SSE 获取进度。
 - 任务使用 `submission_id + submission_count + rubric_version` 作为业务幂等依据。
 
@@ -884,7 +898,7 @@ backend_python/tests/
 
 交付内容：
 
-- 引入 Alembic 并建立当前数据库基线。
+- 为 MySQL 和 PostgreSQL 分别建立 Alembic 基线，并让 Docker Compose 提供两套数据库的健康检查与连接配置。
 - 修正助手路由角色校验和 SSE 错误泄露。
 - 将聊天路由业务逻辑下沉到 CRUD/Service。
 - 建立 Pydantic Agent 契约、统一模型网关和 Prompt 版本管理。
@@ -899,7 +913,7 @@ backend_python/tests/
 
 - 教师主管、意图路由、教学数据分析、教学策略和最终审核。
 - 将七个现有工具改造成结构化只读工具。
-- 新会话、运行、步骤和 Artifact 持久化。
+- 在 PostgreSQL 中实现新会话、运行、步骤和 Artifact 持久化。
 - 新 SSE 事件协议和前端兼容解析。
 - 教师端离线评测集和运行指标。
 
@@ -982,7 +996,7 @@ backend_python/tests/
 | 长任务丢失 | Celery + Redis、MySQL 状态、版本幂等和可安全重跑 |
 | SSE 中断但后端继续写入 | 取消状态传播，写操作执行前再次检查运行状态和审批 |
 | 模型配置变更影响缓存 | 缓存键包含模型更新时间和 Prompt 版本 |
-| 数据库变更难以管理 | 先引入 Alembic，再新增 Agent 表和字段 |
+| 双库变更难以管理 | MySQL 与 PostgreSQL 使用独立 Alembic 迁移链，禁止 `create_all()` 代替生产迁移 |
 
 ## 24. 完成定义
 
