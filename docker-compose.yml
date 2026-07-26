@@ -1,3 +1,4 @@
+# 启动方式：cp .env.docker.example .env.docker 并修改密钥后：docker compose --env-file .env.docker up -d
 services:
   # ==================== 数据库 ====================
   mysql:
@@ -5,11 +6,11 @@ services:
     container_name: ai-review-mysql
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD via --env-file .env.docker}
       MYSQL_DATABASE: ai_smart_review
       TZ: Asia/Shanghai
     ports:
-      - "3306:3306"
+      - "127.0.0.1:3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
@@ -20,6 +21,42 @@ services:
       retries: 10
       start_period: 30s
 
+  postgres:
+    image: postgres:16-alpine
+    container_name: ai-review-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: langgraph_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD via --env-file .env.docker}
+      POSTGRES_DB: ai_smart_review
+      TZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langgraph_user -d ai_smart_review"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: ai-review-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
   # ==================== 后端 ====================
   backend:
     build: ./backend_python
@@ -28,16 +65,46 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
-      DATABASE_URL: mysql+pymysql://root:${MYSQL_ROOT_PASSWORD}@mysql:3306/ai_smart_review?charset=utf8mb4
-      JWT_SECRET: ${JWT_SECRET}
+      DATABASE_URL: mysql+pymysql://root:${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD via --env-file .env.docker}@mysql:3306/ai_smart_review?charset=utf8mb4
+      ASSISTANT_DATABASE_URL: postgresql://langgraph_user:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD via --env-file .env.docker}@postgres:5432/ai_smart_review
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET via --env-file .env.docker}
       JWT_EXPIRES_IN: 7200
       JWT_REFRESH_EXPIRES_IN: 604800
       PORT: 8000
       DEFAULT_PASSWORD: 123456789
       UPLOAD_DIR: /app/uploads
+      RUN_MIGRATIONS: 1
     ports:
       - "8000:8000"
+    volumes:
+      - uploads_data:/app/uploads
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+  worker:
+    build: ./backend_python
+    container_name: ai-review-worker
+    restart: unless-stopped
+    command: python -m celery -A app.tasks.celery_app:celery_app worker --loglevel=info --queues=grading
+    depends_on:
+      mysql:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: mysql+pymysql://root:${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD via --env-file .env.docker}@mysql:3306/ai_smart_review?charset=utf8mb4
+      ASSISTANT_DATABASE_URL: postgresql://langgraph_user:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD via --env-file .env.docker}@postgres:5432/ai_smart_review
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET via --env-file .env.docker}
+      UPLOAD_DIR: /app/uploads
+      RUN_MIGRATIONS: 0
     volumes:
       - uploads_data:/app/uploads
 
@@ -53,4 +120,6 @@ services:
 
 volumes:
   mysql_data:
+  postgres_data:
+  redis_data:
   uploads_data:
