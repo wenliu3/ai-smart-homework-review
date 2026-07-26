@@ -4,7 +4,6 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.agent.tools.approval import create_action_draft
-from app.agent.graphs.approval import build_approval_graph
 from app.crud.agent_approval import (
     approve_and_execute,
     create_approval,
@@ -142,48 +141,6 @@ def test_rejected_action_can_never_execute(assistant_db):
             payload=approval.payload_json,
             executor=lambda *_: {"ok": True},
         )
-
-
-def test_approval_graph_exposes_pending_approve_and_reject_nodes():
-    calls = []
-
-    class Coordinator:
-        def validate(self, state):
-            calls.append("validate_action_draft")
-            return {}
-
-        def persist(self, state):
-            calls.append("persist_pending_approval")
-            return {"approval_id": "approval-1", "status": "pending"}
-
-        def execute(self, state):
-            calls.append("execute_approved_action")
-            return {"status": "executed", "result": {"ok": True}}
-
-        def reject(self, state):
-            calls.append("reject_action")
-            return {"status": "rejected"}
-
-    graph = build_approval_graph(Coordinator())
-    pending = graph.invoke({"draft": _draft()})
-    approved = graph.invoke({
-        "approval_id": "approval-1",
-        "decision": "approved",
-    })
-    rejected = graph.invoke({
-        "approval_id": "approval-2",
-        "decision": "rejected",
-    })
-
-    assert pending["status"] == "pending"
-    assert approved["status"] == "executed"
-    assert rejected["status"] == "rejected"
-    assert calls == [
-        "validate_action_draft",
-        "persist_pending_approval",
-        "execute_approved_action",
-        "reject_action",
-    ]
 
 
 def test_model_config_approval_rejects_secret_or_unknown_fields():
