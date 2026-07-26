@@ -7,7 +7,10 @@
 - finalize_run 在同一 PostgreSQL 事务提交最终消息、Artifact 和 run.completed。
 - 失败 / 取消 / 跨用户读取 / 事务回滚。
 - 图状态不得保存 ORM 对象。
+- 写请求落审批后发 approval.required 事件，且草案不落 Step。
 """
+import json
+
 import pytest
 
 from app.agent.graphs.teacher import build_teacher_graph
@@ -667,3 +670,81 @@ def test_orchestrate_emits_live_started_event_before_specialist_call(assistant_d
     assert result.status == "completed"
     assert any(event["type"] == "content.delta" for event in emitted)
     assert emitted[-1]["type"] == "run.completed"
+
+
+class _ActionDraftSpecialists(_ApprovingSpecialists):
+    """写请求替身：产出草案并落审批，验证 approval.required 进入事件流。"""
+
+    def action_draft(self, state):
+        from app.agent.tools.approval import create_action_draft
+
+        return {
+            "candidate_answer": "我已准备发布《第三章作业》的待审批草案。",
+            "action_draft": create_action_draft(
+                action_type="publish_assignment",
+                target_type="assignment",
+                target_id="7",
+                parameters={
+                    "assignmentId": 7,
+                    "beforeSnapshot": {"status": "draft"},
+                },
+                summary="发布《第三章作业》",
+                risk_level="high",
+                ttl_seconds=600,
+            ),
+        }
+
+    def persist_approval(self, state):
+        return {"approval_id": "approval-orch-1"}
+
+
+def test_orchestrate_streams_approval_required_event(assistant_db):
+    """写请求落审批后必须发 approval.required，且带上 run_id。"""
+    session = create_session(
+        assistant_db, user_id=7, actor_role="teacher", session_id="sessorchappr1",
+    )
+    emitted = []
+
+    result = orchestrate_teacher_run(
+        teacher_id=7,
+        message="帮我发布这份作业",
+        session_id=session.id,
+        request_id="req-appr-001",
+        specialists=_ActionDraftSpecialists(),
+        assistant_db=assistant_db,
+        event_callback=emitted.append,
+    )
+
+    approval_events = [
+        event for event in emitted if event["type"] == "approval.required"
+    ]
+    assert len(approval_events) == 1
+    data = approval_events[0]["data"]
+    assert data["run_id"] == result.run_id
+    assert data["approval_id"] == "approval-orch-1"
+    assert data["action_type"] == "publish_assignment"
+    assert "beforeSnapshot" not in json.dumps(data, ensure_ascii=False)
+    assert result.status == "completed"
+
+
+def test_action_draft_never_lands_in_persisted_step_output(assistant_db):
+    """草案含旧值快照与哈希，审批表已存一份，不再写进 agent_run_steps。"""
+    session = create_session(
+        assistant_db, user_id=7, actor_role="teacher", session_id="sessorchappr2",
+    )
+
+    result = orchestrate_teacher_run(
+        teacher_id=7,
+        message="帮我发布这份作业",
+        session_id=session.id,
+        request_id="req-appr-002",
+        specialists=_ActionDraftSpecialists(),
+        assistant_db=assistant_db,
+    )
+
+    steps = list_steps(assistant_db, run_id=result.run_id, user_id=7)
+    serialized = json.dumps(
+        [step.output_json for step in steps], ensure_ascii=False, default=str,
+    )
+    assert "beforeSnapshot" not in serialized
+    assert "payload_hash" not in serialized

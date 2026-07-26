@@ -21,22 +21,24 @@ from . import (
     audit_analysis,
     model_governance,
     admin_final_reviewer,
+    teacher_action,
     teacher_data,
     teacher_strategy,
 )
 
 
 class SubagentContainer:
-    """组合三个 specialist 节点，供 LangGraph 调用。
+    """组合教师端 specialist 节点，供 LangGraph 调用。
 
     用法：
-        specialists = SpecialistContainer(db)
+        specialists = SubagentContainer(db)
         graph = build_teacher_graph(specialists)
     """
 
     def __init__(self, db: Session, registry: AgentRegistry | None = None) -> None:
         self._teaching_data = teacher_data.create_node(db, registry)
         self._teaching_strategy = teacher_strategy.create_node(db, registry)
+        self._action_draft = teacher_action.create_node(db, registry)
         self._final_reviewer = final_reviewer.create_node(db, registry)
 
     def teaching_data(self, state: dict) -> dict:
@@ -45,8 +47,26 @@ class SubagentContainer:
     def teaching_strategy(self, state: dict) -> dict:
         return self._teaching_strategy(state)
 
+    def action_draft(self, state: dict) -> dict:
+        return self._action_draft(state)
+
     def final_reviewer(self, state: dict) -> dict:
         return self._final_reviewer(state)
+
+    def persist_approval(self, state: dict) -> dict:
+        """把审核通过的草案落成教师名下的待审批记录（PostgreSQL 会话库）。"""
+        draft = state.get("action_draft")
+        if draft is None:
+            return {}
+        with AssistantSessionLocal() as sdb:
+            approval = create_approval(
+                sdb,
+                draft=draft,
+                requester_user_id=state["actor"].user_id,
+                requester_role="teacher",
+                run_id=state.get("run_id"),
+            )
+            return {"approval_id": approval.id}
 
 
 class StudentSubagentContainer:
@@ -109,6 +129,7 @@ class AdminSubagentContainer:
 
 __all__ = [
     "SubagentContainer",
+    "teacher_action",
     "teacher_data",
     "teacher_strategy",
     "final_reviewer",

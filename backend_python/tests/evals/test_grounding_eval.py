@@ -6,8 +6,8 @@ from tests.evals.cases.catalog import (
 )
 
 
-def test_eval_catalog_contains_exactly_100_sanitized_cases():
-    assert len(ALL_CASES) == 100
+def test_eval_catalog_contains_exactly_101_sanitized_cases():
+    assert len(ALL_CASES) == 101
 
 
 def test_data_fact_fixture_accuracy_is_100_percent():

@@ -74,12 +74,17 @@ def test_strategy_route_runs_strategy_agent_then_reviewer():
     assert result["final_answer"] == "策略回答"
 
 
-def test_write_request_never_runs_specialist():
+def test_unsupported_write_request_never_runs_specialist():
+    """白名单外的高风险写请求（删班级/改账号）直接拒绝，不进 specialist。
+
+    受支持的写请求（作业/评分/规则）走 ACTION_DRAFT 路径，
+    覆盖见 tests/unit/agent/test_teacher_action_draft.py。
+    """
     graph = build_teacher_graph(FakeSpecialists())
-    result = graph.invoke({"user_message": "帮我发布一份作业", "visited_nodes": []})
+    result = graph.invoke({"user_message": "帮我删除这个班级", "visited_nodes": []})
 
     assert result["visited_nodes"] == ["route", "finalize"]
-    assert "只读" in result["final_answer"]
+    assert "不在助手可执行范围内" in result["final_answer"]
 
 
 def test_greeting_routes_to_casual_chat():
@@ -213,10 +218,10 @@ def test_graph_emits_structured_events():
     assert "run.completed" in event_types
 
 
-def test_write_request_emits_route_selected_but_no_agent_events():
-    """写请求不进入 specialist，不生成 agent.started 事件。"""
+def test_unsupported_write_emits_route_selected_but_no_agent_events():
+    """白名单外的写请求不进入 specialist，不生成 agent.started 事件。"""
     graph = build_teacher_graph(FakeSpecialists())
-    result = graph.invoke({"user_message": "帮我发布作业", "visited_nodes": []})
+    result = graph.invoke({"user_message": "帮我删除这个学生", "visited_nodes": []})
 
     events = result.get("events", [])
     event_types = [e["type"] for e in events]

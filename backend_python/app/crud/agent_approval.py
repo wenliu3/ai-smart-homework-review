@@ -134,6 +134,9 @@ def _validate_target_metadata(approval: AgentApproval, payload: dict) -> None:
         "create_ai_rule": ("ai_rule", None),
         "submit_teacher_score": ("submission", "submissionId"),
         "update_model_config": ("ai_model", "code"),
+        "publish_assignment": ("assignment", "assignmentId"),
+        "update_assignment": ("assignment", "assignmentId"),
+        "delete_assignment": ("assignment", "assignmentId"),
     }
     expected = target_specs.get(approval.action_type)
     if expected is None:

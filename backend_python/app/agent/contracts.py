@@ -24,6 +24,9 @@ class TeacherIntent(str, Enum):
     CASUAL_CHAT = "casual_chat"
     TEACHING_DATA = "teaching_data"
     TEACHING_STRATEGY = "teaching_strategy"
+    # 受支持的写请求：只产出待审批草案，绝不在图内直接写业务库
+    ACTION_DRAFT = "action_draft"
+    # 白名单之外的高风险写请求（删除班级/学生、改账号等）：明确拒绝
     UNSUPPORTED_WRITE = "unsupported_write"
 
 
@@ -140,6 +143,52 @@ class ModelGovernanceResponse(SpecialistResponse):
     """模型治理分析及可选的受控变更提案。"""
 
     proposal: ModelConfigProposal | None = None
+
+
+# 教师可提案的写操作；`update_model_config` 属管理员，教师不得提案
+TEACHER_PROPOSABLE_ACTIONS = (
+    "create_assignment_draft",
+    "create_ai_rule",
+    "submit_teacher_score",
+    "publish_assignment",
+    "update_assignment",
+    "delete_assignment",
+)
+
+# 身份与凭据字段由服务端注入；提案里出现即视为提权尝试
+_FORBIDDEN_PROPOSAL_FIELDS = frozenset({
+    "teacherId", "teacher_id", "userId", "user_id",
+    "actorId", "actor_id", "studentId", "student_id",
+    "role", "createdBy", "created_by",
+    "apiKey", "api_key", "accessKey", "access_key",
+    "secretKey", "secret_key", "password",
+})
+
+
+class TeacherActionProposal(BaseModel):
+    """教师写操作提案；模型只能描述意图与参数，执行必须经教师人工审批。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    action_type: Literal[TEACHER_PROPOSABLE_ACTIONS]  # type: ignore[valid-type]
+    target_id: str | None = Field(default=None, max_length=64)
+    parameters: dict[str, Any]
+    summary: str = Field(min_length=1, max_length=1000)
+
+    @model_validator(mode="after")
+    def reject_identity_or_credential_fields(self):
+        leaked = set(self.parameters) & _FORBIDDEN_PROPOSAL_FIELDS
+        if leaked:
+            raise ValueError(f"写操作提案禁止携带身份或凭据字段: {sorted(leaked)}")
+        if not self.parameters:
+            raise ValueError("写操作提案参数不能为空")
+        return self
+
+
+class TeacherActionResponse(SpecialistResponse):
+    """教师写操作 Agent 的候选回答及可选的受控写操作提案。"""
+
+    proposal: TeacherActionProposal | None = None
 
 
 class RubricCriterion(BaseModel):
@@ -279,6 +328,9 @@ class ActionType(str, Enum):
     CREATE_AI_RULE = "create_ai_rule"
     SUBMIT_TEACHER_SCORE = "submit_teacher_score"
     UPDATE_MODEL_CONFIG = "update_model_config"
+    PUBLISH_ASSIGNMENT = "publish_assignment"
+    UPDATE_ASSIGNMENT = "update_assignment"
+    DELETE_ASSIGNMENT = "delete_assignment"
 
 
 class ActionDraft(BaseModel):

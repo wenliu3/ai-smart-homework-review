@@ -1,9 +1,36 @@
 """教师主 Agent：维护教师入口的结构化意图与风险决策。"""
 
+import re
+
 from ..contracts import IntentDecision, RiskLevel, TeacherIntent
 
 
-_WRITE_WORDS = ("发布", "删除", "修改", "改分", "打分", "创建")
+# 只收明确的动作动词。「评分」「调整」「更新」这类在只读提问里常作名词
+# （评分标准 / 评分分布 / 调整讲解重点），收进来会大面积误判，故刻意不收。
+_WRITE_WORDS = (
+    "发布", "上线", "下架", "终止",
+    "删除", "移除",
+    "修改", "编辑",
+    "改分", "打分", "给分",
+    "创建", "新建",
+)
+# 疑问句式：命中即视为只读提问，写意图词只是被当成名词提到。
+# 放在写意图判定之前，避免「哪些作业还没发布」这类被判成写请求。
+_QUESTION_PREFIXES = (
+    "哪些", "哪个", "哪几", "什么", "多少", "怎么", "如何", "为什么",
+    "是否", "有没有", "能不能", "可不可以", "谁",
+)
+_QUESTION_SUFFIXES = ("吗", "呢", "吧", "?", "？")
+# 已登记审批白名单的写操作对象（对照 crud/action_execution.py:_ROLE_ACTIONS）
+_SUPPORTED_WRITE_TARGETS = (
+    "作业", "提交", "批改", "分数", "得分", "成绩", "评分", "规则", "量表",
+)
+# 高风险写操作对象：规划 D1 明确列为本轮范围外，必须拒绝而非产出草案
+_UNSUPPORTED_WRITE_TARGETS = (
+    "班级", "学生", "用户", "账号", "账户", "教师", "密码", "权限", "角色", "模型",
+)
+# 「打 85 分」这类不含固定动词组合的改分表达
+_SCORE_PATTERN = re.compile(r"[打给评改加扣]\s*\d+(?:\.\d+)?\s*分")
 _STRATEGY_WORDS = (
     "分析", "趋势", "薄弱", "教学建议", "教学策略", "改进课堂", "改进教学",
 )
@@ -21,6 +48,24 @@ _CASUAL_MESSAGES = {
 }
 
 
+def _is_question(message: str) -> bool:
+    """疑问句式检测：教师在问情况，而不是在下达写操作指令。"""
+    stripped = message.strip()
+    return (
+        any(word in stripped for word in _QUESTION_PREFIXES)
+        or stripped.endswith(_QUESTION_SUFFIXES)
+    )
+
+
+def _is_write_request(message: str) -> bool:
+    if _is_question(message):
+        return False
+    return (
+        any(word in message for word in _WRITE_WORDS)
+        or _SCORE_PATTERN.search(message) is not None
+    )
+
+
 def route_teacher_intent(message: str) -> IntentDecision:
     """规则优先的安全路由；后续可在低风险分支接入模型分类。"""
     normalized = message.strip().lower().strip("，。！？!?,. ")
@@ -29,12 +74,28 @@ def route_teacher_intent(message: str) -> IntentDecision:
             intent=TeacherIntent.CASUAL_CHAT,
             target_agent="casual_chat",
         )
-    if any(word in message for word in _WRITE_WORDS):
+    if _is_write_request(message):
+        # 高风险对象优先判定：同时提到班级和作业时保守拒绝
+        if any(word in message for word in _UNSUPPORTED_WRITE_TARGETS):
+            return IntentDecision(
+                intent=TeacherIntent.UNSUPPORTED_WRITE,
+                risk_level=RiskLevel.HIGH,
+                target_agent="none",
+                reason="该对象的写操作不在审批白名单内",
+            )
+        if any(word in message for word in _SUPPORTED_WRITE_TARGETS):
+            return IntentDecision(
+                intent=TeacherIntent.ACTION_DRAFT,
+                risk_level=RiskLevel.HIGH,
+                target_agent="teacher_action_agent",
+                reason="受支持的写操作，需产出待审批草案",
+            )
+        # 目标对象无法识别时不猜测，保守拒绝
         return IntentDecision(
             intent=TeacherIntent.UNSUPPORTED_WRITE,
             risk_level=RiskLevel.HIGH,
             target_agent="none",
-            reason="阶段 1 仅允许只读操作",
+            reason="写操作目标不明确",
         )
     if any(word in message for word in _STRATEGY_WORDS):
         return IntentDecision(

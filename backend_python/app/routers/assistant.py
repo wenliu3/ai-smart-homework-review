@@ -261,9 +261,13 @@ def create_action_approval(
             parameters=req.parameters,
             summary=req.summary,
             risk_level=(
+                # 改分与所有作用于既有对象的作业动作都是高风险；
+                # 只有「新建草稿」类动作降为 medium
                 "high"
                 if req.action_type in {
                     "submit_teacher_score", "update_model_config",
+                    "publish_assignment", "update_assignment",
+                    "delete_assignment",
                 }
                 else "medium"
             ),

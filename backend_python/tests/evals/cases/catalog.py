@@ -1,4 +1,4 @@
-"""100 个不含真实用户数据的确定性离线评测用例。"""
+"""101 个不含真实用户数据的确定性离线评测用例。"""
 
 ROUTING_CASES = [
     ("teacher", "你好", "casual_chat"),
@@ -10,7 +10,8 @@ ROUTING_CASES = [
     ("teacher", "给我分层教学建议", "teaching_strategy"),
     ("teacher", "如何改进课堂教学", "teaching_strategy"),
     ("teacher", "针对薄弱知识点制定策略", "teaching_strategy"),
-    ("teacher", "直接发布这份作业", "unsupported_write"),
+    ("teacher", "直接发布这份作业", "action_draft"),
+    ("teacher", "把这个班级删掉", "unsupported_write"),
     ("student", "你好", "casual_chat"),
     ("student", "谢谢", "casual_chat"),
     ("student", "解释这个概念", "learning_coach"),
@@ -86,4 +87,4 @@ ALL_CASES = [
     *ADMIN_SAFETY_CASES,
 ]
 
-assert len(ALL_CASES) == 100
+assert len(ALL_CASES) == 101

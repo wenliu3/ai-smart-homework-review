@@ -22,6 +22,7 @@ from .contracts import (
     PlagiarismExplanation,
     ReviewResult,
     SpecialistResponse,
+    TeacherActionResponse,
 )
 from .gateway import model_gateway as _default_gateway
 from .tools.common import ALL_TOOLS, TeacherContext
@@ -125,6 +126,31 @@ TEACHER_FINAL_REVIEWER_V1 = register_prompt(PromptTemplate(
 - 安全合规时通过。
 - 拒绝时必须列出具体问题。
 - 只审核候选回答，不持有业务工具，也不自行查询数据。
+""",
+))
+
+TEACHER_ACTION_SPECIALIST_V1 = register_prompt(PromptTemplate(
+    name="teacher_action_specialist",
+    version="v1",
+    content="""你是教师写操作提案 Agent。你只能提出待审批的操作提案，绝不执行任何写入。
+
+流程：
+- 先用只读工具确认目标对象存在且属于当前教师，再给出 proposal。
+- 找不到对象或教师描述不明确时，不要猜测，把 proposal 留空并说明还需要哪些信息。
+
+proposal 规则：
+- action_type 只能是 publish_assignment、update_assignment、delete_assignment、
+  create_assignment_draft、create_ai_rule、submit_teacher_score 之一。
+- 作业类动作的 parameters 必须包含 assignmentId；改分必须包含 submissionId。
+- update_assignment 的变更放在 parameters.changes 里，只能用
+  title、description、classes、startDate、endDate、allowAttachments 这些字段。
+- 绝不填写 teacherId、userId、role、createdBy 等身份字段，也不填任何密钥。
+- 不要自行编造旧值；旧值快照由服务端补齐。
+
+answer 规则：
+- 用一句话向教师复述你将要提交审批的操作与影响对象（用业务名称，不出现数据库 ID）。
+- 明确说明该操作需要教师本人审批后才会执行。
+- 每项事实必须有 evidence_refs 支撑。
 """,
 ))
 
@@ -294,6 +320,13 @@ _DEFAULT_SPECS: tuple[AgentSpec, ...] = (
         profile=ModelProfile.GENERAL,
         tools=tuple(STRUCTURED_TOOLS),
         response_format=SpecialistResponse,
+    ),
+    AgentSpec(
+        name="teacher_action",
+        prompt_name="teacher_action_specialist",
+        profile=ModelProfile.GENERAL,
+        tools=tuple(STRUCTURED_TOOLS),
+        response_format=TeacherActionResponse,
     ),
     AgentSpec(
         name="final_reviewer",
@@ -473,6 +506,7 @@ __all__ = [
     "TEACHER_DATA_SPECIALIST_V1",
     "TEACHER_FINAL_REVIEWER_V1",
     "TEACHER_STRATEGY_SPECIALIST_V1",
+    "TEACHER_ACTION_SPECIALIST_V1",
     "GRADING_SPECIALIST_V1",
     "GRADING_REVIEW_SPECIALIST_V1",
     "PLAGIARISM_ANALYSIS_SPECIALIST_V1",

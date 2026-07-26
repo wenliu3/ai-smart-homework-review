@@ -171,7 +171,12 @@ def _json_safe(value: Any) -> Any:
         return {
             str(key): _json_safe(item)
             for key, item in value.items()
-            if key not in {"actor", "runtime_budget", "events", "recent_messages"}
+            # action_draft 含旧值快照与哈希，审批表已完整保存一份，
+            # 不再冗余写进 agent_run_steps.output
+            if key not in {
+                "actor", "runtime_budget", "events",
+                "recent_messages", "action_draft",
+            }
         }
     if isinstance(value, (list, tuple)):
         return [_json_safe(item) for item in value]

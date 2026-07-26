@@ -11,6 +11,11 @@ from ..contracts import (
 
 
 class TeacherAgentState(TypedDict, total=False):
+    """教师图状态。
+
+    注意：LangGraph 会静默丢弃 schema 之外的输入键与节点更新键，
+    编排层传入或节点返回的每个键都必须在此声明。
+    """
     run_id: str
     actor: ActorContext
     user_message: str
@@ -29,3 +34,6 @@ class TeacherAgentState(TypedDict, total=False):
     final_answer: str
     visited_nodes: list[str]
     events: list[dict]
+    # 受支持写请求产出的待审批草案（ActionDraft）与落库后的审批 ID
+    action_draft: object
+    approval_id: str

@@ -22,11 +22,37 @@ _ROLE_ACTIONS = {
         "create_assignment_draft",
         "create_ai_rule",
         "submit_teacher_score",
+        "publish_assignment",
+        "update_assignment",
+        "delete_assignment",
     },
     "superadmin": {
         "create_ai_rule",
         "update_model_config",
     },
+}
+
+# 作业生命周期动作：均以 assignmentId 定位对象，共用归属与存在性复验
+_ASSIGNMENT_ACTIONS = frozenset({
+    "publish_assignment",
+    "update_assignment",
+    "delete_assignment",
+})
+
+# 审批载荷中由服务端注入的保留键：参与哈希复验，但绝不进入业务写路径。
+# beforeSnapshot 是创建草案时冻结的旧值快照（决策 D2），仅供审批界面做字段级 diff。
+_ACTION_RESERVED_KEYS = frozenset({"assignmentId", "beforeSnapshot"})
+
+# 作业可被 Agent 提案修改的字段（对齐 schemas/assignment.py:AssignmentUpdate）。
+# 刻意排除 aiRule（改评分量表会让已有 AI 评分失效）与 attachments
+# （引用的是 Agent 无法校验的已上传文件），这两项仍只能在教师页面手工修改。
+_ASSIGNMENT_UPDATE_ALLOWED_FIELDS = {
+    "title",
+    "description",
+    "classes",
+    "startDate",
+    "endDate",
+    "allowAttachments",
 }
 
 _AI_RULE_ALLOWED_FIELDS = {
@@ -59,6 +85,73 @@ def _parse_positive_int_id(value, label: str) -> int:
     return parsed
 
 
+def _assert_owned_classes(db: Session, raw_class_ids, actor_user_id: int) -> None:
+    """班级列表必须全部存在且属于当前教师。"""
+    if not isinstance(raw_class_ids, list):
+        raise ValueError("班级列表格式非法")
+    try:
+        class_ids = [
+            _parse_positive_int_id(class_id, "班级 ID")
+            for class_id in raw_class_ids
+        ]
+    except ValueError as exc:
+        raise ValueError("班级列表包含非法 ID") from exc
+    classes = (
+        db.query(Class).filter(Class.id.in_(set(class_ids))).all()
+        if class_ids
+        else []
+    )
+    owned_ids = {
+        class_.id
+        for class_ in classes
+        if class_.teacher_id == actor_user_id
+    }
+    if owned_ids != set(class_ids):
+        raise ValueError("班级不存在或不属于当前教师")
+
+
+def _validate_assignment_action(
+    action_type: str,
+    payload: dict,
+    actor_user_id: int,
+    db: Session,
+) -> None:
+    """作业生命周期动作的归属、状态机与字段白名单复验。
+
+    存在性/归属在此拦截，避免落到 crud 层抛 NotFoundException 变成 500。
+    """
+    allowed_keys = set(_ACTION_RESERVED_KEYS)
+    if action_type == "update_assignment":
+        allowed_keys.add("changes")
+    unknown_keys = set(payload) - allowed_keys
+    if unknown_keys:
+        raise ValueError("作业操作载荷包含未授权字段")
+
+    assignment_id = _parse_positive_int_id(payload.get("assignmentId"), "作业 ID")
+    assignment = db.query(Assignment).filter(
+        Assignment.alive(),
+        Assignment.id == assignment_id,
+    ).first()
+    if assignment is None or assignment.teacher_id != actor_user_id:
+        raise ValueError("作业不存在或不属于当前教师")
+
+    if action_type == "publish_assignment":
+        if assignment.status != "draft":
+            raise ValueError("作业当前状态不可发布")
+        if not assignment.classes:
+            raise ValueError("作业未关联班级，不能发布")
+
+    if action_type == "update_assignment":
+        changes = payload.get("changes")
+        if not isinstance(changes, dict) or not changes:
+            raise ValueError("作业更新变更内容不能为空")
+        unknown_fields = set(changes) - _ASSIGNMENT_UPDATE_ALLOWED_FIELDS
+        if unknown_fields:
+            raise ValueError("作业更新载荷包含未授权字段")
+        if "classes" in changes:
+            _assert_owned_classes(db, changes["classes"], actor_user_id)
+
+
 def validate_action_permission(
     action_type: str,
     payload: dict,
@@ -73,28 +166,9 @@ def validate_action_permission(
         if unknown_fields:
             raise ValueError("AI 规则载荷包含未授权字段")
     if action_type == "create_assignment_draft" and db is not None:
-        raw_class_ids = payload.get("classes", [])
-        if not isinstance(raw_class_ids, list):
-            raise ValueError("班级列表格式非法")
-        try:
-            class_ids = [
-                _parse_positive_int_id(class_id, "班级 ID")
-                for class_id in raw_class_ids
-            ]
-        except ValueError as exc:
-            raise ValueError("班级列表包含非法 ID") from exc
-        classes = (
-            db.query(Class).filter(Class.id.in_(set(class_ids))).all()
-            if class_ids
-            else []
-        )
-        owned_ids = {
-            class_.id
-            for class_ in classes
-            if class_.teacher_id == actor_user_id
-        }
-        if owned_ids != set(class_ids):
-            raise ValueError("班级不存在或不属于当前教师")
+        _assert_owned_classes(db, payload.get("classes", []), actor_user_id)
+    if action_type in _ASSIGNMENT_ACTIONS and db is not None:
+        _validate_assignment_action(action_type, payload, actor_user_id, db)
     if action_type == "update_model_config":
         changes = payload.get("changes")
         if not payload.get("code") or not isinstance(changes, dict) or not changes:
@@ -123,6 +197,7 @@ def validate_action_permission(
         ).first()
         assignment = (
             db.query(Assignment).filter(
+                Assignment.alive(),
                 Assignment.id == submission.assignment_id,
             ).first()
             if submission
@@ -168,13 +243,9 @@ def execute_approved_business_action(
 ) -> dict:
     """执行白名单操作；MySQL 幂等账本提供跨库崩溃后的重复执行保护。"""
 
-    validate_action_permission(
-        action_type,
-        payload,
-        actor.id,
-        actor.role,
-        db,
-    )
+    # 角色白名单不依赖对象状态，任何路径（含重放）都必须先过。
+    if action_type not in _ROLE_ACTIONS.get(actor.role, set()):
+        raise ValueError("当前角色无权审批该操作")
     ledger = db.query(AgentActionExecution).filter(
         AgentActionExecution.idempotency_key == idempotency_key,
     ).first()
@@ -184,6 +255,15 @@ def execute_approved_business_action(
         if ledger.status == "completed":
             return ledger.result_json or {}
         raise ValueError("该操作已进入执行流程，请人工核对执行结果")
+    # 对象级校验必须在账本命中之后：状态迁移类动作（发布/删除）重放时，
+    # 首次执行造成的状态变化会让前置条件不再成立，先校验会把合法重放误拒。
+    validate_action_permission(
+        action_type,
+        payload,
+        actor.id,
+        actor.role,
+        db,
+    )
     ledger = AgentActionExecution(
         idempotency_key=idempotency_key,
         action_type=action_type,
@@ -252,6 +332,43 @@ def _execute_business_action(
             teacher_score=score,
             teacher_review_content=str(payload.get("teacherReviewContent", "")),
         )
+    if action_type in _ASSIGNMENT_ACTIONS:
+        assignment_id = _parse_positive_int_id(payload.get("assignmentId"), "作业 ID")
+        if action_type == "publish_assignment":
+            result = assignment_crud.update_status(
+                db,
+                assignment_id=assignment_id,
+                teacher_id=actor.id,
+                status="published",
+                terminated_reason=None,
+            )
+            return {"success": True, "resource": result}
+        if action_type == "update_assignment":
+            # 只投影白名单变更字段：assignmentId 与 beforeSnapshot 绝不进入写路径
+            changes = payload.get("changes") or {}
+            data = {
+                key: changes[key]
+                for key in _ASSIGNMENT_UPDATE_ALLOWED_FIELDS
+                if key in changes
+            }
+            if not data:
+                raise ValueError("作业更新变更内容不能为空")
+            result = assignment_crud.update_assignment(
+                db,
+                assignment_id=assignment_id,
+                teacher_id=actor.id,
+                data=data,
+            )
+            return {"success": True, "resource": result}
+        assignment_crud.delete_assignment(
+            db,
+            assignment_id=assignment_id,
+            teacher_id=actor.id,
+        )
+        return {
+            "success": True,
+            "resource": {"assignmentId": str(assignment_id), "deleted": True},
+        }
     if action_type == "update_model_config":
         model = ai_model_crud.update_config(
             db,
