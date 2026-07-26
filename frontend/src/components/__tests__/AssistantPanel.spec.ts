@@ -7,9 +7,13 @@ import AssistantPanel from "../AssistantPanel.vue";
 const apiMocks = vi.hoisted(() => ({
   cancelRun: vi.fn(),
   createSession: vi.fn(),
+  deleteSession: vi.fn(),
+  getRunArtifacts: vi.fn(),
   getSessionMessages: vi.fn(),
   listSessions: vi.fn(),
+  renameSession: vi.fn(),
   streamAssistantRun: vi.fn(),
+  submitRunFeedback: vi.fn(),
 }));
 
 vi.mock("@/api/assistant", () => apiMocks);
@@ -21,6 +25,7 @@ const ChatViewStub = {
   template: `
     <div>
       <div data-testid="messages">{{ messages.map((m) => m.content).join("|") }}</div>
+      <div data-testid="artifacts">{{ messages.flatMap((m) => (m.artifacts || []).map((a) => a.label + ":" + a.detail)).join("|") }}</div>
       <div data-testid="streaming">{{ streamingContent }}</div>
       <button data-testid="send" @click="$emit('send', 'hello')" />
     </div>
@@ -60,6 +65,7 @@ describe("AssistantPanel lifecycle", () => {
     vi.clearAllMocks();
     apiMocks.createSession.mockResolvedValue({ sessionId: "session-1" });
     apiMocks.listSessions.mockResolvedValue({ sessions: [] });
+    apiMocks.getRunArtifacts.mockResolvedValue({ runId: "run-1", items: [] });
     apiMocks.cancelRun.mockResolvedValue({
       runId: "run-1",
       status: "cancelled",
@@ -72,6 +78,70 @@ describe("AssistantPanel lifecycle", () => {
         });
         return new AbortController();
       },
+    );
+  });
+
+  it("发送时携带当前页面路径作为 pageContext", async () => {
+    const wrapper = mountPanel();
+    await wrapper.get('[data-testid="send"]').trigger("click");
+    await flushPromises();
+
+    expect(apiMocks.streamAssistantRun).toHaveBeenCalledWith(
+      "hello",
+      "session-1",
+      expect.any(Object),
+      expect.objectContaining({ pageContext: expect.any(String) }),
+    );
+  });
+
+  it("运行完成后产物摘要挂到对应回答下，拉取失败不影响对话", async () => {
+    let capturedCallbacks: any = null;
+    apiMocks.streamAssistantRun.mockImplementation(
+      (_message: string, _sessionId: string, callbacks: any) => {
+        capturedCallbacks = callbacks;
+        callbacks.onEvent({ type: "run.started", data: { run_id: "run-1" } });
+        return new AbortController();
+      },
+    );
+    apiMocks.getSessionMessages.mockResolvedValue({
+      sessionId: "session-1",
+      messages: [
+        { role: "user", content: "hello", runId: "run-1" },
+        { role: "assistant", content: "这是回答", runId: "run-1" },
+      ],
+    });
+    apiMocks.getRunArtifacts.mockResolvedValue({
+      runId: "run-1",
+      items: [
+        {
+          artifactType: "review_result",
+          schemaVersion: "v1",
+          payload: { approved: true, issues: [] },
+          createdAt: null,
+        },
+      ],
+    });
+
+    const wrapper = mountPanel();
+    await wrapper.get('[data-testid="send"]').trigger("click");
+    await flushPromises();
+    capturedCallbacks.onDone("这是回答");
+    await flushPromises();
+
+    expect(apiMocks.getRunArtifacts).toHaveBeenCalledWith("run-1");
+    expect(wrapper.get('[data-testid="artifacts"]').text()).toContain(
+      "安全审核:已通过",
+    );
+
+    // 第二轮产物拉取失败：对话正常，不新增产物条目
+    apiMocks.getRunArtifacts.mockRejectedValue(new Error("network"));
+    await wrapper.get('[data-testid="send"]').trigger("click");
+    await flushPromises();
+    capturedCallbacks.onDone("第二轮回答");
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="messages"]').text()).toContain(
+      "这是回答",
     );
   });
 
@@ -327,6 +397,7 @@ describe("AssistantPanel 审批卡片", () => {
     vi.clearAllMocks();
     apiMocks.createSession.mockResolvedValue({ sessionId: "session-1" });
     apiMocks.listSessions.mockResolvedValue({ sessions: [] });
+    apiMocks.getRunArtifacts.mockResolvedValue({ runId: "run-1", items: [] });
     apiMocks.cancelRun.mockResolvedValue({
       runId: "run-1",
       status: "cancelled",

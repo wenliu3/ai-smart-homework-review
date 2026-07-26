@@ -127,3 +127,44 @@ describe("formatDiffValue", () => {
     expect(formatDiffValue("文本")).toBe("文本");
   });
 });
+
+// ========== 运行时间线纯函数（规划 5.4） ==========
+
+import { agentLabel, reduceTimelineEvent } from "../timeline";
+
+describe("reduceTimelineEvent", () => {
+  it("按事件流累积步骤：路由 → 运行中 → 完成", () => {
+    let steps: ReturnType<typeof reduceTimelineEvent> = [];
+    steps = reduceTimelineEvent(steps, {
+      type: "route.selected", data: { intent: "teaching_data" },
+    });
+    steps = reduceTimelineEvent(steps, {
+      type: "agent.started", data: { agent: "teacher_data_agent" },
+    });
+
+    expect(steps).toEqual([
+      { key: "route", label: "分析请求", status: "done" },
+      { key: "teacher_data_agent", label: "查询教学数据", status: "running" },
+    ]);
+
+    steps = reduceTimelineEvent(steps, {
+      type: "agent.completed", data: { agent: "teacher_data_agent" },
+    });
+    expect(steps[1].status).toBe("done");
+  });
+
+  it("重复事件与无关事件不产生重复步骤", () => {
+    let steps: ReturnType<typeof reduceTimelineEvent> = [];
+    steps = reduceTimelineEvent(steps, { type: "route.selected", data: {} });
+    steps = reduceTimelineEvent(steps, { type: "route.selected", data: {} });
+    steps = reduceTimelineEvent(steps, { type: "content.delta", data: {} });
+
+    expect(steps).toHaveLength(1);
+  });
+
+  it("内部标识符映射为中文，未知名称回退通用文案", () => {
+    expect(agentLabel("student_final_reviewer")).toBe("安全审核");
+    expect(agentLabel("mystery_agent_v9")).toBe("处理中");
+    expect(agentLabel("mystery_agent_v9")).not.toContain("agent");
+  });
+});

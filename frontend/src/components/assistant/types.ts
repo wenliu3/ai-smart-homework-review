@@ -7,6 +7,14 @@ export interface RenderedAssistantMessage {
   approval?: ApprovalCardData;
   /** 产生该回答的运行 ID；有值的 assistant 消息才显示 👍/👎。 */
   runId?: string | null;
+  /** 运行产物摘要（规划 5.4）：运行完成后尽力拉取，失败不影响对话。 */
+  artifacts?: ArtifactCardItem[];
+}
+
+/** 运行产物卡片条目（见 artifacts.ts）。 */
+export interface ArtifactCardItem {
+  label: string;
+  detail: string;
 }
 
 /** approval.required 事件在聊天流里渲染成的卡片数据（只含安全字段）。 */

@@ -218,6 +218,139 @@ def _merge_usage(left: dict | None, right: dict | None) -> dict:
     }
 
 
+class _StreamRunContext:
+    """一次图流式消费的可变追踪状态；异常时由调用方收口 running Step。"""
+
+    def __init__(self) -> None:
+        self.running_step_ids: dict[str, int] = {}
+        self.node_started_at: dict[str, float] = {}
+        self.active_node: str | None = None
+        self.last_boundary = time.monotonic()
+        self.run_usage: dict = {}
+        self.usage_calls = 0
+
+    def close_running(
+        self, sdb: Session, user_id: int, *, status: str, error_code: str,
+    ) -> None:
+        for step_id in self.running_step_ids.values():
+            agent_run_crud.finish_step(
+                sdb, step_id, user_id, status=status, error_code=error_code,
+            )
+        self.running_step_ids.clear()
+
+
+def _consume_graph_stream(
+    graph,
+    initial_state: dict,
+    *,
+    sdb: Session,
+    run_id: str,
+    user_id: int,
+    emit,
+    supervisor_node: str,
+    ctx: "_StreamRunContext",
+) -> dict:
+    """消费 stream(updates+custom)：节点事件透传、Step 生命周期、usage 聚合。
+
+    学生/管理员真流式路径共用（规划 5.4，对齐教师路径语义）；
+    异常向上抛，由调用方分类并用 ctx.close_running 收口。
+    """
+    final_state = dict(initial_state)
+    for part in graph.stream(
+        initial_state,
+        stream_mode=["updates", "custom"],
+        version="v2",
+    ):
+        if part["type"] == "custom":
+            event = part["data"]
+            if event.get("type") == "agent.started":
+                agent_name = event.get("data", {}).get("agent")
+                if agent_name:
+                    ctx.node_started_at[agent_name] = time.monotonic()
+                    ctx.active_node = agent_name
+                    ctx.running_step_ids[agent_name] = agent_run_crud.start_step(
+                        sdb,
+                        run_id=run_id,
+                        user_id=user_id,
+                        node_name=agent_name,
+                    ).id
+            emit(event)
+            continue
+        if part["type"] != "updates":
+            continue
+        for node_name, update in part["data"].items():
+            final_state.update(update)
+            now_ts = time.monotonic()
+            started = ctx.node_started_at.pop(node_name, ctx.last_boundary)
+            step_usage = update.get("usage") or {}
+            if step_usage:
+                ctx.run_usage = _merge_usage(ctx.run_usage, step_usage)
+                ctx.usage_calls += 1
+            evidence = update.get(
+                "evidence_refs", final_state.get("evidence_refs", []),
+            )
+            duration = max(1, int((now_ts - started) * 1000))
+            running_id = ctx.running_step_ids.pop(node_name, None)
+            if running_id is not None:
+                agent_run_crud.finish_step(
+                    sdb, running_id, user_id,
+                    status="completed",
+                    output=_json_safe(update),
+                    evidence_refs=_json_safe(evidence),
+                    usage=step_usage or None,
+                    duration_ms=duration,
+                )
+            else:
+                agent_run_crud.append_step(
+                    sdb,
+                    run_id=run_id,
+                    user_id=user_id,
+                    node_name=node_name,
+                    status="completed",
+                    output=_json_safe(update),
+                    evidence_refs=_json_safe(evidence),
+                    usage=step_usage or None,
+                    duration_ms=duration,
+                )
+            if node_name == ctx.active_node:
+                ctx.active_node = None
+            ctx.last_boundary = now_ts
+            if node_name == supervisor_node:
+                decision = update.get("intent")
+                if decision is not None:
+                    agent_run_crud.update_run_route(
+                        sdb,
+                        run_id=run_id,
+                        user_id=user_id,
+                        intent=decision.intent.value,
+                        risk_level=decision.risk_level.value,
+                    )
+    return final_state
+
+
+# 单个内容分片的长度上限（段落过长时兜底切块）
+_DELTA_CHUNK_CHARS = 400
+
+
+def _emit_content_deltas(emit, final_answer: str) -> None:
+    """审核通过后按段落逐段放行（决策 D5）。
+
+    严禁在审核/finalize 之前调用——「先流出、审核否决后撤回」被明确禁止。
+    分隔符保留在片段内，客户端顺序拼接可精确还原全文。
+    """
+    if not final_answer:
+        return
+    paragraphs = final_answer.split("\n\n")
+    for index, paragraph in enumerate(paragraphs):
+        piece = paragraph + (
+            "\n\n" if index < len(paragraphs) - 1 else ""
+        )
+        while piece:
+            chunk, piece = piece[:_DELTA_CHUNK_CHARS], piece[_DELTA_CHUNK_CHARS:]
+            if chunk:
+                emit({"type": "content.delta", "data": {"content": chunk}})
+
+
 def _build_session_summary(user_message: str, final_answer: str) -> str:
     """确定性会话摘要：截断拼接，不调用 LLM（规格阶段 1.5 明令）。"""
     question = (user_message or "").strip().replace("\n", " ")[:120]
@@ -352,6 +485,7 @@ def orchestrate_teacher_run(
     assistant_db: Session | None = None,
     budget: RunBudget | None = None,
     event_callback=None,
+    page_context: str | None = None,
 ) -> OrchestrationResult:
     """运行教师图并将 Run/Step/Message 持久化到 PostgreSQL。
 
@@ -372,7 +506,7 @@ def orchestrate_teacher_run(
     try:
         return _orchestrate_inner(
             sdb, teacher_id, message, session_id, request_id, specialists, budget,
-            event_callback,
+            event_callback, page_context,
         )
     finally:
         if own_db:
@@ -388,6 +522,7 @@ def _orchestrate_inner(
     specialists: Any,
     budget: RunBudget | None,
     event_callback,
+    page_context: str | None = None,
 ) -> OrchestrationResult:
     from ..models import AgentMessage, AgentSession
 
@@ -456,6 +591,7 @@ def _orchestrate_inner(
         "run_id": run.id,
         "actor": actor,
         "user_message": message,
+        "page_context": page_context or "",
         "conversation_summary": owned.summary or "",
         "recent_messages": recent_messages,
         "runtime_budget": budget,
@@ -671,11 +807,7 @@ def _orchestrate_inner(
             status="cancelled",
             error_code=AGENT_RUN_CANCELLED,
         )
-    if final_answer:
-        for start in range(0, len(final_answer), 80):
-            emit({"type": "content.delta", "data": {
-                "content": final_answer[start:start + 80],
-            }})
+    _emit_content_deltas(emit, final_answer)
     emit({"type": "run.completed", "data": {
         "final_answer_length": len(final_answer),
     }})
@@ -701,6 +833,7 @@ def stream_assistant_events(
     message: str,
     session_id: str,
     request_id: str,
+    page_context: str | None = None,
 ) -> Iterator[ChatStreamEvent]:
     """新版 SSE 流：将教师图运行结果以 JSON 事件序列输出。
 
@@ -737,6 +870,7 @@ def stream_assistant_events(
                     request_id=request_id,
                     specialists=specialists,
                     event_callback=enqueue,
+                    page_context=page_context,
                 )
             # 测试替身或兼容实现可能不调用 callback，使用结果事件兜底。
             if emitted_count == 0:
@@ -827,6 +961,7 @@ def orchestrate_student_run(
     assistant_db: Session | None = None,
     budget: RunBudget | None = None,
     event_callback: Callable[[dict], None] | None = None,
+    page_context: str | None = None,
 ) -> OrchestrationResult:
     """执行学生主管 Graph，并按角色隔离会话、步骤和 Artifact。"""
 
@@ -903,35 +1038,30 @@ def orchestrate_student_run(
             subagents,
             is_cancelled=_is_cancelled,
         )
+        stream_ctx = _StreamRunContext()
         try:
-            final_state = graph.invoke({
-                "run_id": run.id,
-                "actor": actor,
-                "user_message": message,
-                "conversation_summary": session.summary or "",
-                "recent_messages": recent_messages,
-                "runtime_budget": budget or default_run_budget(),
-                "visited_nodes": [],
-            })
-            decision = final_state.get("intent")
-            if decision is not None:
-                agent_run_crud.update_run_route(
-                    sdb,
-                    run_id=run.id,
-                    user_id=student_id,
-                    intent=decision.intent.value,
-                    risk_level=decision.risk_level.value,
-                )
-            for node_name in final_state.get("visited_nodes", []):
-                agent_run_crud.append_step(
-                    sdb,
-                    run_id=run.id,
-                    user_id=student_id,
-                    node_name=node_name,
-                    status="completed",
-                )
+            # 真流式（规划 5.4）：对齐教师路径的节点事件与 Step 生命周期
+            final_state = _consume_graph_stream(
+                graph,
+                {
+                    "run_id": run.id,
+                    "actor": actor,
+                    "user_message": message,
+                    "page_context": page_context or "",
+                    "conversation_summary": session.summary or "",
+                    "recent_messages": recent_messages,
+                    "runtime_budget": budget or default_run_budget(),
+                    "visited_nodes": [],
+                },
+                sdb=sdb,
+                run_id=run.id,
+                user_id=student_id,
+                emit=emit,
+                supervisor_node="student_supervisor",
+                ctx=stream_ctx,
+            )
             final_answer = final_state.get("final_answer", "")
-            run_usage = final_state.get("usage") or {}
+            run_usage = stream_ctx.run_usage or final_state.get("usage") or {}
             if _finalize_run_or_detect_cancel_race(
                 sdb, run_id=run.id, user_id=student_id,
                 final_answer=final_answer,
@@ -950,11 +1080,9 @@ def orchestrate_student_run(
                     status="cancelled",
                     error_code=AGENT_RUN_CANCELLED,
                 )
-            for node in final_state.get("visited_nodes", []):
-                emit({"type": "agent.completed", "data": {"agent": node}})
-            emit({"type": "content.delta", "data": {"content": final_answer}})
+            _emit_content_deltas(emit, final_answer)
             emit({"type": "run.completed", "data": {}})
-            _record_model_usage(run_usage, 1 if run_usage else 0)
+            _record_model_usage(run_usage, stream_ctx.usage_calls)
             _write_session_summary(
                 sdb, session_id=session_id, user_id=student_id,
                 user_message=message, final_answer=final_answer,
@@ -965,6 +1093,10 @@ def orchestrate_student_run(
                 events=emitted_events,
             )
         except RunCancelled:
+            stream_ctx.close_running(
+                sdb, student_id,
+                status="cancelled", error_code=AGENT_RUN_CANCELLED,
+            )
             emit({
                 "type": "run.cancelled",
                 "data": {"error_code": AGENT_RUN_CANCELLED},
@@ -980,6 +1112,10 @@ def orchestrate_student_run(
             # 与教师路径一致：预算超限落稳定错误码，不误记为通用错误
             logger.warning(
                 "Student run budget exceeded: run_id=%s code=%s", run.id, e.code,
+            )
+            stream_ctx.close_running(
+                sdb, student_id,
+                status="failed", error_code=AGENT_BUDGET_EXCEEDED,
             )
             agent_run_crud.fail_run(
                 sdb,
@@ -1003,6 +1139,9 @@ def orchestrate_student_run(
                 AGENT_MODEL_TIMEOUT
                 if is_model_timeout(exc)
                 else AGENT_CHAT_ERROR
+            )
+            stream_ctx.close_running(
+                sdb, student_id, status="failed", error_code=error_code,
             )
             agent_run_crud.fail_run(
                 sdb,
@@ -1145,6 +1284,7 @@ def stream_student_events(
     message: str,
     session_id: str,
     request_id: str,
+    page_context: str | None = None,
 ) -> Iterator[ChatStreamEvent]:
     """学生 Graph 的 JSON SSE 入口。"""
 
@@ -1159,6 +1299,7 @@ def stream_student_events(
             "message": message,
             "session_id": session_id,
             "request_id": request_id,
+            "page_context": page_context,
         },
         container_factory=StudentSubagentContainer,
     )
@@ -1173,6 +1314,7 @@ def orchestrate_admin_run(
     assistant_db: Session | None = None,
     budget: RunBudget | None = None,
     event_callback: Callable[[dict], None] | None = None,
+    page_context: str | None = None,
 ) -> OrchestrationResult:
     """执行管理员主管 Graph，并按角色隔离持久化运行记录。"""
     from ..models import AgentMessage, AgentSession
@@ -1247,35 +1389,30 @@ def orchestrate_admin_run(
             request_id=request_id,
             session_id=session_id,
         )
+        stream_ctx = _StreamRunContext()
         try:
-            final_state = graph.invoke({
-                "run_id": run.id,
-                "actor": actor,
-                "user_message": message,
-                "conversation_summary": session.summary or "",
-                "recent_messages": recent_messages,
-                "runtime_budget": budget or default_run_budget(),
-                "visited_nodes": [],
-            })
-            decision = final_state.get("intent")
-            if decision is not None:
-                agent_run_crud.update_run_route(
-                    sdb,
-                    run_id=run.id,
-                    user_id=admin_id,
-                    intent=decision.intent.value,
-                    risk_level=decision.risk_level.value,
-                )
-            for node_name in final_state.get("visited_nodes", []):
-                agent_run_crud.append_step(
-                    sdb,
-                    run_id=run.id,
-                    user_id=admin_id,
-                    node_name=node_name,
-                    status="completed",
-                )
+            # 真流式（规划 5.4）：对齐教师路径的节点事件与 Step 生命周期
+            final_state = _consume_graph_stream(
+                graph,
+                {
+                    "run_id": run.id,
+                    "actor": actor,
+                    "user_message": message,
+                    "page_context": page_context or "",
+                    "conversation_summary": session.summary or "",
+                    "recent_messages": recent_messages,
+                    "runtime_budget": budget or default_run_budget(),
+                    "visited_nodes": [],
+                },
+                sdb=sdb,
+                run_id=run.id,
+                user_id=admin_id,
+                emit=emit,
+                supervisor_node="admin_supervisor",
+                ctx=stream_ctx,
+            )
             final_answer = final_state.get("final_answer", "")
-            run_usage = final_state.get("usage") or {}
+            run_usage = stream_ctx.run_usage or final_state.get("usage") or {}
             if _finalize_run_or_detect_cancel_race(
                 sdb, run_id=run.id, user_id=admin_id,
                 final_answer=final_answer,
@@ -1294,11 +1431,9 @@ def orchestrate_admin_run(
                     status="cancelled",
                     error_code=AGENT_RUN_CANCELLED,
                 )
-            for node in final_state.get("visited_nodes", []):
-                emit({"type": "agent.completed", "data": {"agent": node}})
-            emit({"type": "content.delta", "data": {"content": final_answer}})
+            _emit_content_deltas(emit, final_answer)
             emit({"type": "run.completed", "data": {}})
-            _record_model_usage(run_usage, 1 if run_usage else 0)
+            _record_model_usage(run_usage, stream_ctx.usage_calls)
             _write_session_summary(
                 sdb, session_id=session_id, user_id=admin_id,
                 user_message=message, final_answer=final_answer,
@@ -1309,6 +1444,10 @@ def orchestrate_admin_run(
                 events=emitted_events,
             )
         except RunCancelled:
+            stream_ctx.close_running(
+                sdb, admin_id,
+                status="cancelled", error_code=AGENT_RUN_CANCELLED,
+            )
             emit({
                 "type": "run.cancelled",
                 "data": {"error_code": AGENT_RUN_CANCELLED},
@@ -1324,6 +1463,10 @@ def orchestrate_admin_run(
             # 与教师路径一致：预算超限落稳定错误码，不误记为通用错误
             logger.warning(
                 "Admin run budget exceeded: run_id=%s code=%s", run.id, e.code,
+            )
+            stream_ctx.close_running(
+                sdb, admin_id,
+                status="failed", error_code=AGENT_BUDGET_EXCEEDED,
             )
             agent_run_crud.fail_run(
                 sdb,
@@ -1347,6 +1490,9 @@ def orchestrate_admin_run(
                 AGENT_MODEL_TIMEOUT
                 if is_model_timeout(exc)
                 else AGENT_CHAT_ERROR
+            )
+            stream_ctx.close_running(
+                sdb, admin_id, status="failed", error_code=error_code,
             )
             agent_run_crud.fail_run(
                 sdb,
@@ -1379,6 +1525,7 @@ def stream_admin_events(
     message: str,
     session_id: str,
     request_id: str,
+    page_context: str | None = None,
 ) -> Iterator[ChatStreamEvent]:
     """管理员 Graph 的 JSON SSE 入口。"""
     from .subagents import AdminSubagentContainer
@@ -1392,6 +1539,7 @@ def stream_admin_events(
             "message": message,
             "session_id": session_id,
             "request_id": request_id,
+            "page_context": page_context,
         },
         container_factory=AdminSubagentContainer,
     )

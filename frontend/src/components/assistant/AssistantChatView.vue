@@ -63,6 +63,17 @@
               @click="sendFeedback(message.runId, -1)"
             >👎</button>
           </div>
+          <div
+            v-if="message.artifacts && message.artifacts.length"
+            class="artifact-strip"
+            data-testid="artifact-strip"
+          >
+            <span
+              v-for="artifact in message.artifacts"
+              :key="artifact.label"
+              class="artifact-chip"
+            >{{ artifact.label }}：{{ artifact.detail }}</span>
+          </div>
         </div>
       </div>
 
@@ -76,7 +87,12 @@
         ></div>
       </div>
 
-      <div v-if="isGenerating && currentPhase" class="phase-indicator">
+      <RunTimeline v-if="isGenerating" :steps="runSteps || []" />
+
+      <div
+        v-if="isGenerating && currentPhase && (runSteps || []).length === 0"
+        class="phase-indicator"
+      >
         <el-icon class="phase-icon"><Loading /></el-icon>
         <span>{{ currentPhase }}</span>
       </div>
@@ -141,6 +157,8 @@ import {
 
 import { approvalActionLabel } from "./approval";
 import { renderSafeMarkdown } from "./markdown";
+import RunTimeline from "./RunTimeline.vue";
+import type { TimelineStep } from "./timeline";
 import type { AssistantRoleConfig } from "./role-config";
 import type { RenderedAssistantMessage } from "./types";
 
@@ -150,6 +168,7 @@ const props = defineProps<{
   streamingContent: string;
   isGenerating: boolean;
   currentPhase: string;
+  runSteps?: TimelineStep[];
 }>();
 
 const emit = defineEmits<{
@@ -224,6 +243,8 @@ defineExpose({ focus, scrollToBottom });
 .feedback-btn { border: none; background: transparent; padding: 1px 5px; border-radius: 8px; font-size: 13px; line-height: 1.4; cursor: pointer; opacity: .45; }
 .feedback-btn:hover { opacity: .9; background: #f4f4f5; }
 .feedback-btn.active { opacity: 1; background: #f0edfa; }
+.artifact-strip { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 5px; }
+.artifact-chip { font-size: 12px; color: #909399; background: #f4f4f5; border-radius: 8px; padding: 1px 7px; }
 .approval-card { border-left: 3px solid #745fc1; }
 .approval-card-title { display: flex; align-items: center; gap: 6px; font-weight: 600; color: #745fc1; }
 .approval-card-summary { margin: 8px 0 0; }

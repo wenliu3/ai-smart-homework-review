@@ -60,6 +60,7 @@
         :streaming-content="streamingContent"
         :is-generating="isGenerating"
         :current-phase="currentPhase"
+        :run-steps="runSteps"
         @send="sendMessage"
         @stop="stopGenerating"
         @open-approvals="currentView = 'approval'"
@@ -101,6 +102,7 @@ import {
   cancelRun,
   createSession,
   deleteSession,
+  getRunArtifacts,
   getSessionMessages,
   listSessions,
   renameSession,
@@ -109,6 +111,7 @@ import {
   type AssistantSession,
 } from "@/api/assistant";
 import { parseApprovalRequired } from "./assistant/approval";
+import { summarizeArtifacts } from "./assistant/artifacts";
 import AssistantApprovalView from "./assistant/AssistantApprovalView.vue";
 import AssistantChatView from "./assistant/AssistantChatView.vue";
 import AssistantHistoryView from "./assistant/AssistantHistoryView.vue";
@@ -117,6 +120,7 @@ import {
   getAssistantRoleConfig,
   type AssistantRole,
 } from "./assistant/role-config";
+import { reduceTimelineEvent, type TimelineStep } from "./assistant/timeline";
 import type {
   ApprovalCardData,
   RenderedAssistantMessage,
@@ -146,6 +150,8 @@ const historyLoading = ref(false);
 const historyError = ref("");
 const currentPhase = ref("");
 const currentRunId = ref<string | null>(null);
+// 运行步骤时间线（规划 5.4）：从 SSE 事件流实时累积
+const runSteps = ref<TimelineStep[]>([]);
 const chatView = ref<ChatViewExposed>();
 // 本会话产生的审批卡片：服务端消息列表里没有它们，
 // onDone 用服务端快照覆盖消息后需要按顺序重新挂回去。
@@ -199,6 +205,7 @@ async function sendMessage(text: string) {
   streamingContent.value = "";
   currentPhase.value = "";
   currentRunId.value = null;
+  runSteps.value = [];
   scrollToBottom();
 
   let sid: string;
@@ -225,6 +232,7 @@ async function sendMessage(text: string) {
       if (event.type === "run.started" && event.data?.run_id) {
         currentRunId.value = String(event.data.run_id);
       }
+      runSteps.value = reduceTimelineEvent(runSteps.value, event);
       if (event.type === "approval.required") {
         const approval = parseApprovalRequired(event.data);
         if (!approval) return;
@@ -246,6 +254,7 @@ async function sendMessage(text: string) {
     onDone: async (finalAnswer) => {
       if (generation !== sendGeneration) return;
       const streamedAnswer = finalAnswer || streamingContent.value;
+      const finishedRunId = currentRunId.value;
       finishRun();
       try {
         const result = await getSessionMessages(sid);
@@ -262,11 +271,14 @@ async function sendMessage(text: string) {
       } catch {
         if (generation !== sendGeneration || sessionId.value !== sid) return;
         if (streamedAnswer) {
-          messages.value.push(makeMessage("assistant", streamedAnswer));
+          messages.value.push(
+            makeMessage("assistant", streamedAnswer, finishedRunId),
+          );
         }
       }
       streamingContent.value = "";
       scrollToBottom();
+      await attachRunArtifacts(finishedRunId, generation, sid);
     },
     onError: (error) => {
       if (generation !== sendGeneration) return;
@@ -277,7 +289,34 @@ async function sendMessage(text: string) {
       );
       scrollToBottom();
     },
+  }, {
+    // 用户当前页面路径（规划 5.6）：仅作提示上下文，非权限依据
+    pageContext: window.location.pathname.slice(0, 200),
   });
+}
+
+/**
+ * 运行完成后尽力拉取产物摘要（规划 5.4），挂到对应回答气泡下。
+ * 失败静默：产物是补充信息，不能影响对话主流程。
+ */
+async function attachRunArtifacts(
+  runId: string | null,
+  generation: number,
+  sid: string,
+) {
+  if (!runId) return;
+  try {
+    const result = await getRunArtifacts(runId);
+    if (generation !== sendGeneration || sessionId.value !== sid) return;
+    const cards = summarizeArtifacts(result.items || []);
+    if (cards.length === 0) return;
+    const target = messages.value.find(
+      (message) => message.role === "assistant" && message.runId === runId,
+    );
+    if (target) target.artifacts = cards;
+  } catch {
+    // 尽力而为
+  }
 }
 
 function finishRun() {

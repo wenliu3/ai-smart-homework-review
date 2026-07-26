@@ -82,6 +82,7 @@ declare module '@vue/runtime-core' {
     PageHeader: typeof import('./src/components/PageHeader.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    RunTimeline: typeof import('./src/components/assistant/RunTimeline.vue')['default']
     WangEditor: typeof import('./src/components/WangEditor.vue')['default']
   }
   export interface ComponentCustomProperties {

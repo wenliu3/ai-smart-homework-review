@@ -2,6 +2,7 @@
 from typing import Annotated, TypedDict
 
 from langgraph.graph import END, START, StateGraph
+from langgraph.config import get_stream_writer
 
 from ..contracts import (
     AdminIntent,
@@ -40,6 +41,7 @@ class AdminAgentState(TypedDict, total=False):
     编排层传入或节点返回的每个键都必须在此声明（对照 TeacherAgentState）。
     """
     user_message: str
+    page_context: str
     conversation_summary: str
     recent_messages: list[dict]
     intent: AdminIntentDecision
@@ -59,7 +61,17 @@ class AdminAgentState(TypedDict, total=False):
 
 
 def build_admin_graph(subagents, checkpointer=None, is_cancelled=None):
-    supervisor = AdminSupervisor()
+    supervisor = AdminSupervisor(
+        getattr(subagents, "route_classifier", None),
+    )
+
+
+    def emit(event):
+        """通过 LangGraph custom stream 实时发送事件；invoke 模式下安全忽略。"""
+        try:
+            get_stream_writer()(event)
+        except RuntimeError:
+            pass
 
     def check_runtime(state):
         budget = state.get("runtime_budget")
@@ -76,11 +88,10 @@ def build_admin_graph(subagents, checkpointer=None, is_cancelled=None):
 
     def route(state):
         check_runtime(state)
-        return with_visit(
-            state,
-            supervisor.route(state),
-            ADMIN_SUPERVISOR_NODE,
-        )
+        update = supervisor.route(state)
+        emit({"type": "route.selected",
+              "data": {"intent": update["intent"].intent.value}})
+        return with_visit(state, update, ADMIN_SUPERVISOR_NODE)
 
     def casual(state):
         check_runtime(state)
@@ -94,17 +105,21 @@ def build_admin_graph(subagents, checkpointer=None, is_cancelled=None):
     def invoke(name, method):
         def node(state):
             check_runtime(state)
-            return with_visit(state, method(state), name)
+            emit({"type": "agent.started", "data": {"agent": name}})
+            update = method(state)
+            emit({"type": "agent.completed", "data": {"agent": name}})
+            return with_visit(state, update, name)
 
         return node
 
     def reviewer(state):
         check_runtime(state)
-        return with_visit(
-            state,
-            subagents.final_reviewer(state),
-            ADMIN_FINAL_REVIEWER_NODE,
-        )
+        emit({"type": "agent.started",
+              "data": {"agent": ADMIN_FINAL_REVIEWER_NODE}})
+        update = subagents.final_reviewer(state)
+        emit({"type": "agent.completed",
+              "data": {"agent": ADMIN_FINAL_REVIEWER_NODE}})
+        return with_visit(state, update, ADMIN_FINAL_REVIEWER_NODE)
 
     def finalize(state):
         check_runtime(state)

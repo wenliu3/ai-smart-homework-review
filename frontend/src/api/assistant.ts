@@ -239,10 +239,17 @@ const HEARTBEAT_TIMEOUT_MS = 60_000;
  *
  * @returns AbortController — 调用 .abort() 取消流。
  */
+/** streamAssistantRun 可选项。 */
+export interface AssistantStreamOptions {
+  /** 用户当前所在页面路径（规划 5.6）：仅作为提示上下文，非权限依据。 */
+  pageContext?: string;
+}
+
 export function streamAssistantRun(
   message: string,
   sessionId: string,
   callbacks: AssistantStreamCallbacks,
+  options?: AssistantStreamOptions,
 ): AbortController {
   const controller = new AbortController();
   const baseURL = import.meta.env.VITE_API_BASE_URL || "/api";
@@ -297,7 +304,12 @@ export function streamAssistantRun(
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ message, session_id: sessionId }),
+      body: JSON.stringify({
+        message,
+        session_id: sessionId,
+        // 后端 CreateRunRequest 以 pageContext 别名接收
+        ...(options?.pageContext ? { pageContext: options.pageContext } : {}),
+      }),
       signal: controller.signal,
     })
       .then(async (response) => {
