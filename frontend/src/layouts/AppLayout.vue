@@ -59,14 +59,16 @@
       </el-footer>
     </div>
 
-    <!-- AI教学助手悬浮组件 — 仅教师/管理员可见 -->
+    <!-- 多角色 AI 助手悬浮组件 -->
     <template v-if="showAssistant">
       <FloatingAssistantButton
         :visible="!panelVisible"
+        :title="assistantTitle"
         @toggle="panelVisible = !panelVisible"
       />
       <AssistantPanel
         :visible="panelVisible"
+        :role="assistantRole"
         @close="panelVisible = false"
       />
     </template>
@@ -88,6 +90,11 @@ import AppSidebar from "./components/AppSidebar.vue";
 import AppHeader from "./components/AppHeader.vue";
 import FloatingAssistantButton from "@/components/FloatingAssistantButton.vue";
 import AssistantPanel from "@/components/AssistantPanel.vue";
+import {
+  getAssistantRoleConfig,
+  isAssistantRole,
+  type AssistantRole,
+} from "@/components/assistant/role-config";
 import { useStore } from "vuex";
 
 export default defineComponent({
@@ -129,14 +136,23 @@ export default defineComponent({
       store.dispatch("app/toggleSidebar");
     };
 
-    // AI教学助手面板
+    // 多角色 AI 助手面板
     const panelVisible = ref(false);
 
-    // 仅教师/管理员显示助手
     const userInfo = computed(() => store.getters["user/getUserInfo"]);
-    const showAssistant = computed(
-      () => userInfo.value?.role === "teacher" || userInfo.value?.role === "superadmin"
+    const assistantRole = computed<AssistantRole | undefined>(() => {
+      const role = userInfo.value?.role;
+      return isAssistantRole(role) ? role : undefined;
+    });
+    const showAssistant = computed(() => assistantRole.value !== undefined);
+    // 悬浮按钮提示文案与 AssistantPanel 标题保持一致（按角色区分）
+    const assistantTitle = computed(
+      () => getAssistantRoleConfig(assistantRole.value)?.title ?? "AI助手",
     );
+
+    watch(assistantRole, (role) => {
+      if (!role) panelVisible.value = false;
+    });
 
     // 窗口尺寸变化处理
     const handleResize = () => {
@@ -174,6 +190,8 @@ export default defineComponent({
       sidebarOpened,
       panelVisible,
       showAssistant,
+      assistantRole,
+      assistantTitle,
     };
   },
 });

@@ -59,7 +59,7 @@ export default defineComponent({
     // 计算当前激活菜单
     const activeMenu = computed(() => {
       const { meta, path } = route;
-      if (meta.activeMenu) {
+      if (typeof meta.activeMenu === "string") {
         return meta.activeMenu;
       }
       return path;

@@ -8,6 +8,9 @@ export {}
 declare module '@vue/runtime-core' {
   export interface GlobalComponents {
     AdaptiveTableContainer: typeof import('./src/components/AdaptiveTableContainer.vue')['default']
+    AssistantApprovalView: typeof import('./src/components/assistant/AssistantApprovalView.vue')['default']
+    AssistantChatView: typeof import('./src/components/assistant/AssistantChatView.vue')['default']
+    AssistantHistoryView: typeof import('./src/components/assistant/AssistantHistoryView.vue')['default']
     AssistantPanel: typeof import('./src/components/AssistantPanel.vue')['default']
     ElAlert: typeof import('element-plus/es')['ElAlert']
     ElAside: typeof import('element-plus/es')['ElAside']

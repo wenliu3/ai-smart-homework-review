@@ -204,11 +204,16 @@ const loadClassList = async () => {
 const loadAssignmentList = async (classId: string) => {
   try {
     const response = await getAssignmentList({
-      classId,
       page: 1,
       pageSize: 100, // 获取足够多的作业用于下拉选择
     });
-    assignmentList.value = response.items || [];
+    // 后端 get_teacher_assignments 不支持 classId 过滤，
+    // 这里按作业关联的班级（classes 字段）在前端过滤出所选班级的作业
+    assignmentList.value = (response.items || []).filter((assignment) =>
+      (assignment.classes || []).some(
+        (cls) => String(cls.id) === String(classId)
+      )
+    );
   } catch (error) {
     console.error("加载作业列表失败", error);
     ElMessage.error("加载作业列表失败");

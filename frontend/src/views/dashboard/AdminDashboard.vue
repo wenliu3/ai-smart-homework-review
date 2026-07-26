@@ -410,7 +410,7 @@ const allModelsOnline = computed(() => {
 });
 
 // 用户趋势（模拟数据）
-const userTrend = computed(() => "up");
+const userTrend = computed<"up" | "down" | "stable">(() => "up");
 const userTrendValue = computed(() => 15);
 
 // 方法

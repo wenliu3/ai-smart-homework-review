@@ -74,7 +74,7 @@ import { ref, reactive, computed, watch, nextTick } from "vue";
 import { ElMessage, type FormInstance, type FormRules } from "element-plus";
 import { Refresh } from "@element-plus/icons-vue";
 import { createClassForTeacher, updateClass } from "../../../../api/classes";
-import type { Class } from "../../../../types/classes";
+import type { Class, ClassStatus } from "../../../../types/classes";
 
 interface TeacherItem {
   id: number;
@@ -108,7 +108,7 @@ const formData = reactive({
   name: "",
   description: "",
   code: "",
-  status: "active" as string,
+  status: "active" as ClassStatus,
   maxStudents: 60,
 });
 

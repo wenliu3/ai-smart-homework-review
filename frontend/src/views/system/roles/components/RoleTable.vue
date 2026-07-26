@@ -133,7 +133,7 @@ const props = defineProps({
     required: true,
   },
   maxHeight: {
-    type: String,
+    type: [String, Number],
     default: "600px",
   },
   isMobile: {

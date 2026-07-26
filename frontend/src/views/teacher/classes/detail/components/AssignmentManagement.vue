@@ -192,7 +192,7 @@
             <el-col :span="8">
               <div class="bg-emerald-50 rounded-lg p-3 text-center">
                 <div class="text-[16px] font-medium text-emerald-600">
-                  {{ assignment.gradedSubmissions || 0 }}
+                  {{ assignment.reviewedSubmissions || 0 }}
                 </div>
                 <div class="text-[14px] text-emerald-500">已批改</div>
               </div>

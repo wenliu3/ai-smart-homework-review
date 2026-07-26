@@ -135,7 +135,7 @@ import type { SubmissionRecord } from "@/api/correcting";
 // Props
 interface Props {
   submissionData: SubmissionRecord[];
-  maxHeight?: string;
+  maxHeight?: string | number;
 }
 
 defineProps<Props>();

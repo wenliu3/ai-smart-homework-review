@@ -195,7 +195,7 @@ import {
   CopyDocument,
 } from "@element-plus/icons-vue";
 import moment from "moment";
-import type { Class } from "../types/classes";
+import type { Class } from "@/types/classes";
 
 interface Props {
   classData: Class;

@@ -318,17 +318,3 @@ export const dashboardApi = {
 };
 
 export default dashboardApi;
-
-// 显式导出所有类型接口（确保模块导出正确）
-export type {
-  DashboardApi,
-  AdminOverviewResponse,
-  AiModelStatsResponse,
-  RecentUsersResponse,
-  TeacherStatsResponse,
-  TeacherPendingTasksResponse,
-  StudentStatsResponse,
-  DistributionStat,
-  RoleDistribution,
-  StatusDistribution,
-};
