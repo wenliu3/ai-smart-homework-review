@@ -25,7 +25,7 @@ docs/superpowers/
 |---|---|---|
 | 阶段 0：基础治理与 PostgreSQL Agent 状态库 | 已完成 | 后端回归测试通过，双 Alembic 迁移可升降级 |
 | 阶段 1：教师只读多智能体 | 已完成 | 教师主管、专业 Agent、审核与结构化工具已接线（路由为关键词规则，LLM 路由见规划 5.1） |
-| 阶段 2：批改与查重工作流 | 部分完成 | 双 Agent 批改、Celery 幂等与确定性查重可用；批改上下文（作业要求/docx 图片）、人工复核降级、分维度展示、查重解释内容输入见规划 3B |
+| 阶段 2：批改与查重工作流 | 已完成 | 双 Agent 批改 + 3B 回补：作业要求/参考附件/docx 内嵌图进批改上下文、含图提交复核走 VISION_GRADER、结构化失败一次修复重试后转人工（原始草案留证）、RunBudget（模型调用≤6/120s）+ Celery 软超时、分维度产物接口与教师面板、学生 gradingRunId 进度轮询、查重解释带作业内容且经审核落 Run |
 | 阶段 3：写操作审批 | 已完成 | 审批执行机 + 教师写操作闭环：ACTION_DRAFT 路由、`teacher_action` specialist、`persist_action_draft` 节点、`approval.required` 事件、作业发布/修改/软删三动作、教师审批入口与字段级 diff |
 | 阶段 4：学生助手 | 已完成 | 辅导、反馈解释、学习规划可用；防代写为关键词+Prompt 约束，加固见规划 5.2 |
 | 阶段 5：管理员助手 | 部分完成 | 聚合运营、代码级脱敏、模型治理草案可用；审计缺操作日志数据源、连通性/延迟指标见规划 5.3 |
@@ -34,15 +34,16 @@ docs/superpowers/
 
 尚未实现/打折实现的功能全集与分期安排见[差距收敛总体规划](plans/2026-07-26-multi-agent-gap-closure-roadmap.md)（2026-07-26 盘点）。
 
-2026-07-26 阶段 3A 后仓库级验证：
+2026-07-26 阶段 3A/3B 后仓库级验证：
 
 - Conda 解释器：`D:\miniforge\envs\scientific_research\python.exe`（Python 3.12.13）。
-- 后端全量：499 passed（阶段 3A 前基线 359）；前端全量：116 passed（基线 73）。
+- 后端全量：551 passed（阶段 3A 前基线 359）；前端全量：121 passed（基线 73）。
 - 阶段 3A 后做了一轮多视角对抗式审查（25 条发现，驳回 21 条），确认并修复 4 条：
   批改队列未过滤软删作业、删用户守卫漏算软删作业致外键孤儿、
   只读提问被写意图词误判、修订路径残留上一轮草案被误落审批。
 - `vue-tsc --noEmit`、Vite 生产构建、Python `compileall` 均通过。
-- 双 Alembic 单 head：业务库 `a1c7f2d4b8e3`（assignments.deleted_at 软删列），会话库 `20260725_02`。
+- 双 Alembic 单 head：业务库 `c4e9a1b6d2f8`（assignments.deleted_at 软删列 +
+  submissions.grading_run_id），会话库 `20260725_02`。
 - 软删不变式：所有读取 Assignment 的查询（含 join / count）必须带 `Assignment.alive()`，
   软删作业与硬删对调用方等价不可见；提交记录保留以便误删恢复。
 - Docker 必须使用 `docker compose --env-file .env.docker up -d`；仅 backend 执行双库迁移，worker 只启动 Celery，避免并发迁移。
