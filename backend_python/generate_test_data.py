@@ -14,6 +14,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 from app.database import engine, SessionLocal, Base
+from app.assistant_database import assistant_engine, AssistantSessionLocal, AssistantBase
 from app.models import (
     User, Class, ClassStudent, Assignment, Submission,
     AiRule, AiModel, AgentChatMessage,
@@ -21,6 +22,8 @@ from app.models import (
 from app.config import settings
 
 Base.metadata.create_all(bind=engine)
+# AgentChatMessage 等 AI 会话表在 PostgreSQL 会话库（AssistantBase），需单独建表
+AssistantBase.metadata.create_all(bind=assistant_engine)
 
 
 def hash_pwd(pwd: str) -> str:
@@ -555,11 +558,13 @@ def main():
         # 8. AI 助手聊天记录 (可选)
         # ════════════════════════════════════════════════════════
         print("\n━ 8. AI 助手聊天记录 ━")
+        # 聊天记录在 PostgreSQL 会话库，须用 AssistantSessionLocal 读写（不能用业务库 db）
         chat_teacher = db.query(User).filter(User.username == "teacher").first()
         if chat_teacher:
-            existing_chat = db.query(AgentChatMessage).filter(
-                AgentChatMessage.teacher_id == chat_teacher.id
-            ).count()
+            with AssistantSessionLocal() as sdb:
+                existing_chat = sdb.query(AgentChatMessage).filter(
+                    AgentChatMessage.teacher_id == chat_teacher.id
+                ).count()
             if existing_chat > 0:
                 print(f"  ⏭️  聊天记录已存在 ({existing_chat} 条)")
             else:
@@ -582,16 +587,17 @@ def main():
                     },
                 ]
                 msg_count = 0
-                for sess in sessions:
-                    for role, content in sess["messages"]:
-                        db.add(AgentChatMessage(
-                            teacher_id=chat_teacher.id,
-                            session_id=sess["session_id"],
-                            role=role,
-                            content=content,
-                        ))
-                        msg_count += 1
-                db.commit()
+                with AssistantSessionLocal() as sdb:
+                    for sess in sessions:
+                        for role, content in sess["messages"]:
+                            sdb.add(AgentChatMessage(
+                                teacher_id=chat_teacher.id,
+                                session_id=sess["session_id"],
+                                role=role,
+                                content=content,
+                            ))
+                            msg_count += 1
+                    sdb.commit()
                 print(f"  ✅ 创建了 {msg_count} 条聊天记录 (2 个会话)")
 
         # ════════════════════════════════════════════════════════
@@ -607,7 +613,8 @@ def main():
         print(f"  作业: {db.query(Assignment).count()} 个")
         print(f"  提交: {db.query(Submission).count()} 条")
         print(f"  AI规则: {db.query(AiRule).count()} 条")
-        print(f"  聊天记录: {db.query(AgentChatMessage).count()} 条")
+        with AssistantSessionLocal() as sdb:
+            print(f"  聊天记录: {sdb.query(AgentChatMessage).count()} 条")
         print("=" * 50)
         print("\n📋 新增账号 (密码均为 123456789):")
         for t in TEACHERS:

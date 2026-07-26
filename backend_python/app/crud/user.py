@@ -77,17 +77,82 @@ def update_profile(db: Session, user: User, data: dict) -> dict:
     return user.to_dict(exclude={"password"})
 
 
+def _cleanup_assistant_relations(user_id: int) -> list[str]:
+    """清理 PostgreSQL 会话库中该用户的所有 Agent 数据，返回其审批幂等键列表。
+
+    - AgentSession 的 runs/steps/artifacts/messages 虽有 ondelete=CASCADE，
+      但测试用 sqlite 默认不启用外键级联，因此显式逐表删除（生产 PG 级联只是兜底）。
+    - LangGraph checkpoint 表（checkpoints/checkpoint_writes 等，thread_id=run.id）
+      做 best-effort 原生 SQL 清理：表可能不存在（如测试环境），逐表 try/except。
+    - 返回的幂等键供调用方清理 MySQL 侧 agent_action_executions 账本。
+    """
+    from sqlalchemy import bindparam, text
+    from ..assistant_database import AssistantSessionLocal
+    from ..models import (
+        AgentApproval, AgentArtifact, AgentChatMessage,
+        AgentMessage, AgentRun, AgentSession, AgentStep,
+    )
+    with AssistantSessionLocal() as sdb:
+        # 删除前先收集会话/运行 ID 和审批幂等键（用于级联删除与跨库账本清理）
+        session_ids = [
+            row[0] for row in
+            sdb.query(AgentSession.id).filter(AgentSession.user_id == user_id).all()
+        ]
+        run_ids = [
+            row[0] for row in
+            sdb.query(AgentRun.id).filter(AgentRun.user_id == user_id).all()
+        ]
+        approval_keys = [
+            row[0] for row in
+            sdb.query(AgentApproval.idempotency_key).filter(
+                AgentApproval.requester_user_id == user_id,
+            ).all()
+        ]
+        # 旧版聊天记录
+        sdb.query(AgentChatMessage).filter(AgentChatMessage.teacher_id == user_id).delete()
+        # 新多智能体表：按 run -> session 反向逐表显式删除
+        if run_ids:
+            sdb.query(AgentStep).filter(AgentStep.run_id.in_(run_ids)).delete(
+                synchronize_session=False)
+            sdb.query(AgentArtifact).filter(AgentArtifact.run_id.in_(run_ids)).delete(
+                synchronize_session=False)
+        if session_ids:
+            sdb.query(AgentMessage).filter(AgentMessage.session_id.in_(session_ids)).delete(
+                synchronize_session=False)
+        sdb.query(AgentRun).filter(AgentRun.user_id == user_id).delete(
+            synchronize_session=False)
+        sdb.query(AgentSession).filter(AgentSession.user_id == user_id).delete(
+            synchronize_session=False)
+        sdb.query(AgentApproval).filter(AgentApproval.requester_user_id == user_id).delete(
+            synchronize_session=False)
+        sdb.commit()
+        # LangGraph checkpoint 表 best-effort 清理（表可能不存在，逐表独立提交）
+        if run_ids:
+            stmt_template = "DELETE FROM {table} WHERE thread_id IN :ids"
+            for table in ("checkpoint_writes", "checkpoint_blobs", "checkpoints"):
+                try:
+                    sdb.execute(
+                        text(stmt_template.format(table=table)).bindparams(
+                            bindparam("ids", expanding=True),
+                        ),
+                        {"ids": run_ids},
+                    )
+                    sdb.commit()
+                except Exception:
+                    sdb.rollback()
+    return approval_keys
+
+
 def _cleanup_user_relations(db: Session, user_id: int) -> None:
     """删除用户相关的所有关联记录（外键约束的表），并同步更新班级人数。
 
-    注意：AgentChatMessage 已迁移到 PostgreSQL 会话库（AssistantBase），
-    MySQL 业务库中没有该表，需用独立的 AssistantSessionLocal 清理；
-    RefreshToken/ClassStudent/Submission/班级人数同步仍走 MySQL 业务库 db。
+    注意：Agent 会话/运行/审批等数据在 PostgreSQL 会话库（AssistantBase），
+    MySQL 业务库中没有这些表，需用独立的 AssistantSessionLocal 清理；
+    RefreshToken/ClassStudent/Submission/审批账本/班级人数同步仍走 MySQL 业务库 db。
     """
-    from ..assistant_database import AssistantSessionLocal
     from ..models import (
         RefreshToken, ClassStudent, Submission,
-        AgentChatMessage, Class as ClassModel,
+        AgentActionExecution, Class as ClassModel,
     )
     # 先查出该学生所在的班级 ID（用于后续更新 student_count）
     affected_class_ids = [
@@ -96,10 +161,13 @@ def _cleanup_user_relations(db: Session, user_id: int) -> None:
     ]
     # 刷新令牌
     db.query(RefreshToken).filter(RefreshToken.user_id == user_id).delete()
-    # 聊天记录（AgentChatMessage 已迁到 PostgreSQL 会话库，用独立 PG session 清理）
-    with AssistantSessionLocal() as sdb:
-        sdb.query(AgentChatMessage).filter(AgentChatMessage.teacher_id == user_id).delete()
-        sdb.commit()
+    # PostgreSQL 会话库：聊天记录 + Agent 会话/运行/审批 + checkpoint
+    approval_keys = _cleanup_assistant_relations(user_id)
+    # MySQL 审批执行账本（通过该用户审批记录的幂等键关联）
+    if approval_keys:
+        db.query(AgentActionExecution).filter(
+            AgentActionExecution.idempotency_key.in_(approval_keys),
+        ).delete(synchronize_session=False)
     # 班级-学生关联
     db.query(ClassStudent).filter(ClassStudent.student_id == user_id).delete()
     # 提交记录

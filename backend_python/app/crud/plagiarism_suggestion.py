@@ -1,49 +1,16 @@
-"""查重 AI 建议 — 结合查重结果和大模型，针对学生作业提出分析和建议。
-
-复用 ai_models 表中的模型配置，通过 httpx 直调 OpenAI 兼容接口，
-与 crud/submission.py 的 _call_ai_api 保持一致的调用方式。
-"""
+"""查重 AI 建议兼容服务：确定性结果经 LangGraph 交给解释 Subagent。"""
+from copy import deepcopy
 import logging
-import httpx
 from sqlalchemy.orm import Session
-from ..models import AiModel
+from ..agent.graphs.plagiarism import build_plagiarism_graph
+from ..agent.subagents.plagiarism_analysis import (
+    create_node as create_plagiarism_node,
+)
 
 logger = logging.getLogger(__name__)
 
 # 作业内容截断上限（避免 prompt 过长导致 token 超限）
 _MAX_CONTENT_CHARS = 3000
-
-
-def _get_model_config(db: Session) -> AiModel:
-    """获取默认或第一个可用的大模型配置"""
-    config = db.query(AiModel).filter(AiModel.is_default == True).first()
-    if not config:
-        config = db.query(AiModel).filter(AiModel.status == "active").first()
-    if not config:
-        raise ValueError("未配置可用的 AI 模型，请先在系统设置中添加")
-    if not (config.api_key or "").strip():
-        raise ValueError(f"AI 模型「{config.name}」未配置 API Key，请在系统设置中补充")
-    if not (config.base_url or "").strip():
-        raise ValueError(f"AI 模型「{config.name}」未配置 Base URL，请在系统设置中补充")
-    return config
-
-
-def _call_ai_for_suggestion(model_config: AiModel, prompt: str) -> str:
-    """调用大模型生成建议文本（OpenAI 兼容格式）"""
-    api_url = f"{model_config.base_url}/chat/completions"
-    with httpx.Client(timeout=120) as client:
-        resp = client.post(api_url, headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {model_config.api_key}",
-        }, json={
-            "model": model_config.model_name,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.7,
-            "max_tokens": 2000,
-        })
-        resp.raise_for_status()
-        result = resp.json()
-    return (result.get("choices") or [{}])[0].get("message", {}).get("content", "")
 
 
 def _truncate(text: str, limit: int = _MAX_CONTENT_CHARS) -> str:
@@ -132,10 +99,27 @@ def generate_plagiarism_suggestion(
     返回:
         AI 生成的建议文本
     """
-    model_config = _get_model_config(db)
-    prompt = _build_suggestion_prompt(
-        student_name, student_number, content, plagiarism_info,
-        compare_name, compare_content, snippets,
+    deterministic_result = deepcopy(plagiarism_info)
+    if snippets:
+        evidence = deterministic_result.setdefault("evidence", {})
+        evidence.setdefault("common", [])
+        evidence["common"].extend(
+            {"snippet": snippet}
+            for snippet in snippets[:10]
+        )
+    graph = build_plagiarism_graph(create_plagiarism_node(db))
+    analysis = graph.invoke({
+        "deterministic_result": deterministic_result,
+    })["analysis"]
+    logger.info(
+        "查重解释 Graph 完成，学生: %s, 对比模式: %s",
+        student_name,
+        bool(compare_name),
     )
-    logger.info("AI建议 prompt 构建完成，学生: %s, 对比模式: %s", student_name, bool(compare_name))
-    return _call_ai_for_suggestion(model_config, prompt)
+    suggestions = "\n".join(
+        f"- {item}"
+        for item in analysis.explanation.review_suggestions
+    )
+    if suggestions:
+        return f"{analysis.explanation.explanation}\n\n人工核查建议：\n{suggestions}"
+    return analysis.explanation.explanation

@@ -1,9 +1,12 @@
 """Prompt 注册表测试：版本化注册、获取、冲突与缺失处理。"""
 import pytest
 
-from app.agent.prompts import get_prompt
-from app.agent.prompts.registry import PromptTemplate, register_prompt
-from app.agent.prompts.teacher_assistant import TEACHER_ASSISTANT_V1
+from app.agent.registry import (
+    TEACHER_ASSISTANT_V1,
+    PromptTemplate,
+    get_prompt,
+    register_prompt,
+)
 
 
 def test_teacher_assistant_v1_registered_on_import():

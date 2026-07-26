@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "mysql+pymysql://root:123456@localhost:3306/ai_smart_review?charset=utf8mb4"
     # AI 助手会话库（PostgreSQL）：存储 AI 聊天历史；业务数据仍在 MySQL
     ASSISTANT_DATABASE_URL: str = "postgresql://langgraph_user:123456@localhost:5432/ai_smart_review?sslmode=disable"
+    REDIS_URL: str = "redis://localhost:6379/0"
 
     # JWT
     JWT_SECRET: str = "ai-smart-review-secret-key-2026"
@@ -21,6 +22,10 @@ class Settings(BaseSettings):
     PORT: int = 83
     DEFAULT_PASSWORD: str = "123456789"
     UPLOAD_DIR: str = "uploads"
+    # 助手流式 worker 并发上限：必须低于会话库连接池容量
+    # （assistant_database.py: pool_size=5 + max_overflow=10 = 15），
+    # 留出余量给普通请求，避免满载时 worker 等待连接直至池超时（默认 30 秒）。
+    AGENT_STREAM_MAX_CONCURRENCY: int = 12
 
     @property
     def upload_path(self) -> Path:

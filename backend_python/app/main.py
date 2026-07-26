@@ -8,18 +8,16 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from .config import settings
 from .database import engine, Base, SessionLocal
-from .assistant_database import AssistantBase, assistant_engine
 from .core.exceptions import BizException
 from .routers import (
     auth, users, classes, assignments, submissions,
     correcting, dashboard, permissions, ai_models, ai_rules, upload,
-    plagiarism, chat, logs,
+    plagiarism, chat, logs, assistant,
 )
 from .middleware.operation_log import OperationLogMiddleware
 
 # 启动时自动建表（开发期便捷；生产建议用 alembic 迁移）
 Base.metadata.create_all(bind=engine)
-AssistantBase.metadata.create_all(bind=assistant_engine)  # AI 助手会话库（PostgreSQL）
 
 # 启动时清理过期/已撤销的 RefreshToken，避免历史堆积
 from .crud.auth import cleanup_expired_tokens
@@ -72,7 +70,7 @@ app.mount("/uploads", StaticFiles(directory=str(settings.upload_path)), name="up
 # ===== 注册路由（全局前缀 /api）=====
 for r in (auth, users, classes, assignments, submissions,
           correcting, dashboard, permissions, ai_models, ai_rules, upload,
-          plagiarism, chat, logs):
+          plagiarism, chat, logs, assistant):
     app.include_router(r.router, prefix="/api")
 
 

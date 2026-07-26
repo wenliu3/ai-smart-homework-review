@@ -8,8 +8,11 @@ import os
 from pathlib import Path
 
 _TEST_DIR = Path(__file__).parent
-os.environ["DATABASE_URL"] = f"sqlite:///{(_TEST_DIR / '.pytest_biz.db').as_posix()}"
-os.environ["ASSISTANT_DATABASE_URL"] = f"sqlite:///{(_TEST_DIR / '.pytest_assistant.db').as_posix()}"
+# 文件名带 PID：允许多个 pytest 进程并行运行而不互踩同一 sqlite 文件
+_BIZ_DB = _TEST_DIR / f".pytest_biz-{os.getpid()}.db"
+_ASSISTANT_DB = _TEST_DIR / f".pytest_assistant-{os.getpid()}.db"
+os.environ["DATABASE_URL"] = f"sqlite:///{_BIZ_DB.as_posix()}"
+os.environ["ASSISTANT_DATABASE_URL"] = f"sqlite:///{_ASSISTANT_DB.as_posix()}"
 
 import pytest
 from fastapi.testclient import TestClient
@@ -117,3 +120,14 @@ def ai_model_factory(db):
         db.refresh(model)
         return model
     return _make
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """会话结束后释放引擎并删除本进程的 sqlite 临时库文件。"""
+    engine.dispose()
+    assistant_engine.dispose()
+    for path in (_BIZ_DB, _ASSISTANT_DB):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass

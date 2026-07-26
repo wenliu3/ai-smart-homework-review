@@ -4,9 +4,10 @@ import re
 import base64
 import logging
 import httpx
+from sqlalchemy import case, update
 from sqlalchemy.orm import Session
 from ..database import SessionLocal
-from ..models import User, Assignment, Submission, AiModel
+from ..models import User, Assignment, Submission, AiModel, ClassStudent
 from ..core.exceptions import BadRequestException, NotFoundException
 from ..core.utils import now
 from ..plagiarism.extractors import extract_file_text, extract_all_from_docx, extract_all_from_file
@@ -14,6 +15,56 @@ from ..plagiarism import get_word_tokens
 from ..config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def apply_ai_grading_result(
+    db: Session,
+    submission_id: int,
+    expected_submission_count: int,
+    outcome,
+) -> bool:
+    """按提交版本原子写回 AI 批改结果。
+
+    条件 UPDATE 保证旧 Worker 不能覆盖学生重新提交后的新版本。这里只更新
+    AI 字段；教师评分和教师评语从不出现在 values 中。教师已经完成批改时，
+    状态保持 ``teacher_reviewed``。
+    """
+
+    primary = outcome.primary
+    review_note = ""
+    if outcome.needs_human_review:
+        review_note = (
+            "\n\n⚠️ 两次独立评分差异超过满分 10%，需要教师人工复核。"
+        )
+    content = primary.summary + review_note
+    statement = (
+        update(Submission)
+        .where(
+            Submission.id == submission_id,
+            Submission.submission_count == expected_submission_count,
+        )
+        .values(
+            ai_score=primary.total_score,
+            ai_review_content=content,
+            status=case(
+                (
+                    Submission.status == "teacher_reviewed",
+                    Submission.status,
+                ),
+                else_=(
+                    "submitted"
+                    if outcome.needs_human_review
+                    else "ai_reviewed"
+                ),
+            ),
+        )
+    )
+    result = db.execute(statement)
+    if result.rowcount != 1:
+        db.rollback()
+        return False
+    db.commit()
+    return True
 
 
 def _delete_attachment_files(attachments: list):
@@ -53,6 +104,21 @@ def submit(db: Session, student_id: int, data: dict) -> dict:
         raise NotFoundException(10015, "作业不存在")
     if assignment.status != "published":
         raise BadRequestException(10011, "作业不可提交")
+    assigned_class_ids = {
+        int(item["id"])
+        for item in (assignment.classes or [])
+        if isinstance(item, dict) and item.get("id") is not None
+    }
+    requested_class_id = int(data.get("classId") or 0)
+    if requested_class_id not in assigned_class_ids:
+        raise BadRequestException(10007, "该作业未布置给指定班级")
+    membership = db.query(ClassStudent).filter(
+        ClassStudent.class_id == requested_class_id,
+        ClassStudent.student_id == student_id,
+        ClassStudent.status == "active",
+    ).first()
+    if membership is None:
+        raise BadRequestException(10007, "当前学生不属于该作业班级")
     is_draft = data.get("isDraft", False)
     if not is_draft and assignment.end_date and now() > assignment.end_date:
         raise BadRequestException(10011, "作业已截止，无法提交")
@@ -94,7 +160,7 @@ def submit(db: Session, student_id: int, data: dict) -> dict:
     else:
         submission = Submission(
             assignment_id=assignment.id, student_id=student_id,
-            class_id=int(data.get("classId")), content=content, attachments=attachments, word_count=word_count,
+            class_id=requested_class_id, content=content, attachments=attachments, word_count=word_count,
             is_draft=is_draft, status="draft" if is_draft else "submitted",
             submitted_at=None if is_draft else now(), submission_count=1,
         )

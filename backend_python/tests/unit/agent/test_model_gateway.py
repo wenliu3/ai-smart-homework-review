@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import update
 
 from app.agent.contracts import ModelProfile
-from app.agent.services.model_gateway import ModelGateway, mask_secret
+from app.agent.gateway import PROFILE_SETTINGS, ModelGateway, mask_secret
 from app.core.exceptions import BizException
 from app.models import AiModel
 
@@ -40,6 +40,22 @@ def test_prefers_default_over_other_active(db, ai_model_factory):
     default = ai_model_factory(code="m-default", is_default=True)
     gw = ModelGateway()
     assert gw.get_default_config(db).id == default.id
+
+
+def test_inactive_default_falls_back_to_active_model(db, ai_model_factory):
+    ai_model_factory(
+        code="m-disabled-default",
+        is_default=True,
+        status="inactive",
+    )
+    active = ai_model_factory(
+        code="m-active",
+        is_default=False,
+        status="active",
+    )
+    gw = ModelGateway()
+
+    assert gw.get_default_config(db).id == active.id
 
 
 def test_chat_model_cached_by_key(db, ai_model_factory):
@@ -83,8 +99,30 @@ def test_profile_temperature_settings(db, ai_model_factory):
     assert general_llm.max_tokens == 2000
 
 
+def test_interactive_profile_timeouts_fit_the_default_run_budget():
+    assert PROFILE_SETTINGS[ModelProfile.ROUTER]["timeout"] <= 45
+    assert PROFILE_SETTINGS[ModelProfile.GENERAL]["timeout"] <= 45
+    assert PROFILE_SETTINGS[ModelProfile.REVIEWER]["timeout"] <= 45
+
+
 def test_mask_secret():
     assert mask_secret("sk-1234567890abcd") == "sk-1****abcd"
     assert mask_secret("short") == "****"
     assert mask_secret("") == ""
     assert mask_secret(None) == ""
+
+
+def test_model_creation_log_never_contains_api_key_fragments(
+    db,
+    ai_model_factory,
+    caplog,
+):
+    api_key = "sk-visible-prefix-and-secret-tail"
+    ai_model_factory(api_key=api_key)
+    gw = ModelGateway()
+
+    with caplog.at_level("INFO"):
+        gw.get_chat_model(db, ModelProfile.GENERAL, prompt_version="v1")
+
+    assert api_key[:4] not in caplog.text
+    assert api_key[-4:] not in caplog.text

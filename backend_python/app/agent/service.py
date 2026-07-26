@@ -4,18 +4,144 @@
 - 会话历史与消息读写 → PostgreSQL 会话库（AssistantSessionLocal，委托 crud.agent_chat）
 - 模型配置查询与 Agent 构建 → MySQL 业务库（SessionLocal，经 agent._get_agent → ModelGateway）
 """
+import json
 import logging
+import queue
+import threading
+import time
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Callable
+
+from pydantic import BaseModel
+from langchain_core.messages import AIMessageChunk
+from sqlalchemy.orm import Session
 
 from ..assistant_database import AssistantSessionLocal
+from ..config import settings
 from ..core.exceptions import BizException
 from ..crud import agent_chat as agent_chat_crud
+from ..crud import agent_run as agent_run_crud
+from ..crud import agent_session as agent_session_crud
 from ..database import SessionLocal
-from .agent import _get_agent, chat_with_agent
-from .contracts import SAFE_CHAT_ERROR_MESSAGE
+from .contracts import (
+    AGENT_BUDGET_EXCEEDED,
+    AGENT_CHAT_ERROR,
+    AGENT_RUN_CANCELLED,
+    SAFE_CHAT_ERROR_MESSAGE,
+    ActorContext,
+)
+from .graphs.teacher import build_teacher_graph
+from .checkpointer import get_graph_checkpointer
+from .registry import get_teacher_assistant_agent
+from .runtime import (
+    BudgetExceeded,
+    RunBudget,
+    RunCancelled,
+    default_run_budget,
+)
+from .tools.common import TeacherContext
 
 logger = logging.getLogger(__name__)
+# 并发上限必须低于会话库连接池容量（assistant_database.py: pool_size + max_overflow = 15），
+# 否则满载时多出的 worker 会阻塞等待连接直至池超时。默认值见 config.py。
+_STREAM_WORKER_SLOTS = threading.BoundedSemaphore(
+    value=max(1, settings.AGENT_STREAM_MAX_CONCURRENCY),
+)
+_CAPACITY_ERROR_CODE = "AGENT_CAPACITY_EXCEEDED"
+_CAPACITY_ERROR_MESSAGE = "助手当前请求较多，请稍后重试"
+
+# 会话归属/权限类校验消息：本身面向用户，可安全透传到 SSE 事件；
+# 其余 ValueError（含 pydantic ValidationError 等内部细节）一律脱敏。
+_SAFE_OWNERSHIP_ERROR_MESSAGES = frozenset({
+    "会话不存在或不属于当前用户",
+    "学生会话不存在或不属于当前用户",
+    "管理员会话不存在或不属于当前用户",
+})
+
+
+def _public_value_error_message(exc: ValueError) -> str:
+    """只透传已知安全的会话归属校验消息；其余 ValueError 走兜底安全消息。"""
+    message = str(exc)
+    if message in _SAFE_OWNERSHIP_ERROR_MESSAGES:
+        return message
+    return SAFE_CHAT_ERROR_MESSAGE
+
+
+def _capacity_exhausted_events() -> Iterator["ChatStreamEvent"]:
+    yield ChatStreamEvent(
+        event=None,
+        data=json.dumps({
+            "type": "run.failed",
+            "data": {
+                "error_code": _CAPACITY_ERROR_CODE,
+                "message": _CAPACITY_ERROR_MESSAGE,
+            },
+        }, ensure_ascii=False),
+    )
+    yield ChatStreamEvent(event="done", data="[DONE]")
+
+
+def _build_messages(message: str, chat_history: list | None = None) -> list:
+    """构建受控的教师助手消息列表。"""
+    messages = []
+    for item in (chat_history or [])[-10:]:
+        role = "user" if item.get("role", "user") == "user" else "assistant"
+        messages.append({"role": role, "content": item.get("content", "")})
+    messages.append({"role": "user", "content": message})
+    return messages
+
+
+def _get_agent(db: Session):
+    """兼容旧聊天 API 的 Agent 获取入口。"""
+    return get_teacher_assistant_agent(db)
+
+
+def chat_with_agent(
+    agent,
+    teacher_id: int,
+    message: str,
+    chat_history: list | None = None,
+):
+    """流式输出最终 AI 文本，过滤工具结果与工具调用分片。"""
+    for token, _metadata in agent.stream(
+        {"messages": _build_messages(message, chat_history)},
+        context=TeacherContext(teacher_id=teacher_id),
+        stream_mode="messages",
+    ):
+        if isinstance(token, AIMessageChunk) and token.text:
+            yield token.text
+
+
+def chat_with_assistant(
+    db: Session,
+    teacher_id: int,
+    message: str,
+    chat_history: list | None = None,
+):
+    """兼容旧聊天 API 的流式入口。"""
+    yield from chat_with_agent(
+        _get_agent(db),
+        teacher_id,
+        message,
+        chat_history,
+    )
+
+
+def chat_with_assistant_sync(
+    db: Session,
+    teacher_id: int,
+    message: str,
+    chat_history: list | None = None,
+) -> str:
+    """兼容旧聊天 API 的同步入口。"""
+    result = _get_agent(db).invoke(
+        {"messages": _build_messages(message, chat_history)},
+        context=TeacherContext(teacher_id=teacher_id),
+    )
+    ai_messages = [item for item in result["messages"] if item.type == "ai"]
+    return ai_messages[-1].content if ai_messages else "抱歉，我无法处理您的请求。"
 
 
 @dataclass
@@ -23,6 +149,87 @@ class ChatStreamEvent:
     """SSE 事件。event=None 表示默认 message 事件（不带 event 字段，保持旧前端格式兼容）。"""
     event: str | None
     data: str
+
+
+@dataclass
+class OrchestrationResult:
+    """编排服务返回值：供新版 SSE 路由消费。"""
+    run_id: str
+    final_answer: str
+    events: list[dict] = field(default_factory=list)
+    status: str = "completed"  # completed | failed | cancelled
+    error_code: str | None = None
+
+
+def _json_safe(value: Any) -> Any:
+    """将 LangGraph 节点更新压缩为可写入 JSON 列的纯数据。"""
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, dict):
+        return {
+            str(key): _json_safe(item)
+            for key, item in value.items()
+            if key not in {"actor", "runtime_budget", "events", "recent_messages"}
+        }
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
+def _build_artifacts(final_state: dict) -> list[dict]:
+    artifacts: list[dict] = []
+    specialist_response = final_state.get("specialist_response")
+    if specialist_response is not None:
+        artifacts.append({
+            "artifact_type": "specialist_response",
+            "schema_version": "v1",
+            "payload": _json_safe(specialist_response),
+        })
+    review = final_state.get("review")
+    if review is not None:
+        artifacts.append({
+            "artifact_type": "review_result",
+            "schema_version": "v1",
+            "payload": _json_safe(review),
+        })
+    return artifacts
+
+
+def _finalize_run_or_detect_cancel_race(
+    sdb: Session,
+    *,
+    run_id: str,
+    user_id: int,
+    final_answer: str,
+    artifacts: list[dict],
+) -> bool:
+    """原子 finalize 运行；命中「最后节点完成后、finalize 前被取消」的竞态时返回 True。
+
+    finalize_run 只接受活动状态：运行在此窗口被取消会抛
+    ValueError("只有活动状态可完成…")。这里吸收该竞态并交由调用方发
+    run.cancelled 事件，避免把内部 CRUD 消息当作 run.failed 透传给客户端；
+    其余 ValueError 原样抛出。
+    """
+    try:
+        agent_run_crud.finalize_run(
+            sdb,
+            run_id=run_id,
+            user_id=user_id,
+            final_output=final_answer,
+            assistant_message=final_answer,
+            artifacts=artifacts,
+        )
+        return False
+    except ValueError:
+        sdb.expire_all()
+        current = agent_run_crud.get_run(sdb, run_id, user_id=user_id)
+        if current is not None and current.status == "cancelled":
+            return True
+        raise
 
 
 def stream_chat_events(teacher_id: int, message: str, session_id: str) -> Iterator[ChatStreamEvent]:
@@ -63,3 +270,971 @@ def stream_chat_events(teacher_id: int, message: str, session_id: str) -> Iterat
                     agent_chat_crud.save_exchange(sdb, teacher_id, session_id, message, full_answer)
             except Exception:
                 logger.error("助手消息兜底存储失败", exc_info=True)
+
+
+# ========== 新版编排：教师多智能体 + PostgreSQL 运行持久化 ==========
+
+def orchestrate_teacher_run(
+    teacher_id: int,
+    message: str,
+    session_id: str,
+    request_id: str,
+    specialists: Any,
+    assistant_db: Session | None = None,
+    budget: RunBudget | None = None,
+    event_callback=None,
+) -> OrchestrationResult:
+    """运行教师图并将 Run/Step/Message 持久化到 PostgreSQL。
+
+    流程：
+    1. 创建/加载 PG 会话与 Run（status=running）
+    2. 追加用户消息
+    3. 构造 ActorContext（服务端身份，不进入 LLM 工具参数）
+    4. 构建教师图并同步调用
+    5. 从 visited_nodes 持久化每个 Step
+    6. 原子 finalize Run（最终助手消息 + run.completed）
+    7. 失败时 fail_run + 稳定错误码（不泄露内部细节）
+
+    specialists 由调用方注入：生产环境用 SpecialistContainer，测试用替身。
+    assistant_db 可选注入：测试用，生产环境内部创建独立 PG 会话。
+    """
+    own_db = assistant_db is None
+    sdb = assistant_db or AssistantSessionLocal()
+    try:
+        return _orchestrate_inner(
+            sdb, teacher_id, message, session_id, request_id, specialists, budget,
+            event_callback,
+        )
+    finally:
+        if own_db:
+            sdb.close()
+
+
+def _orchestrate_inner(
+    sdb: Session,
+    teacher_id: int,
+    message: str,
+    session_id: str,
+    request_id: str,
+    specialists: Any,
+    budget: RunBudget | None,
+    event_callback,
+) -> OrchestrationResult:
+    from ..models import AgentMessage, AgentSession
+
+    # 1. 会话归属校验（跨用户直接拒绝，不创建 Run）
+    owned = (
+        sdb.query(AgentSession)
+        .filter(
+            AgentSession.id == session_id,
+            AgentSession.user_id == teacher_id,
+            AgentSession.actor_role == "teacher",
+            AgentSession.status == "active",
+        )
+        .first()
+    )
+    if not owned:
+        raise ValueError("会话不存在或不属于当前用户")
+
+    recent_rows = (
+        sdb.query(AgentMessage)
+        .filter(AgentMessage.session_id == session_id)
+        .order_by(AgentMessage.created_at.desc(), AgentMessage.id.desc())
+        .limit(10)
+        .all()
+    )
+    recent_messages = [
+        {"role": row.role, "content": row.content}
+        for row in reversed(recent_rows)
+        if row.role in ("user", "assistant")
+    ]
+
+    # 2. 创建 Run（status=running）— 先建 Run，即使后续失败也能记录
+    run = agent_run_crud.create_run(
+        sdb, session_id=session_id, user_id=teacher_id, intent="pending",
+    )
+
+    # 3. 追加用户消息
+    agent_session_crud.append_message(
+        sdb, session_id=session_id, user_id=teacher_id,
+        role="user", content=message, run_id=run.id,
+    )
+
+    # 4. 构造 ActorContext（服务端身份，不进入 LLM 工具参数）
+    actor = ActorContext(
+        user_id=teacher_id,
+        role="teacher",
+        request_id=request_id,
+        session_id=session_id,
+    )
+
+    # 5. 构建图并调用
+    budget = budget or default_run_budget()
+
+    def _is_cancelled() -> bool:
+        sdb.expire_all()
+        current = agent_run_crud.get_run(sdb, run.id, user_id=teacher_id)
+        return current is None or current.status == "cancelled"
+
+    graph = build_teacher_graph(
+        specialists,
+        budget=budget,
+        is_cancelled=_is_cancelled,
+        checkpointer=get_graph_checkpointer(),
+    )
+    initial_state = {
+        "run_id": run.id,
+        "actor": actor,
+        "user_message": message,
+        "conversation_summary": owned.summary or "",
+        "recent_messages": recent_messages,
+        "runtime_budget": budget,
+        "visited_nodes": [],
+        "events": [],
+    }
+    emitted_events: list[dict] = []
+
+    def emit(event: dict) -> None:
+        event = {
+            "type": event["type"],
+            "data": {"run_id": run.id, **event.get("data", {})},
+        }
+        emitted_events.append(event)
+        if event_callback is not None:
+            event_callback(event)
+
+    emit({"type": "run.started", "data": {}})
+
+    node_started_at: dict[str, float] = {}
+    persisted_nodes: set[str] = set()
+    active_node: str | None = None
+    last_node_boundary = time.monotonic()
+
+    try:
+        final_state = dict(initial_state)
+        for part in graph.stream(
+            initial_state,
+            config={"configurable": {"thread_id": run.id}},
+            stream_mode=["updates", "custom"],
+            version="v2",
+        ):
+            if part["type"] == "custom":
+                custom_event = part["data"]
+                if custom_event.get("type") == "agent.started":
+                    active_node = custom_event.get("data", {}).get("agent")
+                    if active_node:
+                        node_started_at[active_node] = time.monotonic()
+                emit(custom_event)
+                continue
+            if part["type"] != "updates":
+                continue
+            for node_name, update in part["data"].items():
+                final_state.update(update)
+                now = time.monotonic()
+                started = node_started_at.pop(node_name, last_node_boundary)
+                evidence_refs = update.get(
+                    "evidence_refs", final_state.get("evidence_refs", []),
+                )
+                agent_run_crud.append_step(
+                    sdb,
+                    run_id=run.id,
+                    user_id=teacher_id,
+                    node_name=node_name,
+                    status="completed",
+                    output=_json_safe(update),
+                    evidence_refs=_json_safe(evidence_refs),
+                    duration_ms=max(1, int((now - started) * 1000)),
+                )
+                persisted_nodes.add(node_name)
+                if node_name == active_node:
+                    active_node = None
+                last_node_boundary = now
+                if node_name == "teacher_supervisor":
+                    decision = update.get("intent")
+                    if decision is not None:
+                        agent_run_crud.update_run_route(
+                            sdb,
+                            run_id=run.id,
+                            user_id=teacher_id,
+                            intent=decision.intent.value,
+                            risk_level=decision.risk_level.value,
+                        )
+    except RunCancelled:
+        cancelled_event = {
+            "type": "run.cancelled",
+            "data": {"error_code": AGENT_RUN_CANCELLED},
+        }
+        emit(cancelled_event)
+        return OrchestrationResult(
+            run_id=run.id,
+            final_answer="",
+            events=emitted_events,
+            status="cancelled",
+            error_code=AGENT_RUN_CANCELLED,
+        )
+    except BudgetExceeded as e:
+        logger.warning("Teacher run budget exceeded: run_id=%s code=%s", run.id, e.code)
+        if active_node and active_node not in persisted_nodes:
+            agent_run_crud.append_step(
+                sdb, run_id=run.id, user_id=teacher_id,
+                node_name=active_node, status="failed",
+                error_code=AGENT_BUDGET_EXCEEDED,
+                duration_ms=max(
+                    1, int((time.monotonic() - node_started_at.get(
+                        active_node, last_node_boundary,
+                    )) * 1000),
+                ),
+            )
+        agent_run_crud.fail_run(sdb, run.id, user_id=teacher_id, error_code=AGENT_BUDGET_EXCEEDED)
+        emit({"type": "run.failed", "data": {
+            "error_code": AGENT_BUDGET_EXCEEDED,
+        }})
+        return OrchestrationResult(
+            run_id=run.id,
+            final_answer="",
+            events=emitted_events,
+            status="failed",
+            error_code=AGENT_BUDGET_EXCEEDED,
+        )
+    except Exception:
+        logger.exception("Teacher run crashed: run_id=%s", run.id)
+        if active_node and active_node not in persisted_nodes:
+            agent_run_crud.append_step(
+                sdb, run_id=run.id, user_id=teacher_id,
+                node_name=active_node, status="failed",
+                error_code=AGENT_CHAT_ERROR,
+                duration_ms=max(
+                    1, int((time.monotonic() - node_started_at.get(
+                        active_node, last_node_boundary,
+                    )) * 1000),
+                ),
+            )
+        agent_run_crud.fail_run(sdb, run.id, user_id=teacher_id, error_code=AGENT_CHAT_ERROR)
+        emit({"type": "run.failed", "data": {
+            "error_code": AGENT_CHAT_ERROR,
+            "message": SAFE_CHAT_ERROR_MESSAGE,
+        }})
+        return OrchestrationResult(
+            run_id=run.id,
+            final_answer=SAFE_CHAT_ERROR_MESSAGE,
+            events=emitted_events,
+            status="failed",
+            error_code=AGENT_CHAT_ERROR,
+        )
+
+    # 6. 原子 finalize：最终消息 + 结构化产物 + run.completed
+    final_answer = final_state.get("final_answer", "")
+    if _finalize_run_or_detect_cancel_race(
+        sdb, run_id=run.id, user_id=teacher_id,
+        final_answer=final_answer,
+        artifacts=_build_artifacts(final_state),
+    ):
+        # 取消竞态：最后节点完成后、finalize 前用户取消了运行
+        emit({
+            "type": "run.cancelled",
+            "data": {"error_code": AGENT_RUN_CANCELLED},
+        })
+        return OrchestrationResult(
+            run_id=run.id,
+            final_answer="",
+            events=emitted_events,
+            status="cancelled",
+            error_code=AGENT_RUN_CANCELLED,
+        )
+    if final_answer:
+        for start in range(0, len(final_answer), 80):
+            emit({"type": "content.delta", "data": {
+                "content": final_answer[start:start + 80],
+            }})
+    emit({"type": "run.completed", "data": {
+        "final_answer_length": len(final_answer),
+    }})
+
+    return OrchestrationResult(
+        run_id=run.id,
+        final_answer=final_answer,
+        events=emitted_events,
+        status="completed",
+        error_code=None,
+    )
+
+
+# ========== 新版 SSE 流：JSON 事件序列 ==========
+
+def stream_assistant_events(
+    teacher_id: int,
+    message: str,
+    session_id: str,
+    request_id: str,
+) -> Iterator[ChatStreamEvent]:
+    """新版 SSE 流：将教师图运行结果以 JSON 事件序列输出。
+
+    事件格式：每个 data 行是一个 JSON 对象 {"type": "...", "data": {...}}。
+    最终发送 event: done / data: [DONE] 作为结束标记。
+
+    异常绝不外泄类型与细节（规格 3.2/15）。
+    """
+    event_queue: queue.Queue = queue.Queue()
+    finished = object()
+    emitted_count = 0
+    current_run_id: str | None = None
+    completed_normally = False
+
+    if not _STREAM_WORKER_SLOTS.acquire(blocking=False):
+        yield from _capacity_exhausted_events()
+        return
+
+    def enqueue(event: dict) -> None:
+        nonlocal emitted_count
+        emitted_count += 1
+        event_queue.put(event)
+
+    def worker() -> None:
+        try:
+            # 模型配置 Session 只在工作线程内使用；业务工具仍创建独立 Session。
+            with SessionLocal() as db:
+                from .subagents import SubagentContainer
+                specialists = SubagentContainer(db)
+                result = orchestrate_teacher_run(
+                    teacher_id=teacher_id,
+                    message=message,
+                    session_id=session_id,
+                    request_id=request_id,
+                    specialists=specialists,
+                    event_callback=enqueue,
+                )
+            # 测试替身或兼容实现可能不调用 callback，使用结果事件兜底。
+            if emitted_count == 0:
+                for event in result.events:
+                    data = {"run_id": result.run_id, **event.get("data", {})}
+                    enqueue({"type": event["type"], "data": data})
+        except ValueError as exc:
+            logger.warning("Assistant stream validation error: %s", exc)
+            # 只透传会话归属类安全消息；ValidationError 等内部细节脱敏
+            enqueue({
+                "type": "run.failed",
+                "data": {
+                    "error_code": AGENT_CHAT_ERROR,
+                    "message": _public_value_error_message(exc),
+                },
+            })
+        except Exception:
+            logger.exception("Assistant stream error")
+            enqueue({
+                "type": "run.failed",
+                "data": {
+                    "error_code": AGENT_CHAT_ERROR,
+                    "message": SAFE_CHAT_ERROR_MESSAGE,
+                },
+            })
+        finally:
+            _STREAM_WORKER_SLOTS.release()
+            event_queue.put(finished)
+
+    thread = threading.Thread(
+        target=worker,
+        name=f"assistant-run-{request_id[:8]}",
+        daemon=True,
+    )
+    try:
+        thread.start()
+    except Exception:
+        _STREAM_WORKER_SLOTS.release()
+        raise
+
+    try:
+        while True:
+            try:
+                item = event_queue.get(timeout=15)
+            except queue.Empty:
+                yield ChatStreamEvent(
+                    event=None,
+                    data=json.dumps({
+                        "type": "heartbeat",
+                        "data": {"run_id": current_run_id},
+                    }, ensure_ascii=False),
+                )
+                continue
+            if item is finished:
+                completed_normally = True
+                break
+            if item.get("type") == "run.started":
+                current_run_id = item.get("data", {}).get("run_id")
+            yield ChatStreamEvent(
+                event=None,
+                data=json.dumps(item, ensure_ascii=False),
+            )
+        yield ChatStreamEvent(event="done", data="[DONE]")
+    finally:
+        # 客户端断开时尽力取消已知运行；条件取消不会影响已结束 Run。
+        if not completed_normally and current_run_id:
+            try:
+                with AssistantSessionLocal() as sdb:
+                    agent_run_crud.cancel_run(
+                        sdb, current_run_id, user_id=teacher_id,
+                    )
+            except Exception:
+                logger.warning(
+                    "客户端断开后的运行取消失败: run_id=%s",
+                    current_run_id,
+                    exc_info=True,
+                )
+
+
+# ========== 学生角色编排 ==========
+
+def orchestrate_student_run(
+    student_id: int,
+    message: str,
+    session_id: str,
+    request_id: str,
+    subagents: Any,
+    assistant_db: Session | None = None,
+    budget: RunBudget | None = None,
+    event_callback: Callable[[dict], None] | None = None,
+) -> OrchestrationResult:
+    """执行学生主管 Graph，并按角色隔离会话、步骤和 Artifact。"""
+
+    from ..models import AgentMessage, AgentSession
+    from .graphs.student import build_student_graph
+
+    owns_db = assistant_db is None
+    sdb = assistant_db or AssistantSessionLocal()
+    try:
+        session = sdb.query(AgentSession).filter(
+            AgentSession.id == session_id,
+            AgentSession.user_id == student_id,
+            AgentSession.actor_role == "student",
+            AgentSession.status == "active",
+        ).first()
+        if session is None:
+            raise ValueError("学生会话不存在或不属于当前用户")
+        recent_rows = (
+            sdb.query(AgentMessage)
+            .filter(AgentMessage.session_id == session_id)
+            .order_by(AgentMessage.created_at.desc(), AgentMessage.id.desc())
+            .limit(10)
+            .all()
+        )
+        recent_messages = [
+            {"role": row.role, "content": row.content}
+            for row in reversed(recent_rows)
+            if row.role in ("user", "assistant")
+        ]
+        run = agent_run_crud.create_run(
+            sdb,
+            session_id=session_id,
+            user_id=student_id,
+            intent="pending",
+            graph_version="student-v1",
+        )
+        agent_session_crud.append_message(
+            sdb,
+            session_id=session_id,
+            user_id=student_id,
+            role="user",
+            content=message,
+            run_id=run.id,
+        )
+        emitted_events: list[dict] = []
+
+        def emit(event: dict) -> None:
+            normalized = {
+                "type": event["type"],
+                "data": {"run_id": run.id, **event.get("data", {})},
+            }
+            emitted_events.append(normalized)
+            if event_callback is not None:
+                event_callback(normalized)
+
+        emit({"type": "run.started", "data": {}})
+        actor = ActorContext(
+            user_id=student_id,
+            role="student",
+            request_id=request_id,
+            session_id=session_id,
+        )
+
+        def _is_cancelled() -> bool:
+            sdb.expire_all()
+            current = agent_run_crud.get_run(
+                sdb,
+                run.id,
+                user_id=student_id,
+            )
+            return current is None or current.status == "cancelled"
+
+        graph = build_student_graph(
+            subagents,
+            checkpointer=get_graph_checkpointer(),
+            is_cancelled=_is_cancelled,
+        )
+        try:
+            final_state = graph.invoke({
+                "run_id": run.id,
+                "actor": actor,
+                "user_message": message,
+                "conversation_summary": session.summary or "",
+                "recent_messages": recent_messages,
+                "runtime_budget": budget or default_run_budget(),
+                "visited_nodes": [],
+            }, config={"configurable": {"thread_id": run.id}})
+            decision = final_state.get("intent")
+            if decision is not None:
+                agent_run_crud.update_run_route(
+                    sdb,
+                    run_id=run.id,
+                    user_id=student_id,
+                    intent=decision.intent.value,
+                    risk_level=decision.risk_level.value,
+                )
+            for node_name in final_state.get("visited_nodes", []):
+                agent_run_crud.append_step(
+                    sdb,
+                    run_id=run.id,
+                    user_id=student_id,
+                    node_name=node_name,
+                    status="completed",
+                )
+            final_answer = final_state.get("final_answer", "")
+            if _finalize_run_or_detect_cancel_race(
+                sdb, run_id=run.id, user_id=student_id,
+                final_answer=final_answer,
+                artifacts=_build_artifacts(final_state),
+            ):
+                # 取消竞态：最后节点完成后、finalize 前用户取消了运行
+                emit({
+                    "type": "run.cancelled",
+                    "data": {"error_code": AGENT_RUN_CANCELLED},
+                })
+                return OrchestrationResult(
+                    run_id=run.id,
+                    final_answer="",
+                    events=emitted_events,
+                    status="cancelled",
+                    error_code=AGENT_RUN_CANCELLED,
+                )
+            for node in final_state.get("visited_nodes", []):
+                emit({"type": "agent.completed", "data": {"agent": node}})
+            emit({"type": "content.delta", "data": {"content": final_answer}})
+            emit({"type": "run.completed", "data": {}})
+            return OrchestrationResult(
+                run_id=run.id,
+                final_answer=final_answer,
+                events=emitted_events,
+            )
+        except RunCancelled:
+            emit({
+                "type": "run.cancelled",
+                "data": {"error_code": AGENT_RUN_CANCELLED},
+            })
+            return OrchestrationResult(
+                run_id=run.id,
+                final_answer="",
+                events=emitted_events,
+                status="cancelled",
+                error_code=AGENT_RUN_CANCELLED,
+            )
+        except BudgetExceeded as e:
+            # 与教师路径一致：预算超限落稳定错误码，不误记为通用错误
+            logger.warning(
+                "Student run budget exceeded: run_id=%s code=%s", run.id, e.code,
+            )
+            agent_run_crud.fail_run(
+                sdb,
+                run.id,
+                user_id=student_id,
+                error_code=AGENT_BUDGET_EXCEEDED,
+            )
+            emit({"type": "run.failed", "data": {
+                "error_code": AGENT_BUDGET_EXCEEDED,
+            }})
+            return OrchestrationResult(
+                run_id=run.id,
+                final_answer="",
+                events=emitted_events,
+                status="failed",
+                error_code=AGENT_BUDGET_EXCEEDED,
+            )
+        except Exception:
+            logger.exception("Student run crashed: run_id=%s", run.id)
+            agent_run_crud.fail_run(
+                sdb,
+                run.id,
+                user_id=student_id,
+                error_code=AGENT_CHAT_ERROR,
+            )
+            failed_event = {
+                "type": "run.failed",
+                "data": {
+                    "error_code": AGENT_CHAT_ERROR,
+                    "message": SAFE_CHAT_ERROR_MESSAGE,
+                },
+            }
+            emit(failed_event)
+            return OrchestrationResult(
+                run_id=run.id,
+                final_answer=SAFE_CHAT_ERROR_MESSAGE,
+                events=emitted_events,
+                status="failed",
+                error_code=AGENT_CHAT_ERROR,
+            )
+    finally:
+        if owns_db:
+            sdb.close()
+
+
+def _stream_role_events(
+    *,
+    actor_id: int,
+    request_id: str,
+    orchestrate: Callable[..., OrchestrationResult],
+    orchestrate_kwargs: dict[str, Any],
+    container_factory: Callable[[Session], Any],
+) -> Iterator[ChatStreamEvent]:
+    """Run a role graph in a worker and expose events/heartbeats immediately."""
+
+    event_queue: queue.Queue = queue.Queue()
+    finished = object()
+    emitted_count = 0
+    current_run_id: str | None = None
+    completed_normally = False
+
+    if not _STREAM_WORKER_SLOTS.acquire(blocking=False):
+        yield from _capacity_exhausted_events()
+        return
+
+    def enqueue(event: dict) -> None:
+        nonlocal emitted_count
+        emitted_count += 1
+        event_queue.put(event)
+
+    def worker() -> None:
+        try:
+            with SessionLocal() as db:
+                result = orchestrate(
+                    **orchestrate_kwargs,
+                    subagents=container_factory(db),
+                    event_callback=enqueue,
+                )
+            if emitted_count == 0:
+                for event in result.events:
+                    enqueue(event)
+        except ValueError as exc:
+            logger.warning("Role assistant stream validation error: %s", exc)
+            # 只透传会话归属类安全消息；ValidationError 等内部细节脱敏
+            enqueue({
+                "type": "run.failed",
+                "data": {
+                    "error_code": AGENT_CHAT_ERROR,
+                    "message": _public_value_error_message(exc),
+                },
+            })
+        except Exception:
+            logger.exception("Role assistant stream error")
+            enqueue({
+                "type": "run.failed",
+                "data": {
+                    "error_code": AGENT_CHAT_ERROR,
+                    "message": SAFE_CHAT_ERROR_MESSAGE,
+                },
+            })
+        finally:
+            _STREAM_WORKER_SLOTS.release()
+            event_queue.put(finished)
+
+    thread = threading.Thread(
+        target=worker,
+        name=f"assistant-role-run-{request_id[:8]}",
+        daemon=True,
+    )
+    try:
+        thread.start()
+    except Exception:
+        _STREAM_WORKER_SLOTS.release()
+        raise
+
+    try:
+        while True:
+            try:
+                item = event_queue.get(timeout=15)
+            except queue.Empty:
+                yield ChatStreamEvent(
+                    event=None,
+                    data=json.dumps({
+                        "type": "heartbeat",
+                        "data": {"run_id": current_run_id},
+                    }, ensure_ascii=False),
+                )
+                continue
+            if item is finished:
+                completed_normally = True
+                break
+            if item.get("type") == "run.started":
+                current_run_id = item.get("data", {}).get("run_id")
+            yield ChatStreamEvent(
+                event=None,
+                data=json.dumps(item, ensure_ascii=False),
+            )
+        yield ChatStreamEvent(event="done", data="[DONE]")
+    finally:
+        if not completed_normally and current_run_id:
+            try:
+                with AssistantSessionLocal() as sdb:
+                    agent_run_crud.cancel_run(
+                        sdb,
+                        current_run_id,
+                        user_id=actor_id,
+                    )
+            except Exception:
+                logger.warning(
+                    "Failed to cancel disconnected role run: run_id=%s",
+                    current_run_id,
+                    exc_info=True,
+                )
+
+
+def stream_student_events(
+    student_id: int,
+    message: str,
+    session_id: str,
+    request_id: str,
+) -> Iterator[ChatStreamEvent]:
+    """学生 Graph 的 JSON SSE 入口。"""
+
+    from .subagents import StudentSubagentContainer
+
+    yield from _stream_role_events(
+        actor_id=student_id,
+        request_id=request_id,
+        orchestrate=orchestrate_student_run,
+        orchestrate_kwargs={
+            "student_id": student_id,
+            "message": message,
+            "session_id": session_id,
+            "request_id": request_id,
+        },
+        container_factory=StudentSubagentContainer,
+    )
+
+
+def orchestrate_admin_run(
+    admin_id: int,
+    message: str,
+    session_id: str,
+    request_id: str,
+    subagents: Any,
+    assistant_db: Session | None = None,
+    budget: RunBudget | None = None,
+    event_callback: Callable[[dict], None] | None = None,
+) -> OrchestrationResult:
+    """执行管理员主管 Graph，并按角色隔离持久化运行记录。"""
+    from ..models import AgentMessage, AgentSession
+    from .graphs.admin import build_admin_graph
+
+    owns_db = assistant_db is None
+    sdb = assistant_db or AssistantSessionLocal()
+    try:
+        session = sdb.query(AgentSession).filter(
+            AgentSession.id == session_id,
+            AgentSession.user_id == admin_id,
+            AgentSession.actor_role == "superadmin",
+            AgentSession.status == "active",
+        ).first()
+        if session is None:
+            raise ValueError("管理员会话不存在或不属于当前用户")
+        recent_rows = (
+            sdb.query(AgentMessage)
+            .filter(AgentMessage.session_id == session_id)
+            .order_by(AgentMessage.created_at.desc(), AgentMessage.id.desc())
+            .limit(10)
+            .all()
+        )
+        recent_messages = [
+            {"role": row.role, "content": row.content}
+            for row in reversed(recent_rows)
+            if row.role in ("user", "assistant")
+        ]
+        run = agent_run_crud.create_run(
+            sdb,
+            session_id=session_id,
+            user_id=admin_id,
+            intent="pending",
+            graph_version="admin-v1",
+        )
+        agent_session_crud.append_message(
+            sdb,
+            session_id=session_id,
+            user_id=admin_id,
+            role="user",
+            content=message,
+            run_id=run.id,
+        )
+        emitted_events: list[dict] = []
+
+        def emit(event: dict) -> None:
+            normalized = {
+                "type": event["type"],
+                "data": {"run_id": run.id, **event.get("data", {})},
+            }
+            emitted_events.append(normalized)
+            if event_callback is not None:
+                event_callback(normalized)
+
+        emit({"type": "run.started", "data": {}})
+        def _is_cancelled() -> bool:
+            sdb.expire_all()
+            current = agent_run_crud.get_run(
+                sdb,
+                run.id,
+                user_id=admin_id,
+            )
+            return current is None or current.status == "cancelled"
+
+        graph = build_admin_graph(
+            subagents,
+            checkpointer=get_graph_checkpointer(),
+            is_cancelled=_is_cancelled,
+        )
+        actor = ActorContext(
+            user_id=admin_id,
+            role="superadmin",
+            request_id=request_id,
+            session_id=session_id,
+        )
+        try:
+            final_state = graph.invoke({
+                "run_id": run.id,
+                "actor": actor,
+                "user_message": message,
+                "conversation_summary": session.summary or "",
+                "recent_messages": recent_messages,
+                "runtime_budget": budget or default_run_budget(),
+                "visited_nodes": [],
+            }, config={"configurable": {"thread_id": run.id}})
+            decision = final_state.get("intent")
+            if decision is not None:
+                agent_run_crud.update_run_route(
+                    sdb,
+                    run_id=run.id,
+                    user_id=admin_id,
+                    intent=decision.intent.value,
+                    risk_level=decision.risk_level.value,
+                )
+            for node_name in final_state.get("visited_nodes", []):
+                agent_run_crud.append_step(
+                    sdb,
+                    run_id=run.id,
+                    user_id=admin_id,
+                    node_name=node_name,
+                    status="completed",
+                )
+            final_answer = final_state.get("final_answer", "")
+            if _finalize_run_or_detect_cancel_race(
+                sdb, run_id=run.id, user_id=admin_id,
+                final_answer=final_answer,
+                artifacts=_build_artifacts(final_state),
+            ):
+                # 取消竞态：最后节点完成后、finalize 前用户取消了运行
+                emit({
+                    "type": "run.cancelled",
+                    "data": {"error_code": AGENT_RUN_CANCELLED},
+                })
+                return OrchestrationResult(
+                    run_id=run.id,
+                    final_answer="",
+                    events=emitted_events,
+                    status="cancelled",
+                    error_code=AGENT_RUN_CANCELLED,
+                )
+            for node in final_state.get("visited_nodes", []):
+                emit({"type": "agent.completed", "data": {"agent": node}})
+            emit({"type": "content.delta", "data": {"content": final_answer}})
+            emit({"type": "run.completed", "data": {}})
+            return OrchestrationResult(
+                run_id=run.id,
+                final_answer=final_answer,
+                events=emitted_events,
+            )
+        except RunCancelled:
+            emit({
+                "type": "run.cancelled",
+                "data": {"error_code": AGENT_RUN_CANCELLED},
+            })
+            return OrchestrationResult(
+                run_id=run.id,
+                final_answer="",
+                events=emitted_events,
+                status="cancelled",
+                error_code=AGENT_RUN_CANCELLED,
+            )
+        except BudgetExceeded as e:
+            # 与教师路径一致：预算超限落稳定错误码，不误记为通用错误
+            logger.warning(
+                "Admin run budget exceeded: run_id=%s code=%s", run.id, e.code,
+            )
+            agent_run_crud.fail_run(
+                sdb,
+                run.id,
+                user_id=admin_id,
+                error_code=AGENT_BUDGET_EXCEEDED,
+            )
+            emit({"type": "run.failed", "data": {
+                "error_code": AGENT_BUDGET_EXCEEDED,
+            }})
+            return OrchestrationResult(
+                run_id=run.id,
+                final_answer="",
+                events=emitted_events,
+                status="failed",
+                error_code=AGENT_BUDGET_EXCEEDED,
+            )
+        except Exception:
+            logger.exception("Admin run crashed: run_id=%s", run.id)
+            agent_run_crud.fail_run(
+                sdb,
+                run.id,
+                user_id=admin_id,
+                error_code=AGENT_CHAT_ERROR,
+            )
+            failed_event = {
+                "type": "run.failed",
+                "data": {
+                    "error_code": AGENT_CHAT_ERROR,
+                    "message": SAFE_CHAT_ERROR_MESSAGE,
+                },
+            }
+            emit(failed_event)
+            return OrchestrationResult(
+                run_id=run.id,
+                final_answer=SAFE_CHAT_ERROR_MESSAGE,
+                events=emitted_events,
+                status="failed",
+                error_code=AGENT_CHAT_ERROR,
+            )
+    finally:
+        if owns_db:
+            sdb.close()
+
+
+def stream_admin_events(
+    admin_id: int,
+    message: str,
+    session_id: str,
+    request_id: str,
+) -> Iterator[ChatStreamEvent]:
+    """管理员 Graph 的 JSON SSE 入口。"""
+    from .subagents import AdminSubagentContainer
+
+    yield from _stream_role_events(
+        actor_id=admin_id,
+        request_id=request_id,
+        orchestrate=orchestrate_admin_run,
+        orchestrate_kwargs={
+            "admin_id": admin_id,
+            "message": message,
+            "session_id": session_id,
+            "request_id": request_id,
+        },
+        container_factory=AdminSubagentContainer,
+    )
