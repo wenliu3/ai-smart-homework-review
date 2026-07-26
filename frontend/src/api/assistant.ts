@@ -451,6 +451,26 @@ export async function getRun(runId: string): Promise<{
   });
 }
 
+/** 运行产物（分维度批改草案等）。 */
+export interface RunArtifact {
+  artifactType: string;
+  schemaVersion: string;
+  payload: Record<string, any> | null;
+  createdAt: string | null;
+}
+
+/**
+ * 列出运行产物。run 归属人可读；批改 run 的任课教师经跨库校验后可读。
+ */
+export async function getRunArtifacts(
+  runId: string,
+): Promise<{ runId: string; items: RunArtifact[] }> {
+  return request({
+    url: `/assistant/runs/${runId}/artifacts`,
+    method: "get",
+  });
+}
+
 /**
  * 取消运行。双重取消机制：本地 abort + 服务端 cancel API。
  *

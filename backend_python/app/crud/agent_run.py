@@ -265,6 +265,16 @@ def list_artifacts(db: Session, run_id: str, user_id: int) -> list[AgentArtifact
     """返回运行的全部 Artifact。跨用户返回空。"""
     if not get_run(db, run_id, user_id):
         return []
+    return list_artifacts_unscoped(db, run_id)
+
+
+def list_artifacts_unscoped(db: Session, run_id: str) -> list[AgentArtifact]:
+    """不做归属校验的 Artifact 读取。
+
+    仅供路由层在完成跨库授权（如任课教师经 submission → assignment →
+    teacher 链路校验）之后调用；任何直接面向请求参数的路径都必须走
+    带 user_id 的 list_artifacts。
+    """
     return (
         db.query(AgentArtifact)
         .filter(AgentArtifact.run_id == run_id)

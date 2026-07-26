@@ -72,10 +72,19 @@ def append_message(
 GRADING_SESSION_PREFIX = "grading-"
 """系统批改会话的 id 前缀（tasks/grading.py 生成），不属于用户对话会话。"""
 
+# 全部系统会话前缀：不进用户会话列表、不可对话/取消。
+# 新增系统任务类型时在此登记（查重解释见 crud/plagiarism_suggestion.py）。
+SYSTEM_SESSION_PREFIXES = (GRADING_SESSION_PREFIX, "plagiarism-")
+
 
 def is_grading_session_id(session_id: str) -> bool:
-    """判断是否为系统批改会话 id（此类会话不进用户会话列表、不可对话/取消）。"""
+    """判断是否为系统批改会话 id。"""
     return session_id.startswith(GRADING_SESSION_PREFIX)
+
+
+def is_system_session_id(session_id: str) -> bool:
+    """判断是否为任一系统会话 id（批改/查重解释等）。"""
+    return session_id.startswith(SYSTEM_SESSION_PREFIXES)
 
 
 def list_user_sessions(
@@ -83,11 +92,14 @@ def list_user_sessions(
     user_id: int,
     actor_role: str | None = None,
 ) -> list[AgentSession]:
-    """列出用户全部活跃会话（不含系统批改会话）。"""
+    """列出用户全部活跃会话（不含系统会话）。"""
     query = db.query(AgentSession).filter(
         AgentSession.user_id == user_id,
         AgentSession.status == "active",
-        AgentSession.id.notlike(f"{GRADING_SESSION_PREFIX}%"),
+        *[
+            AgentSession.id.notlike(f"{prefix}%")
+            for prefix in SYSTEM_SESSION_PREFIXES
+        ],
     )
     if actor_role is not None:
         query = query.filter(AgentSession.actor_role == actor_role)

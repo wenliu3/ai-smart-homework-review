@@ -65,8 +65,8 @@ def stream_run(
     """启动一次教师助手运行，以 JSON SSE 流式返回事件。"""
     if not _SESSION_ID_PATTERN.match(req.session_id):
         raise BadRequestException(10011, "session_id 格式非法，需为 8-64 位字母数字/下划线/连字符")
-    if agent_session_crud.is_grading_session_id(req.session_id):
-        raise BadRequestException(10011, "系统批改会话不支持发起对话")
+    if agent_session_crud.is_system_session_id(req.session_id):
+        raise BadRequestException(10011, "系统会话不支持发起对话")
 
     request_id = uuid4().hex
 
@@ -124,6 +124,58 @@ def get_run(
     })
 
 
+# ========== 运行产物 ==========
+
+@router.get("/assistant/runs/{run_id}/artifacts")
+def list_run_artifacts(
+    run_id: str,
+    actor: User = Depends(require_roles("teacher", "student", "superadmin")),
+    db: Session = Depends(get_db),
+    sdb: Session = Depends(get_assistant_db),
+):
+    """列出运行产物（分维度批改草案等，规划 3B.3）。
+
+    权限：run 归属人可读；批改 run 的任课教师经
+    submission.grading_run_id → assignment → teacher 跨库校验后可读。
+    """
+    if not _RUN_ID_PATTERN.match(run_id):
+        raise BadRequestException(10011, "run_id 格式非法")
+
+    authorized = agent_run_crud.get_run(sdb, run_id, user_id=actor.id) is not None
+    if not authorized and actor.role == "teacher":
+        from ..models import Assignment, Submission
+
+        owns = (
+            db.query(Submission)
+            .join(Assignment, Assignment.id == Submission.assignment_id)
+            .filter(
+                Submission.grading_run_id == run_id,
+                Assignment.alive(),
+                Assignment.teacher_id == actor.id,
+            )
+            .first()
+        )
+        authorized = owns is not None
+    if not authorized:
+        raise NotFoundException(10015, "运行不存在")
+
+    artifacts = agent_run_crud.list_artifacts_unscoped(sdb, run_id)
+    return ok({
+        "runId": run_id,
+        "items": [
+            {
+                "artifactType": item.artifact_type,
+                "schemaVersion": item.schema_version,
+                "payload": item.payload_json,
+                "createdAt": (
+                    item.created_at.isoformat() if item.created_at else None
+                ),
+            }
+            for item in artifacts
+        ],
+    })
+
+
 # ========== 取消运行 ==========
 
 @router.post("/assistant/runs/{run_id}/cancel")
@@ -139,9 +191,10 @@ def cancel_run(
     run = agent_run_crud.get_run(sdb, run_id, user_id=actor.id)
     if not run:
         raise NotFoundException(10015, "运行不存在")
-    if agent_session_crud.is_grading_session_id(run.session_id):
-        # 系统批改任务不可由用户取消（否则学生可借取消逃避 AI 批改）
-        raise BadRequestException(10011, "系统批改任务不支持取消")
+    if agent_session_crud.is_system_session_id(run.session_id):
+        # 系统任务（批改/查重解释）不可由用户取消
+        # （否则学生可借取消逃避 AI 批改）
+        raise BadRequestException(10011, "系统任务不支持取消")
     if run.status in ("completed", "failed", "cancelled"):
         return ok({"runId": run.id, "status": run.status, "message": "运行已结束，无需取消"})
     agent_run_crud.cancel_run(sdb, run_id, user_id=actor.id)

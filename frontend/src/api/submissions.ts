@@ -42,6 +42,8 @@ export interface Submission {
   createdAt: string;
   isDraft: boolean;
   submissionCount: number; // 提交次数
+  /** 最近一次 AI 批改运行 ID（无 AI 规则的作业为 null），供进度轮询 */
+  gradingRunId?: string | null;
 }
 
 // AI批改信息

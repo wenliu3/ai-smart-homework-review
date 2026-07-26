@@ -97,6 +97,7 @@ def get_submission_detail(db: Session, submission_id: int) -> dict:
         "aiScore": _to100(s.ai_score, max_score), "aiReviewContent": s.ai_review_content,
         "teacherScore": _to100(s.teacher_score, max_score), "teacherReviewContent": s.teacher_review_content,
         "teacherReviewedAt": s.teacher_reviewed_at.isoformat() if s.teacher_reviewed_at else None,
+        "gradingRunId": s.grading_run_id,  # 分维度批改产物入口（规划 3B.3）
         "createdAt": s.created_at.isoformat() if s.created_at else None,
         "updatedAt": s.updated_at.isoformat() if s.updated_at else None,
         "attachments": [
