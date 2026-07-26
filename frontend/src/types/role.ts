@@ -1,4 +1,4 @@
-import { BaseEntity } from "./common";
+import type { BaseEntity } from "./common";
 
 /**
  * 定义用户菜单类型，用于从后端返回的菜单数据

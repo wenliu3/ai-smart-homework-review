@@ -32,6 +32,7 @@ build
 .env
 .env.local
 .env.*.local
+.env.docker
 backend_python/.env
 
 # ===== 测试 =====
@@ -39,6 +40,7 @@ coverage
 *.lcov
 .nyc_output
 .pytest_cache/
+.pytest-review-*/
 .coverage
 htmlcov/
 .tox/

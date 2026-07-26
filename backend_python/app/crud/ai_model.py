@@ -10,23 +10,49 @@ from ..core.utils import camel_to_snake
 
 logger = logging.getLogger(__name__)
 
+# 密钥字段：响应中脱敏，且客户端回传掩码值时不落库
+_SECRET_COLUMNS = ("api_key", "access_key", "secret_key")
+
+# /active 端点（教师可访问）只返回的非敏感字段（camelCase）
+_ACTIVE_PUBLIC_FIELDS = ("code", "name", "provider", "modelName", "status", "isDefault")
+
+
+def _is_masked_value(value) -> bool:
+    """判断客户端回传的密钥值是否为脱敏掩码或空值（是则跳过更新，防止掩码入库）。"""
+    if not value or not isinstance(value, str) or not value.strip():
+        return True
+    return "****" in value
+
+
+def _to_public_dict(model: AiModel) -> dict:
+    """序列化模型配置：排除明文密钥列，补充掩码值供前端展示。"""
+    from ..agent.gateway import mask_secret
+    data = model.to_dict(exclude=set(_SECRET_COLUMNS))
+    data["apiKey"] = mask_secret(model.api_key)
+    data["accessKey"] = mask_secret(model.access_key)
+    data["secretKey"] = mask_secret(model.secret_key)
+    return data
+
 
 def get_list(db: Session) -> dict:
-    """查询所有 AI 模型列表 — 含汇总统计(总数/在线数/总用量/总余额)"""
+    """查询所有 AI 模型列表 — 含汇总统计(总数/在线数/总用量/总余额)，密钥脱敏"""
     models = db.query(AiModel).all()
     active = sum(1 for m in models if m.status == "active")
     total_usage = sum((m.total_usage or 0) for m in models)
     total_balance = sum((m.last_balance or 0) for m in models)
     return {
-        "models": [m.to_dict() for m in models],
+        "models": [_to_public_dict(m) for m in models],
         "summary": {"totalModels": len(models), "activeModels": active, "totalUsage": total_usage, "totalBalance": total_balance},
     }
 
 
 def get_active(db: Session) -> list:
-    """查询所有激活状态的 AI 模型"""
+    """查询所有激活状态的 AI 模型 — 教师端下拉框使用，只返回非敏感字段"""
     models = db.query(AiModel).filter(AiModel.status == "active").all()
-    return [m.to_dict() for m in models]
+    return [
+        {key: m.to_dict().get(key) for key in _ACTIVE_PUBLIC_FIELDS}
+        for m in models
+    ]
 
 
 def initialize(db: Session) -> dict:
@@ -43,15 +69,19 @@ def initialize(db: Session) -> dict:
 
 
 def get_detail(db: Session, code: str) -> dict:
-    """根据 code 查询单个 AI 模型配置"""
+    """根据 code 查询单个 AI 模型配置（密钥脱敏）"""
     model = db.query(AiModel).filter(AiModel.code == code).first()
     if not model:
         raise NotFoundException(10015, "模型不存在")
-    return model.to_dict()
+    return _to_public_dict(model)
 
 
 def update_config(db: Session, code: str, data: dict) -> dict:
-    """更新 AI 模型配置(API Key/状态等) — 含 isDefault 互斥逻辑"""
+    """更新 AI 模型配置(API Key/状态等) — 含 isDefault 互斥逻辑
+
+    密钥字段回传掩码值（如 "sk-1****cdef"）或空值时跳过更新，
+    防止前端把脱敏后的展示值写回数据库覆盖真实密钥。
+    """
     model = db.query(AiModel).filter(AiModel.code == code).first()
     if not model:
         raise NotFoundException(10015, "模型不存在")
@@ -64,10 +94,12 @@ def update_config(db: Session, code: str, data: dict) -> dict:
 
     for k, v in data.items():
         col = camel_to_snake(k)
+        if col in _SECRET_COLUMNS and _is_masked_value(v):
+            continue
         if hasattr(model, col) and col != "id":
             setattr(model, col, v)
     db.commit()
-    return model.to_dict()
+    return _to_public_dict(model)
 
 
 def set_default(db: Session, code: str) -> dict:
@@ -237,3 +269,25 @@ def get_stats(db: Session, code: str) -> dict:
     if not model:
         raise NotFoundException(10015, "模型不存在")
     return {"dailyUsage": [], "monthlyUsage": [], "recentActivity": []}
+
+
+def increment_usage(db: Session, model_id: int, calls: int, tokens: int) -> None:
+    """原子累加模型调用次数与 Token 总量（规划 4.1）。
+
+    多 worker 并发安全：单条 UPDATE 自增，不做读-改-写。
+    统计尽力而为，任何失败由调用方吞掉，不影响业务运行。
+    """
+    from sqlalchemy import func, update as sa_update
+
+    if calls <= 0 and tokens <= 0:
+        return
+    db.execute(
+        sa_update(AiModel)
+        .where(AiModel.id == model_id)
+        .values(
+            total_usage=func.coalesce(AiModel.total_usage, 0) + max(calls, 0),
+            total_tokens=func.coalesce(AiModel.total_tokens, 0) + max(tokens, 0),
+            last_used_at=datetime.now(),
+        )
+    )
+    db.commit()

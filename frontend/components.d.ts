@@ -8,6 +8,10 @@ export {}
 declare module '@vue/runtime-core' {
   export interface GlobalComponents {
     AdaptiveTableContainer: typeof import('./src/components/AdaptiveTableContainer.vue')['default']
+    ApprovalDiff: typeof import('./src/components/assistant/ApprovalDiff.vue')['default']
+    AssistantApprovalView: typeof import('./src/components/assistant/AssistantApprovalView.vue')['default']
+    AssistantChatView: typeof import('./src/components/assistant/AssistantChatView.vue')['default']
+    AssistantHistoryView: typeof import('./src/components/assistant/AssistantHistoryView.vue')['default']
     AssistantPanel: typeof import('./src/components/AssistantPanel.vue')['default']
     ElAlert: typeof import('element-plus/es')['ElAlert']
     ElAside: typeof import('element-plus/es')['ElAside']
@@ -78,6 +82,7 @@ declare module '@vue/runtime-core' {
     PageHeader: typeof import('./src/components/PageHeader.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    RunTimeline: typeof import('./src/components/assistant/RunTimeline.vue')['default']
     WangEditor: typeof import('./src/components/WangEditor.vue')['default']
   }
   export interface ComponentCustomProperties {

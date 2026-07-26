@@ -98,6 +98,13 @@
                 <p class="text-gray-400 text-sm">
                   评价完成后会自动显示结果，请耐心等待
                 </p>
+                <p
+                  v-if="isPolling"
+                  class="text-gray-400 text-sm"
+                  data-testid="grading-progress"
+                >
+                  正在查询批改进度（第 {{ pollingCount || 0 }} 次）…
+                </p>
               </div>
             </div>
           </div>

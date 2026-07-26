@@ -292,7 +292,7 @@ const getActionText = (row: StudentAssignmentListItem) => {
 
 // 查看作业详情
 const viewAssignment = (assignment: StudentAssignmentListItem) => {
-  const classId = assignment.classId || assignment.classes?.[0]?.id || '';
+  const classId = assignment.classId;
   if (assignment.hasSubmitted || assignment.hasDraft) {
     // 跳转到提交页面
     router.push({

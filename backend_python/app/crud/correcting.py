@@ -1,8 +1,13 @@
 """批改 CRUD"""
+import logging
+
 from sqlalchemy.orm import Session
+from ..assistant_database import AssistantSessionLocal
 from ..models import User, Class, Assignment, Submission
 from ..core.exceptions import NotFoundException
 from ..core.utils import now, camel_to_snake
+
+logger = logging.getLogger(__name__)
 
 
 def _max_score(assignment: Assignment) -> int:
@@ -28,7 +33,14 @@ def get_submission_list(db: Session, params: dict) -> dict:
 
     # JOIN User 表，将 studentName/studentNumber 过滤下推到 SQL 层，
     # 确保 total 和分页数据一致（修复原内存过滤导致 total 与页内条数不符的问题）
-    query = db.query(Submission).join(User, Submission.student_id == User.id)
+    # JOIN Assignment 并带 alive()：软删作业不再级联删提交记录，
+    # 不在这里过滤的话，已删作业的提交会永远留在批改队列里还能被打分。
+    query = (
+        db.query(Submission)
+        .join(User, Submission.student_id == User.id)
+        .join(Assignment, Assignment.id == Submission.assignment_id)
+        .filter(Assignment.alive())
+    )
     if params.get("assignmentId"):
         query = query.filter(Submission.assignment_id == int(params["assignmentId"]))
     if params.get("classId"):
@@ -49,7 +61,7 @@ def get_submission_list(db: Session, params: dict) -> dict:
     for s in submissions:
         student = db.query(User).filter(User.id == s.student_id).first()
         cls = db.query(Class).filter(Class.id == s.class_id).first()
-        assignment = db.query(Assignment).filter(Assignment.id == s.assignment_id).first()
+        assignment = db.query(Assignment).filter(Assignment.alive(), Assignment.id == s.assignment_id).first()
         max_score = _max_score(assignment) if assignment else 100
         items.append({
             "_id": str(s.id), "assignmentId": str(s.assignment_id), "studentId": str(s.student_id),
@@ -73,10 +85,13 @@ def get_submission_detail(db: Session, submission_id: int) -> dict:
     s = db.query(Submission).filter(Submission.id == submission_id).first()
     if not s:
         raise NotFoundException(10015, "提交记录不存在")
+    assignment = db.query(Assignment).filter(Assignment.alive(), Assignment.id == s.assignment_id).first()
+    # 作业已软删：不能静默回退成 100 分制照常返回（会把 40/50 显示成 40/100）
+    if not assignment:
+        raise NotFoundException(10015, "作业不存在")
     student = db.query(User).filter(User.id == s.student_id).first()
     cls = db.query(Class).filter(Class.id == s.class_id).first()
-    assignment = db.query(Assignment).filter(Assignment.id == s.assignment_id).first()
-    max_score = _max_score(assignment) if assignment else 100
+    max_score = _max_score(assignment)
     return {
         "_id": str(s.id), "assignmentId": str(s.assignment_id), "studentId": str(s.student_id),
         "studentName": student.name if student else "",
@@ -87,6 +102,7 @@ def get_submission_detail(db: Session, submission_id: int) -> dict:
         "aiScore": _to100(s.ai_score, max_score), "aiReviewContent": s.ai_review_content,
         "teacherScore": _to100(s.teacher_score, max_score), "teacherReviewContent": s.teacher_review_content,
         "teacherReviewedAt": s.teacher_reviewed_at.isoformat() if s.teacher_reviewed_at else None,
+        "gradingRunId": s.grading_run_id,  # 分维度批改产物入口（规划 3B.3）
         "createdAt": s.created_at.isoformat() if s.created_at else None,
         "updatedAt": s.updated_at.isoformat() if s.updated_at else None,
         "attachments": [
@@ -98,14 +114,57 @@ def get_submission_detail(db: Session, submission_id: int) -> dict:
     }
 
 
-def submit_teacher_review(db: Session, submission_id: int, teacher_score: float, teacher_review_content: str) -> dict:
-    """教师提交批改 — 写入教师得分和评语，状态置为 teacher_reviewed"""
+def submit_teacher_review(
+    db: Session,
+    submission_id: int,
+    teacher_score: float,
+    teacher_review_content: str,
+    actor_user_id: int | None = None,
+) -> dict:
+    """教师提交批改 — 写入教师得分和评语，状态置为 teacher_reviewed。
+
+    actor_user_id 提供且提交有 AI 批改 run 时，自动采集教师改分与
+    AI 评分的差值到 PG 反馈表（规划 4.3；跨库尽力而为，失败不阻塞批改）。
+    """
     s = db.query(Submission).filter(Submission.id == submission_id).first()
     if not s:
         raise NotFoundException(10015, "提交记录不存在")
+    # 作业已软删时提交记录仍在库里（保留可恢复），但不能再产生批改数据
+    if db.query(Assignment).filter(
+        Assignment.alive(), Assignment.id == s.assignment_id,
+    ).first() is None:
+        raise NotFoundException(10015, "作业不存在")
     s.teacher_score = teacher_score
     s.teacher_review_content = teacher_review_content
     s.teacher_reviewed_at = now()
     s.status = "teacher_reviewed"
     db.commit()
+    _record_teacher_correction(s, teacher_score, actor_user_id)
     return {"success": True, "message": "批改提交成功", "submission": s.to_dict()}
+
+
+def _record_teacher_correction(
+    submission: Submission,
+    teacher_score: float,
+    actor_user_id: int | None,
+) -> None:
+    """改分差值自动采集：run 归属学生、反馈人是教师，不走 run 归属校验。"""
+    if (
+        actor_user_id is None
+        or submission.grading_run_id is None
+        or submission.ai_score is None
+    ):
+        return
+    try:
+        from ..crud.agent_feedback import record_teacher_correction
+
+        with AssistantSessionLocal() as sdb:
+            record_teacher_correction(
+                sdb,
+                run_id=submission.grading_run_id,
+                teacher_id=actor_user_id,
+                ai_score=float(submission.ai_score),
+                teacher_score=float(teacher_score),
+            )
+    except Exception:
+        logger.warning("教师改分差值采集失败", exc_info=True)

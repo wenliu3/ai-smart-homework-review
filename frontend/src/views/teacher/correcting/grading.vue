@@ -25,6 +25,9 @@
           <div class="text-sm text-gray-700 whitespace-pre-wrap" v-html="formatContent(submission.aiReviewContent)"></div>
         </div>
 
+        <!-- AI 分维度评分草案（有批改 run 时展示，规划 3B.3） -->
+        <GradingDimensionsPanel :run-id="submission.gradingRunId" />
+
         <!-- 学生作业内容 -->
         <div v-if="submission.content" class="mb-4">
           <div class="text-sm font-medium mb-2 flex items-center gap-1">
@@ -106,6 +109,7 @@ import { ElMessage } from 'element-plus'
 import { ArrowLeft, Paperclip, Document, PictureFilled } from '@element-plus/icons-vue'
 import { getSubmissionDetail, submitTeacherReview } from "@/api/correcting";
 import FilePreviewDialog from "@/components/FilePreviewDialog.vue";
+import GradingDimensionsPanel from "./components/GradingDimensionsPanel.vue";
 import type { SubmissionRecord } from '@/api/correcting'
 
 const route = useRoute()

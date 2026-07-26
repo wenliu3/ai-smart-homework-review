@@ -1,0 +1,1306 @@
+{
+  "schema_version": "1.0",
+  "cases": [
+    {
+      "case_id": "grading-replay-01",
+      "assignment_description": "按批改量表逐项评分并给出评语。",
+      "rubric": {
+        "version": "v1",
+        "criteria": [
+          {
+            "criterion_id": "c1",
+            "title": "论点与论据",
+            "max_score": 40.0,
+            "instructions": "论点明确，论据能支撑论点"
+          },
+          {
+            "criterion_id": "c2",
+            "title": "结构与表达",
+            "max_score": 60.0,
+            "instructions": "结构完整，语言通顺"
+          }
+        ]
+      },
+      "submission_text": "坚持是一种可贵的品质。古人云，锲而不舍，金石可镂。学习中遇到难题时，我们不应轻言放弃，而应反复推敲，逐步逼近答案。正如登山，一步一个脚印，终能到达顶峰。因此，坚持不懈是取得进步的根本保障。",
+      "model_responses": [
+        {
+          "schema_version": "v1",
+          "rubric_version": "v1",
+          "items": [
+            {
+              "criterion_id": "c1",
+              "title": "论点与论据",
+              "score": 32.0,
+              "max_score": 40.0,
+              "feedback": "论点与论据表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            },
+            {
+              "criterion_id": "c2",
+              "title": "结构与表达",
+              "score": 47.0,
+              "max_score": 60.0,
+              "feedback": "结构与表达表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            }
+          ],
+          "summary": "各维度已逐项评分，总体完成质量与得分档位一致。"
+        }
+      ],
+      "human_rating": {
+        "total_score": 76.0,
+        "requires_human_review": false
+      }
+    },
+    {
+      "case_id": "grading-replay-02",
+      "assignment_description": "按批改量表逐项评分并给出评语。",
+      "rubric": {
+        "version": "v1",
+        "criteria": [
+          {
+            "criterion_id": "c1",
+            "title": "论点与论据",
+            "max_score": 40.0,
+            "instructions": "论点明确，论据能支撑论点"
+          },
+          {
+            "criterion_id": "c2",
+            "title": "结构与表达",
+            "max_score": 60.0,
+            "instructions": "结构完整，语言通顺"
+          }
+        ]
+      },
+      "submission_text": "阅读经典让我受益匪浅。读《朝花夕拾》时，我体会到作者对童年的怀念与对旧社会的批判交织在一起。文字平实却情感深沉，让我认识到好文章不在辞藻华丽，而在真情实感。今后我要多读经典，提高自己的写作水平。",
+      "model_responses": [
+        {
+          "schema_version": "v1",
+          "rubric_version": "v1",
+          "items": [
+            {
+              "criterion_id": "c1",
+              "title": "论点与论据",
+              "score": 35.0,
+              "max_score": 40.0,
+              "feedback": "论点与论据表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            },
+            {
+              "criterion_id": "c2",
+              "title": "结构与表达",
+              "score": 52.0,
+              "max_score": 60.0,
+              "feedback": "结构与表达表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            }
+          ],
+          "summary": "各维度已逐项评分，总体完成质量与得分档位一致。"
+        }
+      ],
+      "human_rating": {
+        "total_score": 89.0,
+        "requires_human_review": false
+      }
+    },
+    {
+      "case_id": "grading-replay-03",
+      "assignment_description": "按批改量表逐项评分并给出评语。",
+      "rubric": {
+        "version": "v1",
+        "criteria": [
+          {
+            "criterion_id": "c1",
+            "title": "论点与论据",
+            "max_score": 40.0,
+            "instructions": "论点明确，论据能支撑论点"
+          },
+          {
+            "criterion_id": "c2",
+            "title": "结构与表达",
+            "max_score": 60.0,
+            "instructions": "结构完整，语言通顺"
+          }
+        ]
+      },
+      "submission_text": "环境保护人人有责。我们小区最近开展了垃圾分类活动，起初大家都嫌麻烦，但坚持一个月后，楼道整洁了，蚊虫也少了。这件小事让我明白，环保不是口号，而是从身边点滴做起的行动。",
+      "model_responses": [
+        {
+          "schema_version": "v1",
+          "rubric_version": "v1",
+          "items": [
+            {
+              "criterion_id": "c1",
+              "title": "论点与论据",
+              "score": 22.0,
+              "max_score": 40.0,
+              "feedback": "论点与论据表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            },
+            {
+              "criterion_id": "c2",
+              "title": "结构与表达",
+              "score": 38.0,
+              "max_score": 60.0,
+              "feedback": "结构与表达表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            }
+          ],
+          "summary": "各维度已逐项评分，总体完成质量与得分档位一致。"
+        }
+      ],
+      "human_rating": {
+        "total_score": 55.0,
+        "requires_human_review": false
+      }
+    },
+    {
+      "case_id": "grading-replay-04",
+      "assignment_description": "按批改量表逐项评分并给出评语。",
+      "rubric": {
+        "version": "v1",
+        "criteria": [
+          {
+            "criterion_id": "c1",
+            "title": "公式与推导",
+            "max_score": 30.0,
+            "instructions": "公式使用正确，推导步骤完整"
+          },
+          {
+            "criterion_id": "c2",
+            "title": "计算准确性",
+            "max_score": 40.0,
+            "instructions": "数值计算无误"
+          },
+          {
+            "criterion_id": "c3",
+            "title": "过程规范性",
+            "max_score": 30.0,
+            "instructions": "解题过程书写规范"
+          }
+        ]
+      },
+      "submission_text": "本次物理实验测量单摆周期。我先量取摆长并记录，再用秒表测量三十次全振动的总时间，重复三组取平均，最后代入公式计算重力加速度，得到的结果与标准值的相对误差约为百分之二，在允许范围内。",
+      "model_responses": [
+        {
+          "schema_version": "v1",
+          "rubric_version": "v1",
+          "items": [
+            {
+              "criterion_id": "c1",
+              "title": "公式与推导",
+              "score": 26.0,
+              "max_score": 30.0,
+              "feedback": "公式与推导表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            },
+            {
+              "criterion_id": "c2",
+              "title": "计算准确性",
+              "score": 35.0,
+              "max_score": 40.0,
+              "feedback": "计算准确性表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            },
+            {
+              "criterion_id": "c3",
+              "title": "过程规范性",
+              "score": 27.0,
+              "max_score": 30.0,
+              "feedback": "过程规范性表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            }
+          ],
+          "summary": "各维度已逐项评分，总体完成质量与得分档位一致。"
+        }
+      ],
+      "human_rating": {
+        "total_score": 90.0,
+        "requires_human_review": false
+      }
+    },
+    {
+      "case_id": "grading-replay-05",
+      "assignment_description": "按批改量表逐项评分并给出评语。",
+      "rubric": {
+        "version": "v1",
+        "criteria": [
+          {
+            "criterion_id": "c1",
+            "title": "公式与推导",
+            "max_score": 30.0,
+            "instructions": "公式使用正确，推导步骤完整"
+          },
+          {
+            "criterion_id": "c2",
+            "title": "计算准确性",
+            "max_score": 40.0,
+            "instructions": "数值计算无误"
+          },
+          {
+            "criterion_id": "c3",
+            "title": "过程规范性",
+            "max_score": 30.0,
+            "instructions": "解题过程书写规范"
+          }
+        ]
+      },
+      "submission_text": "解方程组时，我先用代入消元法把二元一次方程组化为一元一次方程，求出未知数后再回代求另一个未知数，最后把两个解代回原方程组逐一验算，确认等式两边相等，解题过程完整。",
+      "model_responses": [
+        {
+          "schema_version": "v1",
+          "rubric_version": "v1",
+          "items": [
+            {
+              "criterion_id": "c1",
+              "title": "公式与推导",
+              "score": 18.0,
+              "max_score": 30.0,
+              "feedback": "公式与推导表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            },
+            {
+              "criterion_id": "c2",
+              "title": "计算准确性",
+              "score": 22.0,
+              "max_score": 40.0,
+              "feedback": "计算准确性表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            },
+            {
+              "criterion_id": "c3",
+              "title": "过程规范性",
+              "score": 20.0,
+              "max_score": 30.0,
+              "feedback": "过程规范性表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            }
+          ],
+          "summary": "各维度已逐项评分，总体完成质量与得分档位一致。"
+        }
+      ],
+      "human_rating": {
+        "total_score": 66.0,
+        "requires_human_review": false
+      }
+    },
+    {
+      "case_id": "grading-replay-06",
+      "assignment_description": "按批改量表逐项评分并给出评语。",
+      "rubric": {
+        "version": "v1",
+        "criteria": [
+          {
+            "criterion_id": "c1",
+            "title": "论点与论据",
+            "max_score": 40.0,
+            "instructions": "论点明确，论据能支撑论点"
+          },
+          {
+            "criterion_id": "c2",
+            "title": "结构与表达",
+            "max_score": 60.0,
+            "instructions": "结构完整，语言通顺"
+          }
+        ]
+      },
+      "submission_text": "我的家乡在江南水乡，春天油菜花开成一片金黄，夏天荷叶铺满池塘。外婆常在桥边给我讲过去的故事。家乡的景色和人情，是我作文里永远写不完的素材。",
+      "model_responses": [
+        {
+          "schema_version": "v1",
+          "rubric_version": "v1",
+          "items": [
+            {
+              "criterion_id": "c1",
+              "title": "论点与论据",
+              "score": 30.0,
+              "max_score": 40.0,
+              "feedback": "论点与论据表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            },
+            {
+              "criterion_id": "c2",
+              "title": "结构与表达",
+              "score": 45.0,
+              "max_score": 60.0,
+              "feedback": "结构与表达表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            }
+          ],
+          "summary": "各维度已逐项评分，总体完成质量与得分档位一致。"
+        }
+      ],
+      "human_rating": {
+        "total_score": 70.0,
+        "requires_human_review": false
+      }
+    },
+    {
+      "case_id": "grading-replay-07",
+      "assignment_description": "按批改量表逐项评分并给出评语。",
+      "rubric": {
+        "version": "v1",
+        "criteria": [
+          {
+            "criterion_id": "c1",
+            "title": "论点与论据",
+            "max_score": 40.0,
+            "instructions": "论点明确，论据能支撑论点"
+          },
+          {
+            "criterion_id": "c2",
+            "title": "结构与表达",
+            "max_score": 60.0,
+            "instructions": "结构完整，语言通顺"
+          }
+        ]
+      },
+      "submission_text": "关于诚信的议论文。诚信是立身之本，商鞅立木取信的故事说明，取信于人方能成事。反观失信者，即使一时得利，终将失去他人的信任。所以我们应当从小事做起，言出必行。",
+      "model_responses": [
+        {
+          "schema_version": "v1",
+          "rubric_version": "v1",
+          "items": [
+            {
+              "criterion_id": "c1",
+              "title": "论点与论据",
+              "score": 38.0,
+              "max_score": 40.0,
+              "feedback": "论点与论据表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            },
+            {
+              "criterion_id": "c2",
+              "title": "结构与表达",
+              "score": 55.0,
+              "max_score": 60.0,
+              "feedback": "结构与表达表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            }
+          ],
+          "summary": "各维度已逐项评分，总体完成质量与得分档位一致。"
+        }
+      ],
+      "human_rating": {
+        "total_score": 95.0,
+        "requires_human_review": false
+      }
+    },
+    {
+      "case_id": "grading-replay-08",
+      "assignment_description": "按批改量表逐项评分并给出评语。",
+      "rubric": {
+        "version": "v1",
+        "criteria": [
+          {
+            "criterion_id": "c1",
+            "title": "公式与推导",
+            "max_score": 30.0,
+            "instructions": "公式使用正确，推导步骤完整"
+          },
+          {
+            "criterion_id": "c2",
+            "title": "计算准确性",
+            "max_score": 40.0,
+            "instructions": "数值计算无误"
+          },
+          {
+            "criterion_id": "c3",
+            "title": "过程规范性",
+            "max_score": 30.0,
+            "instructions": "解题过程书写规范"
+          }
+        ]
+      },
+      "submission_text": "化学实验报告：配制一定物质的量浓度的溶液。先计算所需固体质量并称量，溶解冷却后转移至容量瓶，洗涤烧杯并定容摇匀。操作中注意视线与刻度线平齐，避免仰视俯视造成误差。",
+      "model_responses": [
+        {
+          "schema_version": "v1",
+          "rubric_version": "v1",
+          "items": [
+            {
+              "criterion_id": "c1",
+              "title": "公式与推导",
+              "score": 24.0,
+              "max_score": 30.0,
+              "feedback": "公式与推导表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            },
+            {
+              "criterion_id": "c2",
+              "title": "计算准确性",
+              "score": 30.0,
+              "max_score": 40.0,
+              "feedback": "计算准确性表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            },
+            {
+              "criterion_id": "c3",
+              "title": "过程规范性",
+              "score": 24.0,
+              "max_score": 30.0,
+              "feedback": "过程规范性表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            }
+          ],
+          "summary": "各维度已逐项评分，总体完成质量与得分档位一致。"
+        }
+      ],
+      "human_rating": {
+        "total_score": 85.0,
+        "requires_human_review": false
+      }
+    },
+    {
+      "case_id": "grading-replay-09",
+      "assignment_description": "按批改量表逐项评分并给出评语。",
+      "rubric": {
+        "version": "v1",
+        "criteria": [
+          {
+            "criterion_id": "c1",
+            "title": "论点与论据",
+            "max_score": 40.0,
+            "instructions": "论点明确，论据能支撑论点"
+          },
+          {
+            "criterion_id": "c2",
+            "title": "结构与表达",
+            "max_score": 60.0,
+            "instructions": "结构完整，语言通顺"
+          }
+        ]
+      },
+      "submission_text": "读《西游记》有感。孙悟空的形象既叛逆又忠诚，他敢于反抗天庭，却始终护送师父西行。这种矛盾让人物立体丰满。我认识到，评价一个人物不能只看单一侧面，要看他在关键时刻的选择。",
+      "model_responses": [
+        {
+          "schema_version": "v1",
+          "rubric_version": "v1",
+          "items": [
+            {
+              "criterion_id": "c1",
+              "title": "论点与论据",
+              "score": 28.0,
+              "max_score": 40.0,
+              "feedback": "论点与论据表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            },
+            {
+              "criterion_id": "c2",
+              "title": "结构与表达",
+              "score": 40.0,
+              "max_score": 60.0,
+              "feedback": "结构与表达表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            }
+          ],
+          "summary": "各维度已逐项评分，总体完成质量与得分档位一致。"
+        }
+      ],
+      "human_rating": {
+        "total_score": 61.0,
+        "requires_human_review": false
+      }
+    },
+    {
+      "case_id": "grading-replay-10",
+      "assignment_description": "按批改量表逐项评分并给出评语。",
+      "rubric": {
+        "version": "v1",
+        "criteria": [
+          {
+            "criterion_id": "c1",
+            "title": "公式与推导",
+            "max_score": 30.0,
+            "instructions": "公式使用正确，推导步骤完整"
+          },
+          {
+            "criterion_id": "c2",
+            "title": "计算准确性",
+            "max_score": 40.0,
+            "instructions": "数值计算无误"
+          },
+          {
+            "criterion_id": "c3",
+            "title": "过程规范性",
+            "max_score": 30.0,
+            "instructions": "解题过程书写规范"
+          }
+        ]
+      },
+      "submission_text": "英语学习心得。我坚持每天朗读课文十五分钟，并把生词整理成卡片随身携带。一个学期下来，听写正确率明显提高。方法虽然朴素，但贵在坚持，适合自己的才是最好的。",
+      "model_responses": [
+        {
+          "schema_version": "v1",
+          "rubric_version": "v1",
+          "items": [
+            {
+              "criterion_id": "c1",
+              "title": "公式与推导",
+              "score": 15.0,
+              "max_score": 30.0,
+              "feedback": "公式与推导表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            },
+            {
+              "criterion_id": "c2",
+              "title": "计算准确性",
+              "score": 18.0,
+              "max_score": 40.0,
+              "feedback": "计算准确性表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            },
+            {
+              "criterion_id": "c3",
+              "title": "过程规范性",
+              "score": 16.0,
+              "max_score": 30.0,
+              "feedback": "过程规范性表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            }
+          ],
+          "summary": "各维度已逐项评分，总体完成质量与得分档位一致。"
+        }
+      ],
+      "human_rating": {
+        "total_score": 52.0,
+        "requires_human_review": false
+      }
+    },
+    {
+      "case_id": "grading-replay-11",
+      "assignment_description": "按批改量表逐项评分并给出评语。",
+      "rubric": {
+        "version": "v1",
+        "criteria": [
+          {
+            "criterion_id": "c1",
+            "title": "论点与论据",
+            "max_score": 40.0,
+            "instructions": "论点明确，论据能支撑论点"
+          },
+          {
+            "criterion_id": "c2",
+            "title": "结构与表达",
+            "max_score": 60.0,
+            "instructions": "结构完整，语言通顺"
+          }
+        ]
+      },
+      "submission_text": "历史小论文：论丝绸之路的意义。丝绸之路不仅是商贸通道，更是文明交流的桥梁。中原的丝绸瓷器西传，西域的音乐作物东来，双向的交流丰富了彼此的文化，说明开放交流促进文明进步。",
+      "model_responses": [
+        {
+          "schema_version": "v1",
+          "rubric_version": "v1",
+          "items": [
+            {
+              "criterion_id": "c1",
+              "title": "论点与论据",
+              "score": 34.0,
+              "max_score": 40.0,
+              "feedback": "论点与论据表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            },
+            {
+              "criterion_id": "c2",
+              "title": "结构与表达",
+              "score": 50.0,
+              "max_score": 60.0,
+              "feedback": "结构与表达表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            }
+          ],
+          "summary": "各维度已逐项评分，总体完成质量与得分档位一致。"
+        }
+      ],
+      "human_rating": {
+        "total_score": 82.0,
+        "requires_human_review": false
+      }
+    },
+    {
+      "case_id": "grading-replay-12",
+      "assignment_description": "按批改量表逐项评分并给出评语。",
+      "rubric": {
+        "version": "v1",
+        "criteria": [
+          {
+            "criterion_id": "c1",
+            "title": "公式与推导",
+            "max_score": 30.0,
+            "instructions": "公式使用正确，推导步骤完整"
+          },
+          {
+            "criterion_id": "c2",
+            "title": "计算准确性",
+            "max_score": 40.0,
+            "instructions": "数值计算无误"
+          },
+          {
+            "criterion_id": "c3",
+            "title": "过程规范性",
+            "max_score": 30.0,
+            "instructions": "解题过程书写规范"
+          }
+        ]
+      },
+      "submission_text": "几何证明题解答。要证两三角形全等，我先由平行条件得到内错角相等，再结合公共边和对顶角，依据角边角判定定理证得全等，进而推出对应边相等，命题得证。书写时每步都注明依据。",
+      "model_responses": [
+        {
+          "schema_version": "v1",
+          "rubric_version": "v1",
+          "items": [
+            {
+              "criterion_id": "c1",
+              "title": "公式与推导",
+              "score": 28.0,
+              "max_score": 30.0,
+              "feedback": "公式与推导表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            },
+            {
+              "criterion_id": "c2",
+              "title": "计算准确性",
+              "score": 38.0,
+              "max_score": 40.0,
+              "feedback": "计算准确性表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            },
+            {
+              "criterion_id": "c3",
+              "title": "过程规范性",
+              "score": 28.0,
+              "max_score": 30.0,
+              "feedback": "过程规范性表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            }
+          ],
+          "summary": "各维度已逐项评分，总体完成质量与得分档位一致。"
+        }
+      ],
+      "human_rating": {
+        "total_score": 100.0,
+        "requires_human_review": false
+      }
+    },
+    {
+      "case_id": "grading-replay-13",
+      "assignment_description": "数学解答含拍照上传的推导步骤图。",
+      "rubric": {
+        "version": "v1",
+        "criteria": [
+          {
+            "criterion_id": "c1",
+            "title": "公式与推导",
+            "max_score": 30.0,
+            "instructions": "公式使用正确，推导步骤完整"
+          },
+          {
+            "criterion_id": "c2",
+            "title": "计算准确性",
+            "max_score": 40.0,
+            "instructions": "数值计算无误"
+          },
+          {
+            "criterion_id": "c3",
+            "title": "过程规范性",
+            "max_score": 30.0,
+            "instructions": "解题过程书写规范"
+          }
+        ]
+      },
+      "submission_text": "解方程组时，我先用代入消元法把二元一次方程组化为一元一次方程，求出未知数后再回代求另一个未知数，最后把两个解代回原方程组逐一验算，确认等式两边相等，解题过程完整。",
+      "image_assets": [
+        "formula_step.png"
+      ],
+      "model_responses": [
+        {
+          "schema_version": "v1",
+          "rubric_version": "v1",
+          "items": [
+            {
+              "criterion_id": "c1",
+              "title": "公式与推导",
+              "score": 27.0,
+              "max_score": 30.0,
+              "feedback": "公式与推导表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            },
+            {
+              "criterion_id": "c2",
+              "title": "计算准确性",
+              "score": 36.0,
+              "max_score": 40.0,
+              "feedback": "计算准确性表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            },
+            {
+              "criterion_id": "c3",
+              "title": "过程规范性",
+              "score": 27.0,
+              "max_score": 30.0,
+              "feedback": "过程规范性表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            }
+          ],
+          "summary": "推导步骤图与文字解答一致，计算准确。"
+        }
+      ],
+      "human_rating": {
+        "total_score": 92.0,
+        "requires_human_review": false
+      }
+    },
+    {
+      "case_id": "grading-replay-14",
+      "assignment_description": "物理实验报告含电路接线照片。",
+      "rubric": {
+        "version": "v1",
+        "criteria": [
+          {
+            "criterion_id": "c1",
+            "title": "公式与推导",
+            "max_score": 30.0,
+            "instructions": "公式使用正确，推导步骤完整"
+          },
+          {
+            "criterion_id": "c2",
+            "title": "计算准确性",
+            "max_score": 40.0,
+            "instructions": "数值计算无误"
+          },
+          {
+            "criterion_id": "c3",
+            "title": "过程规范性",
+            "max_score": 30.0,
+            "instructions": "解题过程书写规范"
+          }
+        ]
+      },
+      "submission_text": "本次物理实验测量单摆周期。我先量取摆长并记录，再用秒表测量三十次全振动的总时间，重复三组取平均，最后代入公式计算重力加速度，得到的结果与标准值的相对误差约为百分之二，在允许范围内。",
+      "image_assets": [
+        "circuit_diagram.png"
+      ],
+      "model_responses": [
+        {
+          "schema_version": "v1",
+          "rubric_version": "v1",
+          "items": [
+            {
+              "criterion_id": "c1",
+              "title": "公式与推导",
+              "score": 24.0,
+              "max_score": 30.0,
+              "feedback": "公式与推导表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            },
+            {
+              "criterion_id": "c2",
+              "title": "计算准确性",
+              "score": 32.0,
+              "max_score": 40.0,
+              "feedback": "计算准确性表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            },
+            {
+              "criterion_id": "c3",
+              "title": "过程规范性",
+              "score": 26.0,
+              "max_score": 30.0,
+              "feedback": "过程规范性表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            }
+          ],
+          "summary": "接线照片与报告描述相符，误差分析到位。"
+        }
+      ],
+      "human_rating": {
+        "total_score": 80.0,
+        "requires_human_review": false
+      }
+    },
+    {
+      "case_id": "grading-replay-15",
+      "assignment_description": "作文含一张过大的扫描图（超限降级为占位）。",
+      "rubric": {
+        "version": "v1",
+        "criteria": [
+          {
+            "criterion_id": "c1",
+            "title": "论点与论据",
+            "max_score": 40.0,
+            "instructions": "论点明确，论据能支撑论点"
+          },
+          {
+            "criterion_id": "c2",
+            "title": "结构与表达",
+            "max_score": 60.0,
+            "instructions": "结构完整，语言通顺"
+          }
+        ]
+      },
+      "submission_text": "关于诚信的议论文。诚信是立身之本，商鞅立木取信的故事说明，取信于人方能成事。反观失信者，即使一时得利，终将失去他人的信任。所以我们应当从小事做起，言出必行。",
+      "image_assets": [
+        "formula_step.png"
+      ],
+      "oversized_image": true,
+      "model_responses": [
+        {
+          "schema_version": "v1",
+          "rubric_version": "v1",
+          "items": [
+            {
+              "criterion_id": "c1",
+              "title": "论点与论据",
+              "score": 30.0,
+              "max_score": 40.0,
+              "feedback": "论点与论据表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            },
+            {
+              "criterion_id": "c2",
+              "title": "结构与表达",
+              "score": 44.0,
+              "max_score": 60.0,
+              "feedback": "结构与表达表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            }
+          ],
+          "summary": "正文完整可评；扫描图超出大小限制未纳入评阅。",
+          "limitations": [
+            "一张附图超出大小限制，未纳入评阅"
+          ]
+        }
+      ],
+      "human_rating": {
+        "total_score": 72.0,
+        "requires_human_review": false
+      }
+    },
+    {
+      "case_id": "grading-replay-16",
+      "assignment_description": "考察结构化校验失败后的定向修复重试。",
+      "rubric": {
+        "version": "v1",
+        "criteria": [
+          {
+            "criterion_id": "c1",
+            "title": "论点与论据",
+            "max_score": 40.0,
+            "instructions": "论点明确，论据能支撑论点"
+          },
+          {
+            "criterion_id": "c2",
+            "title": "结构与表达",
+            "max_score": 60.0,
+            "instructions": "结构完整，语言通顺"
+          }
+        ]
+      },
+      "submission_text": "坚持是一种可贵的品质。古人云，锲而不舍，金石可镂。学习中遇到难题时，我们不应轻言放弃，而应反复推敲，逐步逼近答案。正如登山，一步一个脚印，终能到达顶峰。因此，坚持不懈是取得进步的根本保障。",
+      "model_responses": [
+        {
+          "schema_version": "v1",
+          "rubric_version": "v1",
+          "items": [
+            {
+              "criterion_id": "c1",
+              "title": "论点与论据",
+              "score": 45.0,
+              "max_score": 40.0,
+              "feedback": "论点与论据表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            },
+            {
+              "criterion_id": "c2",
+              "title": "结构与表达",
+              "score": 50.0,
+              "max_score": 60.0,
+              "feedback": "结构与表达表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            }
+          ],
+          "summary": "首次输出：论点项得分超过满分。"
+        },
+        {
+          "schema_version": "v1",
+          "rubric_version": "v1",
+          "items": [
+            {
+              "criterion_id": "c1",
+              "title": "论点与论据",
+              "score": 36.0,
+              "max_score": 40.0,
+              "feedback": "论点与论据表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            },
+            {
+              "criterion_id": "c2",
+              "title": "结构与表达",
+              "score": 50.0,
+              "max_score": 60.0,
+              "feedback": "结构与表达表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            }
+          ],
+          "summary": "修复后：各项得分均在满分范围内。"
+        }
+      ],
+      "human_rating": {
+        "total_score": 84.0,
+        "requires_human_review": false
+      }
+    },
+    {
+      "case_id": "grading-replay-17",
+      "assignment_description": "考察量表版本不匹配的修复重试。",
+      "rubric": {
+        "version": "v1",
+        "criteria": [
+          {
+            "criterion_id": "c1",
+            "title": "公式与推导",
+            "max_score": 30.0,
+            "instructions": "公式使用正确，推导步骤完整"
+          },
+          {
+            "criterion_id": "c2",
+            "title": "计算准确性",
+            "max_score": 40.0,
+            "instructions": "数值计算无误"
+          },
+          {
+            "criterion_id": "c3",
+            "title": "过程规范性",
+            "max_score": 30.0,
+            "instructions": "解题过程书写规范"
+          }
+        ]
+      },
+      "submission_text": "化学实验报告：配制一定物质的量浓度的溶液。先计算所需固体质量并称量，溶解冷却后转移至容量瓶，洗涤烧杯并定容摇匀。操作中注意视线与刻度线平齐，避免仰视俯视造成误差。",
+      "model_responses": [
+        {
+          "schema_version": "v1",
+          "rubric_version": "v0",
+          "items": [
+            {
+              "criterion_id": "c1",
+              "title": "公式与推导",
+              "score": 20.0,
+              "max_score": 30.0,
+              "feedback": "公式与推导表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            },
+            {
+              "criterion_id": "c2",
+              "title": "计算准确性",
+              "score": 30.0,
+              "max_score": 40.0,
+              "feedback": "计算准确性表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            },
+            {
+              "criterion_id": "c3",
+              "title": "过程规范性",
+              "score": 20.0,
+              "max_score": 30.0,
+              "feedback": "过程规范性表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            }
+          ],
+          "summary": "首次输出：量表版本不匹配。"
+        },
+        {
+          "schema_version": "v1",
+          "rubric_version": "v1",
+          "items": [
+            {
+              "criterion_id": "c1",
+              "title": "公式与推导",
+              "score": 21.0,
+              "max_score": 30.0,
+              "feedback": "公式与推导表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            },
+            {
+              "criterion_id": "c2",
+              "title": "计算准确性",
+              "score": 28.0,
+              "max_score": 40.0,
+              "feedback": "计算准确性表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            },
+            {
+              "criterion_id": "c3",
+              "title": "过程规范性",
+              "score": 21.0,
+              "max_score": 30.0,
+              "feedback": "过程规范性表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            }
+          ],
+          "summary": "修复后：量表版本与维度对齐。"
+        }
+      ],
+      "human_rating": {
+        "total_score": 74.0,
+        "requires_human_review": false
+      }
+    },
+    {
+      "case_id": "grading-replay-18",
+      "assignment_description": "模型两次输出均不合规，应降级转人工复核。",
+      "rubric": {
+        "version": "v1",
+        "criteria": [
+          {
+            "criterion_id": "c1",
+            "title": "论点与论据",
+            "max_score": 40.0,
+            "instructions": "论点明确，论据能支撑论点"
+          },
+          {
+            "criterion_id": "c2",
+            "title": "结构与表达",
+            "max_score": 60.0,
+            "instructions": "结构完整，语言通顺"
+          }
+        ]
+      },
+      "submission_text": "读《西游记》有感。孙悟空的形象既叛逆又忠诚，他敢于反抗天庭，却始终护送师父西行。这种矛盾让人物立体丰满。我认识到，评价一个人物不能只看单一侧面，要看他在关键时刻的选择。",
+      "model_responses": [
+        {
+          "schema_version": "v1",
+          "rubric_version": "v1",
+          "items": [
+            {
+              "criterion_id": "c1",
+              "title": "论点与论据",
+              "score": 30.0,
+              "max_score": 40.0,
+              "feedback": "只输出了一个维度。"
+            }
+          ],
+          "summary": "缺失维度的输出。"
+        },
+        {
+          "schema_version": "v1",
+          "rubric_version": "v1",
+          "items": [
+            {
+              "criterion_id": "c1",
+              "title": "论点与论据",
+              "score": 30.0,
+              "max_score": 40.0,
+              "feedback": "只输出了一个维度。"
+            }
+          ],
+          "summary": "缺失维度的输出。"
+        }
+      ],
+      "human_rating": {
+        "total_score": null,
+        "requires_human_review": true
+      }
+    },
+    {
+      "case_id": "grading-replay-19",
+      "assignment_description": "模型两次输出均不合规，应降级转人工复核。",
+      "rubric": {
+        "version": "v1",
+        "criteria": [
+          {
+            "criterion_id": "c1",
+            "title": "论点与论据",
+            "max_score": 40.0,
+            "instructions": "论点明确，论据能支撑论点"
+          },
+          {
+            "criterion_id": "c2",
+            "title": "结构与表达",
+            "max_score": 60.0,
+            "instructions": "结构完整，语言通顺"
+          }
+        ]
+      },
+      "submission_text": "英语学习心得。我坚持每天朗读课文十五分钟，并把生词整理成卡片随身携带。一个学期下来，听写正确率明显提高。方法虽然朴素，但贵在坚持，适合自己的才是最好的。",
+      "model_responses": [
+        {
+          "score": "九十分",
+          "comment": "总体不错"
+        },
+        {
+          "score": "九十分",
+          "comment": "总体不错"
+        }
+      ],
+      "human_rating": {
+        "total_score": null,
+        "requires_human_review": true
+      }
+    },
+    {
+      "case_id": "grading-replay-20",
+      "assignment_description": "模型两次输出均不合规，应降级转人工复核。",
+      "rubric": {
+        "version": "v1",
+        "criteria": [
+          {
+            "criterion_id": "c1",
+            "title": "论点与论据",
+            "max_score": 40.0,
+            "instructions": "论点明确，论据能支撑论点"
+          },
+          {
+            "criterion_id": "c2",
+            "title": "结构与表达",
+            "max_score": 60.0,
+            "instructions": "结构完整，语言通顺"
+          }
+        ]
+      },
+      "submission_text": "历史小论文：论丝绸之路的意义。丝绸之路不仅是商贸通道，更是文明交流的桥梁。中原的丝绸瓷器西传，西域的音乐作物东来，双向的交流丰富了彼此的文化，说明开放交流促进文明进步。",
+      "model_responses": [
+        {
+          "schema_version": "v1",
+          "rubric_version": "v1",
+          "items": [
+            {
+              "criterion_id": "c1",
+              "title": "论点与论据",
+              "score": 45.0,
+              "max_score": 40.0,
+              "feedback": "论点与论据表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            },
+            {
+              "criterion_id": "c2",
+              "title": "结构与表达",
+              "score": 50.0,
+              "max_score": 60.0,
+              "feedback": "结构与表达表现符合该得分档位的要求。",
+              "evidence_refs": [
+                "submission:text:1"
+              ]
+            }
+          ],
+          "summary": "首次输出：论点项得分超过满分。"
+        },
+        {
+          "schema_version": "v1",
+          "rubric_version": "v1",
+          "items": [
+            {
+              "criterion_id": "c1",
+              "title": "论点与论据",
+              "score": 30.0,
+              "max_score": 40.0,
+              "feedback": "只输出了一个维度。"
+            }
+          ],
+          "summary": "缺失维度的输出。"
+        }
+      ],
+      "human_rating": {
+        "total_score": null,
+        "requires_human_review": true
+      }
+    }
+  ]
+}

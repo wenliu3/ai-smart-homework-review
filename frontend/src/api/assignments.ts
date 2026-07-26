@@ -18,6 +18,8 @@ export interface Assignment {
     id: string;
     name: string;
   }>;
+  aiRule?: any;
+  aiRuleName?: string;
   startDate: string;
   endDate: string;
   status: AssignmentStatus;

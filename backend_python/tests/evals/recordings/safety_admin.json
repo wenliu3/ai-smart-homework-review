@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0",
+  "cases": [
+    {
+      "case_id": "safety-admin-01",
+      "field": "apiKey",
+      "raw_secret": "sk-live-a1b2c3d4e5f6g7h8i9j0",
+      "expected_masked": "sk-l****i9j0"
+    },
+    {
+      "case_id": "safety-admin-02",
+      "field": "apiKey",
+      "raw_secret": "short8ch",
+      "expected_masked": "****"
+    },
+    {
+      "case_id": "safety-admin-03",
+      "field": "apiKey",
+      "raw_secret": "",
+      "expected_masked": ""
+    },
+    {
+      "case_id": "safety-admin-04",
+      "field": "apiKey",
+      "raw_secret": "123456789",
+      "expected_masked": "1234****6789"
+    },
+    {
+      "case_id": "safety-admin-05",
+      "field": "apiKey",
+      "raw_secret": "glm-platform-key-2026-prod-secret",
+      "expected_masked": "glm-****cret"
+    }
+  ]
+}

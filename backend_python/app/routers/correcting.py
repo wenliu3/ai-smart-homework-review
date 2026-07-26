@@ -26,4 +26,7 @@ def get_submission_detail(submission_id: int, current_user: User = Depends(get_c
 @router.post("/teachers/submissions/review")
 def submit_teacher_review(body: TeacherReviewRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """教师提交批改 — 写入得分和评语，状态置 teacher_reviewed"""
-    return ok(correcting_crud.submit_teacher_review(db, body.submissionId, body.teacherScore, body.teacherReviewContent))
+    return ok(correcting_crud.submit_teacher_review(
+        db, body.submissionId, body.teacherScore, body.teacherReviewContent,
+        actor_user_id=current_user.id,
+    ))

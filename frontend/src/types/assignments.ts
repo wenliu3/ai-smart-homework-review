@@ -7,12 +7,12 @@ export enum AssignmentStatus {
 
 // AI规则快照接口
 export interface AiRuleSnapshot {
-  id?: string; // 原始规则ID（编辑时需要）
+  id: string; // 原始规则ID（编辑时需要）
   name: string;
   modelType: string;
   prompt: string;
-  originalRuleId: string;
-  snapshotAt: string;
+  originalRuleId?: string;
+  snapshotAt?: string;
 }
 
 // 作业接口
@@ -26,10 +26,11 @@ export interface Assignment {
     id: string;
     name: string;
   }>;
-  aiRule: AiRuleSnapshot;
+  aiRule?: AiRuleSnapshot;
+  aiRuleName?: string;
   startDate: string;
   endDate: string;
-  allowAttachments: boolean;
+  allowAttachments?: boolean;
   attachments?: Array<{
     fileName: string;
     fileUrl: string;
@@ -38,13 +39,13 @@ export interface Assignment {
   }>;
   status: AssignmentStatus;
   terminatedReason?: string;
-  isDeleted: boolean;
+  isDeleted?: boolean;
   deletedAt?: string;
   createdAt: string;
   updatedAt: string;
   isExpired?: boolean;
   // 统计信息
-  submissionStats: {
+  submissionStats?: {
     totalSubmissions: number;
     reviewedSubmissions: number;
     pendingSubmissions: number;
@@ -53,6 +54,9 @@ export interface Assignment {
     teacherReviewed: number;
   };
   totalStudents?: number;
+  totalSubmissions?: number;
+  reviewedSubmissions?: number;
+  pendingSubmissions?: number;
 }
 
 // 作业列表项接口（简化版）
@@ -66,13 +70,13 @@ export interface AssignmentListItem {
     id: string;
     name: string;
   }>;
-  aiRule: AiRuleSnapshot;
+  aiRule?: AiRuleSnapshot;
   startDate: string;
   endDate: string;
-  allowAttachments: boolean;
+  allowAttachments?: boolean;
   status: AssignmentStatus;
   terminatedReason?: string;
-  isDeleted: boolean;
+  isDeleted?: boolean;
   deletedAt?: string;
   createdAt: string;
   updatedAt: string;

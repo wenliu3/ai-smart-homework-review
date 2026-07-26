@@ -128,8 +128,10 @@ const handleSearch = () => {
   loadData();
 };
 
-const getActionTagType = (action: string) => {
-  const map: Record<string, string> = {
+type TagType = "success" | "warning" | "danger" | "primary" | "info";
+
+const getActionTagType = (action: string): TagType => {
+  const map: Record<string, TagType> = {
     创建: "success",
     更新: "warning",
     删除: "danger",

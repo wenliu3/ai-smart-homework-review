@@ -102,7 +102,7 @@ export default defineComponent({
     // 计算当前激活菜单
     const activeMenu = computed(() => {
       const { meta, path } = route;
-      if (meta.activeMenu) {
+      if (typeof meta.activeMenu === "string") {
         return meta.activeMenu;
       }
       return path;
@@ -118,8 +118,9 @@ export default defineComponent({
       return store.getters["user/getUserInfo"]?.name || "用户";
     });
 
-    const userAvatar = computed(() => {
-      return store.getters["auth/currentUser"]?.avatar || "";
+    const userAvatar = computed<string>(() => {
+      const avatar = store.getters["auth/currentUser"]?.avatar;
+      return typeof avatar === "string" ? avatar : "";
     });
 
     const userInitials = computed(() => {

@@ -8,6 +8,7 @@ import SubmissionsApi, {
 } from "@/api/submissions";
 import { useAiReviewPolling } from "./useAiReviewPolling";
 import { checkAiSupport } from "@/config/ai-config";
+import { getRun } from "@/api/assistant";
 
 export function useSubmissionManagement() {
   const route = useRoute();
@@ -19,6 +20,8 @@ export function useSubmissionManagement() {
   const saving = ref(false);
   const deleting = ref(false);
   const submissionData = ref<MySubmissionDetail | null>(null);
+  // 批改运行状态（经 gradingRunId 查询）：failed 时立即停止轮询并提示
+  const gradingRunStatus = ref<string | null>(null);
 
   // AI评价轮询
   const {
@@ -141,7 +144,9 @@ export function useSubmissionManagement() {
     return {
       status: submissionData.value?.submission?.status,
       hasAiReview: !!aiReview,
-      hasAiError: !!aiReview?.aiReviewMetadata?.error, // 🔥 新增：检测AI评价错误
+      hasAiError:
+        !!aiReview?.aiReviewMetadata?.error ||
+        gradingRunStatus.value === "failed", // 批改 run 失败同样视为错误
       assignment: submissionData.value?.assignment,
     };
   };
@@ -171,6 +176,20 @@ export function useSubmissionManagement() {
       const data = await SubmissionsApi.getMySubmission(assignmentId.value);
       console.log("📥 查询到的作业数据:", data);
       submissionData.value = data;
+
+      // 批改进行中时查一次 run 状态：failed 能立即停止轮询并提示，
+      // 而不是等提交状态一直不变直到轮询次数耗尽
+      const runId = data.submission?.gradingRunId;
+      if (runId && data.submission?.status === "submitted" && !data.aiReview) {
+        try {
+          const run = await getRun(runId);
+          gradingRunStatus.value = run.status;
+        } catch {
+          // run 信息不可用不影响既有轮询逻辑
+        }
+      } else {
+        gradingRunStatus.value = null;
+      }
     } catch (error) {
       console.error("❌ 加载作业数据失败:", error);
       ElMessage.error("加载作业数据失败");
@@ -196,7 +215,10 @@ export function useSubmissionManagement() {
     if (hasAiError) {
       console.log("❌ AI评价失败，停止轮询");
       const errorMessage =
-        submissionData.value?.aiReview?.aiReviewMetadata?.error || "AI评价失败";
+        submissionData.value?.aiReview?.aiReviewMetadata?.error ||
+        (gradingRunStatus.value === "failed"
+          ? "AI 批改运行失败，请等待教师人工批改"
+          : "AI评价失败");
       ElMessage.error(`AI评价失败: ${errorMessage}`);
       return;
     }

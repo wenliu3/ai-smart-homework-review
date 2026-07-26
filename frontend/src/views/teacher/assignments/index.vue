@@ -457,7 +457,7 @@ const calculateContentHeight = () => {
 };
 
 const debounce = (func: Function, wait: number) => {
-  let timeout: number | null = null;
+  let timeout: ReturnType<typeof setTimeout> | null = null;
   return (...args: any[]) => {
     if (timeout) clearTimeout(timeout);
     timeout = setTimeout(() => func.apply(null, args), wait);

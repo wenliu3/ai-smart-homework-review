@@ -19,6 +19,8 @@ export interface SubmissionRecord {
   teacherScore?: number;
   teacherReviewContent?: string;
   teacherReviewedAt?: string;
+  /** 最近一次 AI 批改运行 ID，分维度草案面板据此拉取产物 */
+  gradingRunId?: string | null;
   createdAt: string;
   updatedAt: string;
 }

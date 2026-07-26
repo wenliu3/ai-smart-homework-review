@@ -67,6 +67,8 @@ def image_similarity(image_a: bytes, image_b: bytes, hash_size: int = HASH_SIZE)
         a_dhash, b_dhash = difference_hash(image_a, hash_size), difference_hash(image_b, hash_size)
     except Exception:
         return 0.0
+    if None in (a_ahash, b_ahash, a_dhash, b_dhash):
+        return 0.0
     dist = max(hamming_distance(a_ahash, b_ahash), hamming_distance(a_dhash, b_dhash))
     total_bits = hash_size * hash_size
     return max(0.0, 1 - dist / total_bits)
@@ -158,7 +160,9 @@ def compute_template_hashes(template_images: list, hash_size: int = HASH_SIZE) -
     hashes = set()
     for img in template_images or []:
         try:
-            hashes.add(average_hash(img, hash_size))
+            image_hash = average_hash(img, hash_size)
+            if image_hash is not None:
+                hashes.add(image_hash)
         except Exception:
             continue
     return hashes
@@ -172,6 +176,9 @@ def _filter_template_images(images: list, template_hashes: set, hash_size: int =
         try:
             h = average_hash(img, hash_size)
         except Exception:
+            kept.append(img)
+            continue
+        if h is None:
             kept.append(img)
             continue
         if not any(hamming_distance(h, t) <= DISTANCE_THRESHOLD for t in template_hashes):

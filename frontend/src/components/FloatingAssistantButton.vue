@@ -4,7 +4,7 @@
       v-show="visible"
       class="floating-assistant-btn"
       @click="$emit('toggle')"
-      title="AI教学助手"
+      :title="title"
     >
       <el-icon class="fab-icon"><ChatDotRound /></el-icon>
       <span class="fab-badge" v-if="unread">AI</span>
@@ -15,10 +15,15 @@
 <script setup lang="ts">
 import { ChatDotRound } from "@element-plus/icons-vue";
 
-defineProps<{
-  visible?: boolean;
-  unread?: boolean;
-}>();
+withDefaults(
+  defineProps<{
+    visible?: boolean;
+    unread?: boolean;
+    /** 悬浮提示文案，由布局按助手角色传入（与 AssistantPanel 标题一致） */
+    title?: string;
+  }>(),
+  { title: "AI助手" },
+);
 
 defineEmits<{
   (e: "toggle"): void;

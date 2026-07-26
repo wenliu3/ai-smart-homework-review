@@ -12,7 +12,7 @@ from .core.exceptions import BizException
 from .routers import (
     auth, users, classes, assignments, submissions,
     correcting, dashboard, permissions, ai_models, ai_rules, upload,
-    plagiarism, chat, logs,
+    plagiarism, chat, logs, assistant,
 )
 from .middleware.operation_log import OperationLogMiddleware
 
@@ -70,7 +70,7 @@ app.mount("/uploads", StaticFiles(directory=str(settings.upload_path)), name="up
 # ===== 注册路由（全局前缀 /api）=====
 for r in (auth, users, classes, assignments, submissions,
           correcting, dashboard, permissions, ai_models, ai_rules, upload,
-          plagiarism, chat, logs):
+          plagiarism, chat, logs, assistant):
     app.include_router(r.router, prefix="/api")
 
 
