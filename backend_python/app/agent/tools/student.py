@@ -183,3 +183,92 @@ __all__ = [
     "query_my_feedback",
     "query_my_learning_overview",
 ]
+
+
+# ========== 防代写：题面相似度（服务端专用，绝不注册为 LLM 工具） ==========
+# 把题面递给模型等于把题目喂给代写请求，因此查询与比对只在服务端进行。
+
+# 请求与任一进行中作业题面的字符 4-gram 重合率阈值
+_TOPIC_MATCH_THRESHOLD = 0.55
+_TOPIC_NGRAM = 4
+_MIN_MESSAGE_CHARS = 12
+
+
+def _char_ngrams(text: str, size: int = _TOPIC_NGRAM) -> set[str]:
+    compact = "".join(text.split())
+    if len(compact) < size:
+        return set()
+    return {compact[i:i + size] for i in range(len(compact) - size + 1)}
+
+
+def message_matches_topics(message: str, topics: list[str]) -> bool:
+    """确定性判定：学生请求是否与某进行中作业题面高度重合（规划 5.2）。
+
+    以请求侧 n-gram 被题面覆盖的比例衡量——学生整段或大段粘贴题面
+    即命中；普通概念提问不受影响。
+    """
+    message = (message or "").strip()
+    if len(message) < _MIN_MESSAGE_CHARS:
+        return False
+    message_grams = _char_ngrams(message)
+    if not message_grams:
+        return False
+    for topic in topics:
+        topic_grams = _char_ngrams(topic or "")
+        if not topic_grams:
+            continue
+        overlap = len(message_grams & topic_grams) / len(message_grams)
+        if overlap >= _TOPIC_MATCH_THRESHOLD:
+            return True
+    return False
+
+
+def query_active_assignment_topics(db: Session, student_id: int) -> list[str]:
+    """学生名下进行中（published 未截止）作业的题面文本。"""
+    from ...core.utils import now
+    from ...models import ClassStudent
+
+    memberships = db.query(ClassStudent).filter(
+        ClassStudent.student_id == student_id,
+        ClassStudent.status == "active",
+    ).all()
+    class_ids = {str(item.class_id) for item in memberships}
+    if not class_ids:
+        return []
+    current = now()
+    topics: list[str] = []
+    assignments = db.query(Assignment).filter(
+        Assignment.alive(),
+        Assignment.status == "published",
+    ).all()
+    for assignment in assignments:
+        if assignment.end_date and current > assignment.end_date:
+            continue
+        assigned = {
+            str(item.get("id"))
+            for item in (assignment.classes or [])
+            if isinstance(item, dict)
+        }
+        if not (assigned & class_ids):
+            continue
+        description = (assignment.description or "").strip()
+        if description:
+            topics.append(description)
+    return topics
+
+
+def build_topic_similarity_checker():
+    """构造题面相似度检查闭包；每次调用开独立 Session（后台线程安全）。
+
+    签名 (message, student_id)：容器构造期不知道请求者，
+    student_id 由主管在路由时从 state.actor 提供。
+    """
+
+    def check(message: str, student_id: int) -> bool:
+        if not student_id:
+            return False
+        with SessionLocal() as db:
+            topics = query_active_assignment_topics(db, student_id)
+        return message_matches_topics(message, topics)
+
+    return check

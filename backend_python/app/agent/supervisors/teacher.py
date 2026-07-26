@@ -108,10 +108,48 @@ def route_teacher_intent(message: str) -> IntentDecision:
     )
 
 
+_LLM_LABEL_DECISIONS = {
+    "casual_chat": lambda: IntentDecision(
+        intent=TeacherIntent.CASUAL_CHAT,
+        target_agent="casual_chat",
+        reason="llm_router 兜底分类",
+    ),
+    "teaching_data": lambda: IntentDecision(
+        intent=TeacherIntent.TEACHING_DATA,
+        target_agent="teacher_data_agent",
+        reason="llm_router 兜底分类",
+    ),
+    "teaching_strategy": lambda: IntentDecision(
+        intent=TeacherIntent.TEACHING_STRATEGY,
+        target_agent="teacher_strategy_agent",
+        reason="llm_router 兜底分类",
+    ),
+}
+
+
 class TeacherSupervisor:
+    def __init__(self, route_classifier=None) -> None:
+        # 关键词未命中时的单次 LLM 分类兜底（规划 5.1）；None 保持纯关键词
+        self._route_classifier = route_classifier
+
     def route(self, state: dict) -> dict:
+        message = state["user_message"]
+        decision = route_teacher_intent(message)
+        # 「未命中」= 落到 TEACHING_DATA 默认分支（无 reason 的兜底路径）
+        keyword_miss = (
+            decision.intent == TeacherIntent.TEACHING_DATA
+            and not decision.reason
+        )
+        if keyword_miss and self._route_classifier is not None:
+            try:
+                label = self._route_classifier(message)
+            except Exception:
+                label = None
+            builder = _LLM_LABEL_DECISIONS.get(label or "")
+            if builder is not None:
+                decision = builder()
         return {
-            "intent": route_teacher_intent(state["user_message"]),
+            "intent": decision,
             "visited_nodes": [*state.get("visited_nodes", []), "route"],
         }
 

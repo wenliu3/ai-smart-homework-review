@@ -8,6 +8,8 @@ from ...assistant_database import AssistantSessionLocal
 from ...crud.agent_approval import create_approval
 
 from ..registry import AgentRegistry
+from ..supervisors.llm_router import create_route_classifier
+from ..tools.student import build_topic_similarity_checker
 from . import (
     final_reviewer,
     grading,
@@ -36,6 +38,7 @@ class SubagentContainer:
     """
 
     def __init__(self, db: Session, registry: AgentRegistry | None = None) -> None:
+        self.route_classifier = create_route_classifier(db, "teacher")
         self._teaching_data = teacher_data.create_node(db, registry)
         self._teaching_strategy = teacher_strategy.create_node(db, registry)
         self._action_draft = teacher_action.create_node(db, registry)
@@ -73,6 +76,8 @@ class StudentSubagentContainer:
     """组合学生端三个专业 Agent 和最终审核 Agent。"""
 
     def __init__(self, db: Session, registry: AgentRegistry | None = None) -> None:
+        self.route_classifier = create_route_classifier(db, "student")
+        self.topic_similarity_checker = build_topic_similarity_checker()
         self._learning_coach = learning_coach.create_node(db, registry)
         self._feedback_explainer = feedback_explainer.create_node(db, registry)
         self._learning_planner = learning_planner.create_node(db, registry)
@@ -95,6 +100,7 @@ class AdminSubagentContainer:
     """组合管理员端运营、审计、模型治理和最终审核 Agent。"""
 
     def __init__(self, db: Session, registry: AgentRegistry | None = None) -> None:
+        self.route_classifier = create_route_classifier(db, "superadmin")
         self._operations_analysis = operations_analysis.create_node(db, registry)
         self._audit_analysis = audit_analysis.create_node(db, registry)
         self._model_governance = model_governance.create_node(db, registry)

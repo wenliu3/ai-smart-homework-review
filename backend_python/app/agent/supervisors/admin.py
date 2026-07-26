@@ -6,7 +6,37 @@ from ..contracts import (
 )
 
 
+_LLM_LABEL_DECISIONS = {
+    "casual_chat": lambda: AdminIntentDecision(
+        intent=AdminIntent.CASUAL_CHAT,
+        target_agent="admin_casual_chat",
+        reason="llm_router 兜底分类",
+    ),
+    "operations_analysis": lambda: AdminIntentDecision(
+        intent=AdminIntent.OPERATIONS_ANALYSIS,
+        target_agent="operations_analysis_agent",
+        reason="llm_router 兜底分类",
+    ),
+    "audit_analysis": lambda: AdminIntentDecision(
+        intent=AdminIntent.AUDIT_ANALYSIS,
+        risk_level=RiskLevel.MEDIUM,
+        target_agent="audit_analysis_agent",
+        reason="llm_router 兜底分类",
+    ),
+    # LLM 兜底产生的模型治理意图不带 requires_approval：写路径只靠关键词
+    "model_governance": lambda: AdminIntentDecision(
+        intent=AdminIntent.MODEL_GOVERNANCE,
+        target_agent="model_governance_agent",
+        reason="llm_router 兜底分类",
+    ),
+}
+
+
 class AdminSupervisor:
+    def __init__(self, route_classifier=None) -> None:
+        # 关键词未命中时的单次 LLM 分类兜底（规划 5.1）；None 保持纯关键词
+        self._route_classifier = route_classifier
+
     def route(self, state: dict) -> dict:
         message = state.get("user_message", "").strip()
         if any(word in message for word in (
@@ -50,6 +80,14 @@ class AdminSupervisor:
                 target_agent="operations_analysis_agent",
                 reason="请求平台聚合运营分析",
             )
+            if self._route_classifier is not None:
+                try:
+                    label = self._route_classifier(message)
+                except Exception:
+                    label = None
+                builder = _LLM_LABEL_DECISIONS.get(label or "")
+                if builder is not None:
+                    decision = builder()
         return {"intent": decision}
 
 

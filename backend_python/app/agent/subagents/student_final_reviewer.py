@@ -7,6 +7,9 @@ from ..contracts import ReviewResult, StudentIntent
 from ..registry import AgentRegistry, agent_registry
 from .messages import collect_invoke_usage, parse_review_or_reject
 
+# 辅导类回答的完整度上限：超过即视为疑似完整代写（规划 5.2）
+_COACH_ANSWER_CHAR_LIMIT = 1200
+
 _PROMPT = """审核下面面向学生的回答。
 
 必须拒绝：
@@ -37,14 +40,26 @@ def create_node(db, registry: AgentRegistry | None = None) -> Callable:
             )}
         intent = state["intent"].intent
         evidence = state.get("evidence_refs", [])
+        # 概念讲解/启发辅导不必然涉及本人数据，豁免证据硬门槛（规划 5.2）；
+        # 反馈解释与学习规划仍必须有本人数据证据
         evidence_optional = intent in {
             StudentIntent.CASUAL_CHAT,
             StudentIntent.PROHIBITED_ANSWER,
+            StudentIntent.LEARNING_COACH,
         }
         if not evidence and not evidence_optional:
             return {"review": ReviewResult(
                 approved=False,
                 issues=["学生事实性回答缺少本人数据证据"],
+            )}
+        # 完整度约束（规划 5.2）：辅导类回答过长疑似完整代写，确定性拒绝
+        if (
+            intent == StudentIntent.LEARNING_COACH
+            and len(candidate) > _COACH_ANSWER_CHAR_LIMIT
+        ):
+            return {"review": ReviewResult(
+                approved=False,
+                issues=["辅导回答过长，疑似输出可直接提交的完整答案"],
             )}
         agent = reg.get_specialist("student_final_reviewer", db)
         prompt = _PROMPT.format(candidate=candidate)

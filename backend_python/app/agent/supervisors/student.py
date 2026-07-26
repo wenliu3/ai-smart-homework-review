@@ -15,7 +15,48 @@ _PROHIBITED_PATTERNS = (
 )
 
 
+_LLM_LABEL_DECISIONS = {
+    "casual_chat": lambda: StudentIntentDecision(
+        intent=StudentIntent.CASUAL_CHAT,
+        target_agent="casual_chat",
+        reason="llm_router 兜底分类",
+    ),
+    "learning_coach": lambda: StudentIntentDecision(
+        intent=StudentIntent.LEARNING_COACH,
+        target_agent="learning_coach",
+        reason="llm_router 兜底分类",
+    ),
+    "feedback_explanation": lambda: StudentIntentDecision(
+        intent=StudentIntent.FEEDBACK_EXPLANATION,
+        target_agent="feedback_explainer",
+        reason="llm_router 兜底分类",
+    ),
+    "learning_plan": lambda: StudentIntentDecision(
+        intent=StudentIntent.LEARNING_PLAN,
+        target_agent="learning_planner",
+        reason="llm_router 兜底分类",
+    ),
+    "prohibited_answer": lambda: StudentIntentDecision(
+        intent=StudentIntent.PROHIBITED_ANSWER,
+        risk_level=RiskLevel.HIGH,
+        target_agent="prohibited_answer",
+        reason="llm_router 判定疑似代写请求",
+    ),
+}
+
+
 class StudentSupervisor:
+    def __init__(
+        self,
+        route_classifier=None,
+        topic_similarity_checker=None,
+    ) -> None:
+        # 关键词未命中时的单次 LLM 分类兜底（规划 5.1）；None 保持纯关键词
+        self._route_classifier = route_classifier
+        # 题面相似度检查（规划 5.2）：请求与进行中作业题面高度重合时
+        # 升级为 PROHIBITED_ANSWER；检查失败不阻塞正常路由
+        self._topic_checker = topic_similarity_checker
+
     def route(self, state: dict) -> dict:
         message = state.get("user_message", "").strip()
         lowered = message.lower()
@@ -58,6 +99,33 @@ class StudentSupervisor:
                 target_agent="learning_coach",
                 reason="默认进入启发式学习辅导",
             )
+            if self._route_classifier is not None:
+                try:
+                    label = self._route_classifier(message)
+                except Exception:
+                    label = None
+                builder = _LLM_LABEL_DECISIONS.get(label or "")
+                if builder is not None:
+                    decision = builder()
+        if (
+            self._topic_checker is not None
+            and decision.intent not in (
+                StudentIntent.PROHIBITED_ANSWER,
+                StudentIntent.CASUAL_CHAT,
+            )
+        ):
+            try:
+                actor = state.get("actor")
+                student_id = getattr(actor, "user_id", 0)
+                if self._topic_checker(message, student_id):
+                    decision = StudentIntentDecision(
+                        intent=StudentIntent.PROHIBITED_ANSWER,
+                        risk_level=RiskLevel.HIGH,
+                        target_agent="prohibited_answer",
+                        reason="请求与进行中作业题面高度重合，疑似代写",
+                    )
+            except Exception:
+                pass
         return {"intent": decision}
 
 

@@ -49,7 +49,9 @@ def build_teacher_graph(
     is_cancelled=None,
     checkpointer=None,
 ):
-    supervisor = TeacherSupervisor()
+    supervisor = TeacherSupervisor(
+        getattr(specialists, "route_classifier", None),
+    )
 
     def consume_node():
         if is_cancelled is not None and is_cancelled():
