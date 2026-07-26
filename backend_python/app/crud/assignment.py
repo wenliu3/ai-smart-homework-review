@@ -687,4 +687,6 @@ def get_ai_suggestion(
         compare_name=compare_name,
         compare_content=compare_content,
         snippets=snippets,
+        submission_id=submission_id,
+        actor_user_id=teacher_id,
     )

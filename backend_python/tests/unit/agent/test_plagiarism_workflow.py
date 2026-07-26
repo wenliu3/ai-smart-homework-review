@@ -70,6 +70,15 @@ def test_legacy_suggestion_api_uses_new_graph_without_changing_metrics(
         "create_plagiarism_node",
         lambda db: fake_node,
     )
+    from app.agent.contracts import ReviewResult
+
+    monkeypatch.setattr(
+        plagiarism_suggestion,
+        "create_plagiarism_review_node",
+        lambda db: lambda state: {
+            "review": ReviewResult(approved=True, issues=[]),
+        },
+    )
     source = _engine_result()
 
     text = plagiarism_suggestion.generate_plagiarism_suggestion(
@@ -78,6 +87,8 @@ def test_legacy_suggestion_api_uses_new_graph_without_changing_metrics(
         student_number="S001",
         content="正文",
         plagiarism_info=source,
+        submission_id=7,
+        actor_user_id=11,
     )
 
     assert captured["result"] == source
