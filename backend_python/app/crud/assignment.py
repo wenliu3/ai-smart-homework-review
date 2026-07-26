@@ -34,7 +34,7 @@ def get_teacher_assignments(db: Session, teacher_id: int, params: dict) -> dict:
     sort_by = params.get("sortBy", "createdAt")
     sort_order = params.get("sortOrder", "desc")
 
-    query = db.query(Assignment).filter(Assignment.teacher_id == teacher_id)
+    query = db.query(Assignment).filter(Assignment.alive(), Assignment.teacher_id == teacher_id)
     if params.get("status"):
         query = query.filter(Assignment.status == params["status"])
     if params.get("title"):
@@ -66,7 +66,7 @@ def get_teacher_assignments(db: Session, teacher_id: int, params: dict) -> dict:
 
 def get_teacher_detail(db: Session, assignment_id: int) -> dict:
     """获取单个作业详情 — 含提交统计(总数/已批改/待批改/草稿/AI批改/教师批改)"""
-    a = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+    a = db.query(Assignment).filter(Assignment.alive(), Assignment.id == assignment_id).first()
     if not a:
         raise NotFoundException(10015, "作业不存在")
     d = a.to_dict()
@@ -85,7 +85,7 @@ def get_teacher_detail(db: Session, assignment_id: int) -> dict:
 
 def get_assignment_students(db: Session, assignment_id: int, params: dict) -> dict:
     """查询某作业下的学生提交列表 — 含学生姓名/学号/班级/AI得分/教师得分"""
-    a = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+    a = db.query(Assignment).filter(Assignment.alive(), Assignment.id == assignment_id).first()
     if not a:
         raise NotFoundException(10015, "作业不存在")
     page = int(params.get("page", 1))
@@ -191,7 +191,7 @@ def create_assignment(db: Session, teacher_id: int, teacher_name: str, data: dic
 
 def update_assignment(db: Session, assignment_id: int, teacher_id: int, data: dict) -> dict:
     """更新作业 — 仅作业创建教师可操作"""
-    a = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+    a = db.query(Assignment).filter(Assignment.alive(), Assignment.id == assignment_id).first()
     if not a:
         raise NotFoundException(10015, "作业不存在")
     if a.teacher_id != teacher_id:
@@ -215,7 +215,7 @@ def update_assignment(db: Session, assignment_id: int, teacher_id: int, data: di
 
 def update_status(db: Session, assignment_id: int, teacher_id: int, status: str, terminated_reason: str | None) -> dict:
     """更新作业状态(draft/published/terminated) — 终止时可填写原因"""
-    a = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+    a = db.query(Assignment).filter(Assignment.alive(), Assignment.id == assignment_id).first()
     if not a:
         raise NotFoundException(10015, "作业不存在")
     if a.teacher_id != teacher_id:
@@ -228,14 +228,17 @@ def update_status(db: Session, assignment_id: int, teacher_id: int, status: str,
 
 
 def delete_assignment(db: Session, assignment_id: int, teacher_id: int) -> dict:
-    """删除作业 — 同时删除该作业下的所有提交记录"""
-    a = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+    """软删作业 — 只置 deleted_at，保留提交记录以便误删后恢复。
+
+    软删后该作业对所有读路径不可见（各查询均带 Assignment.alive()），
+    对调用方与硬删等价；重复删除按「作业不存在」拒绝。
+    """
+    a = db.query(Assignment).filter(Assignment.alive(), Assignment.id == assignment_id).first()
     if not a:
         raise NotFoundException(10015, "作业不存在")
     if a.teacher_id != teacher_id:
         raise BadRequestException(10007, "无权删除此作业")
-    db.query(Submission).filter(Submission.assignment_id == assignment_id).delete()
-    db.delete(a)
+    a.deleted_at = now()
     db.commit()
     return {"message": "删除成功"}
 
@@ -248,7 +251,7 @@ def get_student_assignments(db: Session, student_id: int, class_id: str | None, 
     all_class_ids = [sc.class_id for sc in student_classes]
     class_ids = [int(class_id)] if (class_id and int(class_id) in all_class_ids) else all_class_ids
     str_class_ids = [str(c) for c in class_ids]
-    assignments = db.query(Assignment).filter(Assignment.status == "published").order_by(Assignment.created_at.desc()).all()
+    assignments = db.query(Assignment).filter(Assignment.alive(), Assignment.status == "published").order_by(Assignment.created_at.desc()).all()
     assignments = [a for a in assignments if any(c.get("id") in str_class_ids for c in (a.classes or []))]
 
     items = []
@@ -297,7 +300,7 @@ def get_student_statistics(db: Session, student_id: int, class_id: str | None) -
         student_classes = db.query(ClassStudent).filter(ClassStudent.student_id == student_id, ClassStudent.status == "active").all()
         class_ids = [sc.class_id for sc in student_classes]
     str_class_ids = [str(c) for c in class_ids]
-    assignments = db.query(Assignment).filter(Assignment.status == "published").all()
+    assignments = db.query(Assignment).filter(Assignment.alive(), Assignment.status == "published").all()
     assignments = [a for a in assignments if any(c.get("id") in str_class_ids for c in (a.classes or []))]
 
     total = submitted = reviewed = expired = draft = todo = 0
@@ -326,7 +329,7 @@ def get_student_statistics(db: Session, student_id: int, class_id: str | None) -
 
 def get_student_detail(db: Session, assignment_id: int, student_id: int) -> dict:
     """学生查看作业详情 — 含自己的提交记录"""
-    a = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+    a = db.query(Assignment).filter(Assignment.alive(), Assignment.id == assignment_id).first()
     if not a:
         raise NotFoundException(10015, "作业不存在")
     submission = db.query(Submission).filter(Submission.assignment_id == assignment_id, Submission.student_id == student_id).first()
@@ -348,7 +351,7 @@ def check_plagiarism(
 ) -> dict:
     """对指定作业的所有学生提交进行查重 — 优先读磁盘原始文件，没有文件则用提交文本
     可选传入模板内容（template_text/template_images），比对前自动剔除模板部分。"""
-    a = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+    a = db.query(Assignment).filter(Assignment.alive(), Assignment.id == assignment_id).first()
     if not a:
         raise NotFoundException(10015, "作业不存在")
     if a.teacher_id != teacher_id:
@@ -554,7 +557,7 @@ def compare_submissions(db: Session, submission_id: int, match_submission_id: in
         raise NotFoundException(10016, "提交记录不存在")
 
     # 验证老师拥有该作业
-    a = db.query(Assignment).filter(Assignment.id == s1.assignment_id).first()
+    a = db.query(Assignment).filter(Assignment.alive(), Assignment.id == s1.assignment_id).first()
     if not a or a.teacher_id != teacher_id:
         raise BadRequestException(10007, "无权操作此作业")
 
@@ -643,7 +646,7 @@ def get_ai_suggestion(
     if not s1:
         raise NotFoundException(10016, "提交记录不存在")
 
-    a = db.query(Assignment).filter(Assignment.id == s1.assignment_id).first()
+    a = db.query(Assignment).filter(Assignment.alive(), Assignment.id == s1.assignment_id).first()
     if not a or a.teacher_id != teacher_id:
         raise BadRequestException(10007, "无权操作此作业")
 

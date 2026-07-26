@@ -35,7 +35,10 @@ def query_my_learning_overview(
 ) -> StudentQueryResult:
     rows = (
         db.query(Submission, Assignment)
-        .join(Assignment, Assignment.id == Submission.assignment_id)
+        .join(
+            Assignment,
+            (Assignment.id == Submission.assignment_id) & Assignment.alive(),
+        )
         .filter(
             Submission.student_id == actor_id,
             Submission.status != "draft",
@@ -87,7 +90,10 @@ def query_my_feedback(
 ) -> StudentQueryResult:
     row = (
         db.query(Submission, Assignment)
-        .join(Assignment, Assignment.id == Submission.assignment_id)
+        .join(
+            Assignment,
+            (Assignment.id == Submission.assignment_id) & Assignment.alive(),
+        )
         .filter(
             Submission.student_id == actor_id,
             Submission.assignment_id == assignment_id,

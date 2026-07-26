@@ -99,7 +99,7 @@ def _to100(score, max_score):
 def submit(db: Session, student_id: int, data: dict) -> dict:
     """学生提交作业 — 若已有提交则更新(允许重复提交)，草稿不触发 AI 批改"""
     assignment_id = data.get("assignmentId")
-    assignment = db.query(Assignment).filter(Assignment.id == int(assignment_id)).first()
+    assignment = db.query(Assignment).filter(Assignment.alive(), Assignment.id == int(assignment_id)).first()
     if not assignment:
         raise NotFoundException(10015, "作业不存在")
     if assignment.status != "published":
@@ -172,7 +172,7 @@ def submit(db: Session, student_id: int, data: dict) -> dict:
 
 def get_my_submission(db: Session, assignment_id: int, student_id: int) -> dict:
     """学生查看自己的提交详情 — 含作业信息、提交内容、AI批改结果、教师批改结果"""
-    assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
+    assignment = db.query(Assignment).filter(Assignment.alive(), Assignment.id == assignment_id).first()
     if not assignment:
         raise NotFoundException(10015, "作业不存在")
     submission = db.query(Submission).filter(
@@ -237,7 +237,7 @@ def teacher_delete_submission(db: Session, submission_id: int, teacher_id: int) 
     submission = db.query(Submission).filter(Submission.id == submission_id).first()
     if not submission:
         raise NotFoundException(10015, "提交记录不存在")
-    assignment = db.query(Assignment).filter(Assignment.id == submission.assignment_id).first()
+    assignment = db.query(Assignment).filter(Assignment.alive(), Assignment.id == submission.assignment_id).first()
     if not assignment:
         raise NotFoundException(10015, "作业不存在")
     if assignment.teacher_id != teacher_id:
@@ -272,7 +272,7 @@ def trigger_ai_review(submission_id: int):
         submission = db.query(Submission).filter(Submission.id == submission_id).first()
         if not submission:
             return
-        assignment = db.query(Assignment).filter(Assignment.id == submission.assignment_id).first()
+        assignment = db.query(Assignment).filter(Assignment.alive(), Assignment.id == submission.assignment_id).first()
         if not assignment or not assignment.ai_rule:
             return
         ai_rule = assignment.ai_rule

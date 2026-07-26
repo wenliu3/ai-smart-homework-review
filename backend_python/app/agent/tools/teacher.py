@@ -80,7 +80,7 @@ def query_class_students(db: Session, actor_id: int, class_id: int) -> TeachingQ
 def query_teacher_assignments(db: Session, actor_id: int) -> TeachingQueryResult:
     assignments = (
         db.query(Assignment)
-        .filter(Assignment.teacher_id == actor_id)
+        .filter(Assignment.alive(), Assignment.teacher_id == actor_id)
         .order_by(Assignment.created_at.desc())
         .all()
     )
@@ -107,6 +107,7 @@ def query_teacher_assignments(db: Session, actor_id: int) -> TeachingQueryResult
 
 def query_assignment_summary(db: Session, actor_id: int, assignment_id: int) -> TeachingQueryResult:
     assignment = db.query(Assignment).filter(
+        Assignment.alive(),
         Assignment.id == assignment_id,
         Assignment.teacher_id == actor_id,
     ).first()
@@ -178,7 +179,7 @@ def query_teacher_dashboard(db: Session, actor_id: int) -> TeachingQueryResult:
     )
     assignment_count = (
         db.query(func.count(Assignment.id))
-        .filter(Assignment.teacher_id == actor_id)
+        .filter(Assignment.alive(), Assignment.teacher_id == actor_id)
         .scalar()
         or 0
     )
@@ -188,7 +189,9 @@ def query_teacher_dashboard(db: Session, actor_id: int) -> TeachingQueryResult:
             title="教师看板",
             metrics={"classCount": 0, "assignmentCount": 0},
         )
-    own_assignment_ids = select(Assignment.id).where(Assignment.teacher_id == actor_id)
+    own_assignment_ids = select(Assignment.id).where(
+        Assignment.alive(), Assignment.teacher_id == actor_id,
+    )
     submission_counts = dict(
         db.query(Submission.status, func.count(Submission.id))
         .filter(
@@ -218,7 +221,11 @@ def query_pending_reviews(db: Session, actor_id: int) -> TeachingQueryResult:
     rows = (
         db.query(Submission, Assignment)
         .join(Assignment, Assignment.id == Submission.assignment_id)
-        .filter(Assignment.teacher_id == actor_id, Submission.status == "submitted")
+        .filter(
+            Assignment.alive(),
+            Assignment.teacher_id == actor_id,
+            Submission.status == "submitted",
+        )
         .order_by(Submission.submitted_at.asc())
         .all()
     )

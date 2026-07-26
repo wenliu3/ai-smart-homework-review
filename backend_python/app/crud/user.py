@@ -188,7 +188,10 @@ def delete_user(db: Session, user_id: int) -> dict:
     """删除用户 — 先清理关联数据（刷新令牌/聊天/班级关联/提交），再删用户"""
     user = get_user_by_id(db, user_id)
 
-    # 检查是否有不可自动清理的数据
+    # 检查是否有不可自动清理的数据。
+    # 注意：作业这里刻意**不**加 Assignment.alive() —— 这是外键完整性守卫而非面向用户的读取，
+    # 软删作业的行仍在表里占着 teacher_id 外键，漏算会导致 MySQL 删用户时报 FK 错（或在
+    # 未开 FK 的库里留下孤儿作业，且因其对所有读路径不可见而永远无法清理）。
     from ..models import Assignment, Class as ClassModel
     classes_count = db.query(ClassModel).filter(ClassModel.teacher_id == user_id).count()
     assignments_count = db.query(Assignment).filter(Assignment.teacher_id == user_id).count()

@@ -35,6 +35,16 @@ def test_upgrade_head_creates_all_existing_tables(tmp_path):
     assert EXPECTED_TABLES <= _table_names(db_path)
 
 
+def test_upgrade_head_adds_assignment_soft_delete_column(tmp_path):
+    """开发态走 create_all，只有这里能发现迁移漏加列。"""
+    db_path = tmp_path / "softdelete.db"
+    command.upgrade(_make_config(db_path), "head")
+
+    insp = inspect(create_engine(f"sqlite:///{db_path.as_posix()}"))
+    columns = {col["name"] for col in insp.get_columns("assignments")}
+    assert "deleted_at" in columns
+
+
 def test_downgrade_base_drops_all_tables(tmp_path):
     db_path = tmp_path / "downgrade.db"
     cfg = _make_config(db_path)

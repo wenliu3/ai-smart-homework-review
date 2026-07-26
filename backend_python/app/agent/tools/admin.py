@@ -39,7 +39,7 @@ def query_platform_operations(db: Session) -> AdminQueryResult:
         "userCount": sum(role_counts.values()),
         "teacherCount": role_counts.get("teacher", 0),
         "studentCount": role_counts.get("student", 0),
-        "assignmentCount": db.query(func.count(Assignment.id)).scalar() or 0,
+        "assignmentCount": db.query(func.count(Assignment.id)).filter(Assignment.alive()).scalar() or 0,
         "submissionCount": db.query(func.count(Submission.id)).scalar() or 0,
     }
     return AdminQueryResult(

@@ -94,6 +94,7 @@ def enqueue_grading_job(
     """创建持久化 Run，并且每个提交版本只投递一次。"""
 
     assignment = business_db.query(Assignment).filter(
+        Assignment.alive(),
         Assignment.id == submission.assignment_id,
     ).first()
     if not assignment or not assignment.ai_rule:
@@ -279,6 +280,7 @@ def execute_grading_job(
             return {"status": "stale", "run_id": run_id}
 
         assignment = biz.query(Assignment).filter(
+            Assignment.alive(),
             Assignment.id == submission.assignment_id,
         ).first()
         if not assignment or not assignment.ai_rule:

@@ -21,7 +21,7 @@ def get_admin_overview(db: Session) -> dict:
     """管理员看板概览 — 用户数/班级数/作业数/提交数/AI模型数 + 分布统计"""
     total_users = db.query(User).count()
     total_classes = db.query(Class).count()
-    total_assignments = db.query(Assignment).count()
+    total_assignments = db.query(Assignment).filter(Assignment.alive()).count()
     total_submissions = db.query(Submission).count()
     ai_model_count = db.query(AiModel).count()
 
@@ -87,7 +87,7 @@ def get_teacher_stats(db: Session, teacher_id: int) -> dict:
     my_classes = db.query(Class).filter(Class.teacher_id == teacher_id, Class.status == "active").all()
     class_ids = [c.id for c in my_classes]
     total_students = db.query(ClassStudent).filter(ClassStudent.class_id.in_(class_ids), ClassStudent.status == "active").count()
-    my_assignments = db.query(Assignment).filter(Assignment.teacher_id == teacher_id).all()
+    my_assignments = db.query(Assignment).filter(Assignment.alive(), Assignment.teacher_id == teacher_id).all()
     assignment_ids = [a.id for a in my_assignments]
 
     total_submissions = db.query(Submission).filter(Submission.assignment_id.in_(assignment_ids)).count()
@@ -150,7 +150,7 @@ def get_teacher_stats(db: Session, teacher_id: int) -> dict:
 
 def get_teacher_pending_tasks(db: Session, teacher_id: int) -> dict:
     """教师待办任务 — 即将截止的作业 + 最近待批改的提交"""
-    assignments = db.query(Assignment).filter(Assignment.teacher_id == teacher_id, Assignment.status == "published").order_by(Assignment.end_date.asc()).limit(5).all()
+    assignments = db.query(Assignment).filter(Assignment.alive(), Assignment.teacher_id == teacher_id, Assignment.status == "published").order_by(Assignment.end_date.asc()).limit(5).all()
     items = []
     for a in assignments:
         cids = [int(c["id"]) for c in (a.classes or []) if c.get("id")]
@@ -197,7 +197,7 @@ def get_student_stats(db: Session, student_id: int) -> dict:
     student_classes = db.query(ClassStudent).filter(ClassStudent.student_id == student_id, ClassStudent.status == "active").all()
     class_ids = [sc.class_id for sc in student_classes]
     str_class_ids = [str(c) for c in class_ids]
-    published = db.query(Assignment).filter(Assignment.status == "published").all()
+    published = db.query(Assignment).filter(Assignment.alive(), Assignment.status == "published").all()
     published = [a for a in published if any(c.get("id") in str_class_ids for c in (a.classes or []))]
 
     n = now()

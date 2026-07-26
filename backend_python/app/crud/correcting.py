@@ -28,7 +28,14 @@ def get_submission_list(db: Session, params: dict) -> dict:
 
     # JOIN User 表，将 studentName/studentNumber 过滤下推到 SQL 层，
     # 确保 total 和分页数据一致（修复原内存过滤导致 total 与页内条数不符的问题）
-    query = db.query(Submission).join(User, Submission.student_id == User.id)
+    # JOIN Assignment 并带 alive()：软删作业不再级联删提交记录，
+    # 不在这里过滤的话，已删作业的提交会永远留在批改队列里还能被打分。
+    query = (
+        db.query(Submission)
+        .join(User, Submission.student_id == User.id)
+        .join(Assignment, Assignment.id == Submission.assignment_id)
+        .filter(Assignment.alive())
+    )
     if params.get("assignmentId"):
         query = query.filter(Submission.assignment_id == int(params["assignmentId"]))
     if params.get("classId"):
@@ -49,7 +56,7 @@ def get_submission_list(db: Session, params: dict) -> dict:
     for s in submissions:
         student = db.query(User).filter(User.id == s.student_id).first()
         cls = db.query(Class).filter(Class.id == s.class_id).first()
-        assignment = db.query(Assignment).filter(Assignment.id == s.assignment_id).first()
+        assignment = db.query(Assignment).filter(Assignment.alive(), Assignment.id == s.assignment_id).first()
         max_score = _max_score(assignment) if assignment else 100
         items.append({
             "_id": str(s.id), "assignmentId": str(s.assignment_id), "studentId": str(s.student_id),
@@ -73,10 +80,13 @@ def get_submission_detail(db: Session, submission_id: int) -> dict:
     s = db.query(Submission).filter(Submission.id == submission_id).first()
     if not s:
         raise NotFoundException(10015, "提交记录不存在")
+    assignment = db.query(Assignment).filter(Assignment.alive(), Assignment.id == s.assignment_id).first()
+    # 作业已软删：不能静默回退成 100 分制照常返回（会把 40/50 显示成 40/100）
+    if not assignment:
+        raise NotFoundException(10015, "作业不存在")
     student = db.query(User).filter(User.id == s.student_id).first()
     cls = db.query(Class).filter(Class.id == s.class_id).first()
-    assignment = db.query(Assignment).filter(Assignment.id == s.assignment_id).first()
-    max_score = _max_score(assignment) if assignment else 100
+    max_score = _max_score(assignment)
     return {
         "_id": str(s.id), "assignmentId": str(s.assignment_id), "studentId": str(s.student_id),
         "studentName": student.name if student else "",
@@ -103,6 +113,11 @@ def submit_teacher_review(db: Session, submission_id: int, teacher_score: float,
     s = db.query(Submission).filter(Submission.id == submission_id).first()
     if not s:
         raise NotFoundException(10015, "提交记录不存在")
+    # 作业已软删时提交记录仍在库里（保留可恢复），但不能再产生批改数据
+    if db.query(Assignment).filter(
+        Assignment.alive(), Assignment.id == s.assignment_id,
+    ).first() is None:
+        raise NotFoundException(10015, "作业不存在")
     s.teacher_score = teacher_score
     s.teacher_review_content = teacher_review_content
     s.teacher_reviewed_at = now()
