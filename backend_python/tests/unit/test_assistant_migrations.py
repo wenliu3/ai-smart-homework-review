@@ -23,7 +23,9 @@ def test_compose_declares_postgres_and_backend_dependency():
 
 
 def test_docker_environment_declares_postgres_password():
-    content = (PROJECT_ROOT / ".env.docker").read_text(encoding="utf-8")
+    # 校验被跟踪的模板文件：.env.docker 本身是本地私密文件（gitignored），
+    # 仓库要保证的是模板向部署者声明了该变量
+    content = (PROJECT_ROOT / ".env.docker.example").read_text(encoding="utf-8")
     assert "POSTGRES_PASSWORD=" in content
 
 
