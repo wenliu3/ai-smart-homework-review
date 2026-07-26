@@ -35,6 +35,7 @@ from ..core.response import ok
 from ..crud import agent_run as agent_run_crud
 from ..crud import agent_session as agent_session_crud
 from ..crud import agent_approval as agent_approval_crud
+from ..crud import agent_feedback as agent_feedback_crud
 from ..crud.action_execution import (
     execute_approved_business_action,
     validate_action_permission,
@@ -47,6 +48,8 @@ from ..schemas.assistant import (
     CreateRunRequest,
     CreateSessionRequest,
     RejectActionRequest,
+    RenameSessionRequest,
+    SubmitFeedbackRequest,
 )
 
 router = APIRouter()
@@ -121,6 +124,51 @@ def get_run(
         "intent": run.intent,
         "startedAt": run.started_at.isoformat() if run.started_at else None,
         "finishedAt": run.finished_at.isoformat() if run.finished_at else None,
+        # 步骤摘要（规划 4.4）：只暴露节点名/状态/耗时/错误码，
+        # 不含 output 与证据正文，避免泄露节点内部细节
+        "steps": [
+            {
+                "nodeName": step.node_name,
+                "status": step.status,
+                "durationMs": step.duration_ms or 0,
+                "errorCode": step.error_code,
+            }
+            for step in sorted(run.steps, key=lambda item: item.sequence)
+        ],
+    })
+
+
+# ========== 运行反馈 ==========
+
+@router.post("/assistant/runs/{run_id}/feedback")
+def submit_run_feedback(
+    run_id: str,
+    req: SubmitFeedbackRequest,
+    actor: User = Depends(require_roles("teacher", "student", "superadmin")),
+    sdb: Session = Depends(get_assistant_db),
+):
+    """对一次助手运行提交 👍/👎（规划 4.3）。
+
+    只有 run 归属人可评；系统运行（批改/查重）不接受用户评分。
+    """
+    if not _RUN_ID_PATTERN.match(run_id):
+        raise BadRequestException(10011, "run_id 格式非法")
+    run = agent_run_crud.get_run(sdb, run_id, user_id=actor.id)
+    if run is None:
+        raise NotFoundException(10015, "运行不存在")
+    if agent_session_crud.is_system_session_id(run.session_id):
+        raise BadRequestException(10011, "系统运行不支持评分")
+    feedback = agent_feedback_crud.submit_user_rating(
+        sdb,
+        run_id=run_id,
+        user_id=actor.id,
+        rating=req.rating,
+        comment=req.comment,
+    )
+    return ok({
+        "runId": run_id,
+        "rating": feedback.rating,
+        "comment": feedback.comment,
     })
 
 
@@ -241,6 +289,44 @@ def create_session(
         actor_role=actor.role,
         title=req.title,
     )
+    return ok({"sessionId": session.id, "title": session.title})
+
+
+@router.delete("/assistant/sessions/{session_id}")
+def delete_session(
+    session_id: str,
+    actor: User = Depends(require_roles("teacher", "student", "superadmin")),
+    sdb: Session = Depends(get_assistant_db),
+):
+    """归档会话（软删除）。跨用户 404；系统会话（批改/查重）不可删。"""
+    if agent_session_crud.is_system_session_id(session_id):
+        raise BadRequestException(10011, "系统会话不支持删除")
+    deleted = agent_session_crud.delete_session(
+        sdb, session_id, user_id=actor.id,
+    )
+    if not deleted:
+        raise NotFoundException(10015, "会话不存在")
+    return ok({"sessionId": session_id, "status": "archived"})
+
+
+@router.patch("/assistant/sessions/{session_id}")
+def rename_session(
+    session_id: str,
+    req: RenameSessionRequest,
+    actor: User = Depends(require_roles("teacher", "student", "superadmin")),
+    sdb: Session = Depends(get_assistant_db),
+):
+    """重命名会话。跨用户 404；系统会话不可改名。"""
+    if agent_session_crud.is_system_session_id(session_id):
+        raise BadRequestException(10011, "系统会话不支持改名")
+    title = req.title.strip()
+    if not title:
+        raise BadRequestException(10011, "会话标题不能为空")
+    session = agent_session_crud.rename_session(
+        sdb, session_id, user_id=actor.id, title=title,
+    )
+    if session is None:
+        raise NotFoundException(10015, "会话不存在")
     return ok({"sessionId": session.id, "title": session.title})
 
 

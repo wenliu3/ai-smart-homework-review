@@ -5,7 +5,7 @@ from langchain_core.messages import HumanMessage
 
 from ..contracts import ReviewResult, StudentIntent
 from ..registry import AgentRegistry, agent_registry
-from .messages import parse_review_or_reject
+from .messages import collect_invoke_usage, parse_review_or_reject
 
 _PROMPT = """审核下面面向学生的回答。
 
@@ -52,7 +52,10 @@ def create_node(db, registry: AgentRegistry | None = None) -> Callable:
             prompt += "\n服务端验证证据：\n" + "\n".join(evidence)
         result = agent.invoke({"messages": [HumanMessage(content=prompt)]})
         # 结构化输出缺失或不合规时安全拒绝，不中断整轮运行
-        return {"review": parse_review_or_reject(result)}
+        return {
+            "review": parse_review_or_reject(result),
+            "usage": collect_invoke_usage(result),
+        }
 
     return node
 

@@ -80,6 +80,50 @@ def build_specialist_messages(state: dict) -> list:
     return messages
 
 
+def collect_invoke_usage(result) -> dict:
+    """从一次 agent.invoke 结果求和带 usage_metadata 的 AI 消息用量。
+
+    键名对齐 contracts.UsageSummary；无用量信息返回空 dict
+    （落库方按空 dict 跳过，不写零值噪音）。
+    """
+    if not isinstance(result, dict):
+        return {}
+    prompt = completion = total = 0
+    seen = False
+    for message in result.get("messages", []):
+        usage = getattr(message, "usage_metadata", None)
+        if not usage:
+            continue
+        seen = True
+        prompt += int(usage.get("input_tokens", 0))
+        completion += int(usage.get("output_tokens", 0))
+        total += int(usage.get(
+            "total_tokens",
+            usage.get("input_tokens", 0) + usage.get("output_tokens", 0),
+        ))
+    if not seen:
+        return {}
+    return {
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "total_tokens": total,
+    }
+
+
+def merge_usage(left: dict | None, right: dict | None) -> dict:
+    """键级相加两份用量；供重试/多节点累加。"""
+    left = left or {}
+    right = right or {}
+    if not left:
+        return dict(right)
+    if not right:
+        return dict(left)
+    return {
+        key: left.get(key, 0) + right.get(key, 0)
+        for key in {*left, *right}
+    }
+
+
 def _collect_evidence_refs(value, output: list[str]) -> None:
     if isinstance(value, dict):
         refs = value.get("evidence_refs")

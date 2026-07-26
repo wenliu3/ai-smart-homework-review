@@ -331,6 +331,7 @@ def _execute_business_action(
             submission_id=int(payload["submissionId"]),
             teacher_score=score,
             teacher_review_content=str(payload.get("teacherReviewContent", "")),
+            actor_user_id=actor.id,
         )
     if action_type in _ASSIGNMENT_ACTIONS:
         assignment_id = _parse_positive_int_id(payload.get("assignmentId"), "作业 ID")

@@ -1,5 +1,5 @@
 """教师 Graph 共享状态。"""
-from typing import TypedDict
+from typing import Annotated, TypedDict
 
 from ..contracts import (
     ActorContext,
@@ -8,6 +8,18 @@ from ..contracts import (
     ReviewResult,
     SpecialistResponse,
 )
+
+
+
+
+def _accumulate_usage(left: dict, right: dict) -> dict:
+    """usage 通道 reducer：多个节点各自回传用量，按键累加成运行总量。"""
+    left = left or {}
+    right = right or {}
+    return {
+        key: left.get(key, 0) + right.get(key, 0)
+        for key in {*left, *right}
+    }
 
 
 class TeacherAgentState(TypedDict, total=False):
@@ -34,6 +46,8 @@ class TeacherAgentState(TypedDict, total=False):
     final_answer: str
     visited_nodes: list[str]
     events: list[dict]
+    # 各节点回传的模型用量，按键累加为运行总量（规划 4.1）
+    usage: Annotated[dict, _accumulate_usage]
     # 受支持写请求产出的待审批草案（ActionDraft）与落库后的审批 ID
     action_draft: object
     approval_id: str

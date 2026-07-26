@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 
 from celery.exceptions import SoftTimeLimitExceeded
 from sqlalchemy.orm import Session
@@ -29,6 +30,8 @@ from ..crud.submission import (
 from ..database import SessionLocal
 from ..models import AgentRun, AgentSession, Assignment, Submission
 from .celery_app import celery_app
+
+logger = logging.getLogger(__name__)
 
 # 降级转人工时写给教师端的提示（服务端文案，不经模型）
 MANUAL_GRADING_NOTE = (
@@ -214,6 +217,29 @@ def _record_grading_run_id(
     business_db.commit()
 
 
+def _record_grading_model_usage(business_db: Session, graph_result: dict) -> None:
+    """批改运行的模型用量累加（尽力而为，失败不影响批改结果）。"""
+    usage = graph_result.get("usage") or {}
+    calls = getattr(
+        graph_result.get("runtime_budget"), "model_call_count", 0,
+    ) or (1 if usage else 0)
+    if not usage and calls <= 0:
+        return
+    try:
+        from ..agent.gateway import model_gateway
+        from ..crud import ai_model as ai_model_crud
+
+        config = model_gateway.get_default_config(business_db)
+        ai_model_crud.increment_usage(
+            business_db,
+            model_id=config.id,
+            calls=calls,
+            tokens=int(usage.get("total_tokens", 0)),
+        )
+    except Exception:
+        logger.warning("批改模型用量统计写入失败", exc_info=True)
+
+
 def build_grading_state(
     submission: Submission,
     assignment: Assignment,
@@ -385,7 +411,9 @@ def execute_grading_job(
                     "schema_version": "v1",
                     "payload": failure,
                 }],
+                usage=graph_result.get("usage") or None,
             )
+            _record_grading_model_usage(biz, graph_result)
             return {"status": "completed", "run_id": run_id}
 
         outcome = graph_result["outcome"]
@@ -415,7 +443,9 @@ def execute_grading_job(
                 "schema_version": outcome.schema_version,
                 "payload": outcome.model_dump(mode="json"),
             }],
+            usage=graph_result.get("usage") or None,
         )
+        _record_grading_model_usage(biz, graph_result)
         return {"status": status, "run_id": run_id}
     except SoftTimeLimitExceeded:
         # Celery 软超时：预算应先于它触发，走到这里说明 worker 卡死，

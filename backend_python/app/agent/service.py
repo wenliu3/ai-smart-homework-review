@@ -28,18 +28,19 @@ from ..database import SessionLocal
 from .contracts import (
     AGENT_BUDGET_EXCEEDED,
     AGENT_CHAT_ERROR,
+    AGENT_MODEL_TIMEOUT,
     AGENT_RUN_CANCELLED,
     SAFE_CHAT_ERROR_MESSAGE,
     ActorContext,
 )
 from .graphs.teacher import build_teacher_graph
-from .checkpointer import get_graph_checkpointer
 from .registry import get_teacher_assistant_agent
 from .runtime import (
     BudgetExceeded,
     RunBudget,
     RunCancelled,
     default_run_budget,
+    is_model_timeout,
 )
 from .tools.common import TeacherContext
 
@@ -172,10 +173,10 @@ def _json_safe(value: Any) -> Any:
             str(key): _json_safe(item)
             for key, item in value.items()
             # action_draft 含旧值快照与哈希，审批表已完整保存一份，
-            # 不再冗余写进 agent_run_steps.output
+            # 不再冗余写进 agent_run_steps.output；usage 走独立列
             if key not in {
                 "actor", "runtime_budget", "events",
-                "recent_messages", "action_draft",
+                "recent_messages", "action_draft", "usage",
             }
         }
     if isinstance(value, (list, tuple)):
@@ -183,6 +184,67 @@ def _json_safe(value: Any) -> Any:
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     return str(value)
+
+
+def _record_model_usage(usage: dict | None, calls: int) -> None:
+    """把运行用量累加到默认模型的全局计数（规划 4.1）。
+
+    统计尽力而为：模型配置缺失或库抖动都不影响运行结果。
+    """
+    if not usage and calls <= 0:
+        return
+    try:
+        from ..crud import ai_model as ai_model_crud
+        from .gateway import model_gateway
+
+        with SessionLocal() as db:
+            config = model_gateway.get_default_config(db)
+            ai_model_crud.increment_usage(
+                db,
+                model_id=config.id,
+                calls=calls,
+                tokens=int((usage or {}).get("total_tokens", 0)),
+            )
+    except Exception:
+        logger.warning("模型用量统计写入失败", exc_info=True)
+
+
+def _merge_usage(left: dict | None, right: dict | None) -> dict:
+    left = left or {}
+    right = right or {}
+    return {
+        key: left.get(key, 0) + right.get(key, 0)
+        for key in {*left, *right}
+    }
+
+
+def _build_session_summary(user_message: str, final_answer: str) -> str:
+    """确定性会话摘要：截断拼接，不调用 LLM（规格阶段 1.5 明令）。"""
+    question = (user_message or "").strip().replace("\n", " ")[:120]
+    answer = (final_answer or "").strip().replace("\n", " ")[:240]
+    if not question and not answer:
+        return ""
+    return f"问：{question}｜答：{answer}"
+
+
+def _write_session_summary(
+    sdb: Session,
+    *,
+    session_id: str,
+    user_id: int,
+    user_message: str,
+    final_answer: str,
+) -> None:
+    """finalize 后写回摘要；失败只告警，绝不影响本轮回答（规划 4.4）。"""
+    summary = _build_session_summary(user_message, final_answer)
+    if not summary:
+        return
+    try:
+        agent_session_crud.update_summary(
+            sdb, session_id, user_id=user_id, summary=summary,
+        )
+    except Exception:
+        logger.warning("会话摘要写回失败: session_id=%s", session_id, exc_info=True)
 
 
 def _build_artifacts(final_state: dict) -> list[dict]:
@@ -211,6 +273,7 @@ def _finalize_run_or_detect_cancel_race(
     user_id: int,
     final_answer: str,
     artifacts: list[dict],
+    usage: dict | None = None,
 ) -> bool:
     """原子 finalize 运行；命中「最后节点完成后、finalize 前被取消」的竞态时返回 True。
 
@@ -227,6 +290,7 @@ def _finalize_run_or_detect_cancel_race(
             final_output=final_answer,
             assistant_message=final_answer,
             artifacts=artifacts,
+            usage=usage,
         )
         return False
     except ValueError:
@@ -381,11 +445,12 @@ def _orchestrate_inner(
         current = agent_run_crud.get_run(sdb, run.id, user_id=teacher_id)
         return current is None or current.status == "cancelled"
 
+    # 聊天路径不再写 checkpoint（决策 D3）：全仓无 interrupt/恢复消费方，
+    # 审批持久化走 PG 业务表；checkpointer.py 基础设施保留备用
     graph = build_teacher_graph(
         specialists,
         budget=budget,
         is_cancelled=_is_cancelled,
-        checkpointer=get_graph_checkpointer(),
     )
     initial_state = {
         "run_id": run.id,
@@ -412,14 +477,17 @@ def _orchestrate_inner(
 
     node_started_at: dict[str, float] = {}
     persisted_nodes: set[str] = set()
+    # 节点开始即落 running Step，结束时原地收口（规划 4.4 生命周期）
+    running_step_ids: dict[str, int] = {}
     active_node: str | None = None
     last_node_boundary = time.monotonic()
+    run_usage: dict = {}
+    usage_calls = 0
 
     try:
         final_state = dict(initial_state)
         for part in graph.stream(
             initial_state,
-            config={"configurable": {"thread_id": run.id}},
             stream_mode=["updates", "custom"],
             version="v2",
         ):
@@ -429,6 +497,12 @@ def _orchestrate_inner(
                     active_node = custom_event.get("data", {}).get("agent")
                     if active_node:
                         node_started_at[active_node] = time.monotonic()
+                        running_step_ids[active_node] = agent_run_crud.start_step(
+                            sdb,
+                            run_id=run.id,
+                            user_id=teacher_id,
+                            node_name=active_node,
+                        ).id
                 emit(custom_event)
                 continue
             if part["type"] != "updates":
@@ -440,16 +514,34 @@ def _orchestrate_inner(
                 evidence_refs = update.get(
                     "evidence_refs", final_state.get("evidence_refs", []),
                 )
-                agent_run_crud.append_step(
-                    sdb,
-                    run_id=run.id,
-                    user_id=teacher_id,
-                    node_name=node_name,
-                    status="completed",
-                    output=_json_safe(update),
-                    evidence_refs=_json_safe(evidence_refs),
-                    duration_ms=max(1, int((now - started) * 1000)),
-                )
+                step_usage = update.get("usage") or {}
+                if step_usage:
+                    run_usage = _merge_usage(run_usage, step_usage)
+                    usage_calls += 1
+                running_id = running_step_ids.pop(node_name, None)
+                if running_id is not None:
+                    agent_run_crud.finish_step(
+                        sdb,
+                        running_id,
+                        teacher_id,
+                        status="completed",
+                        output=_json_safe(update),
+                        evidence_refs=_json_safe(evidence_refs),
+                        usage=step_usage or None,
+                        duration_ms=max(1, int((now - started) * 1000)),
+                    )
+                else:
+                    agent_run_crud.append_step(
+                        sdb,
+                        run_id=run.id,
+                        user_id=teacher_id,
+                        node_name=node_name,
+                        status="completed",
+                        output=_json_safe(update),
+                        evidence_refs=_json_safe(evidence_refs),
+                        usage=step_usage or None,
+                        duration_ms=max(1, int((now - started) * 1000)),
+                    )
                 persisted_nodes.add(node_name)
                 if node_name == active_node:
                     active_node = None
@@ -465,6 +557,14 @@ def _orchestrate_inner(
                             risk_level=decision.risk_level.value,
                         )
     except RunCancelled:
+        for cancelled_id in running_step_ids.values():
+            agent_run_crud.finish_step(
+                sdb,
+                cancelled_id,
+                teacher_id,
+                status="cancelled",
+                error_code=AGENT_RUN_CANCELLED,
+            )
         cancelled_event = {
             "type": "run.cancelled",
             "data": {"error_code": AGENT_RUN_CANCELLED},
@@ -480,16 +580,26 @@ def _orchestrate_inner(
     except BudgetExceeded as e:
         logger.warning("Teacher run budget exceeded: run_id=%s code=%s", run.id, e.code)
         if active_node and active_node not in persisted_nodes:
-            agent_run_crud.append_step(
-                sdb, run_id=run.id, user_id=teacher_id,
-                node_name=active_node, status="failed",
-                error_code=AGENT_BUDGET_EXCEEDED,
-                duration_ms=max(
-                    1, int((time.monotonic() - node_started_at.get(
-                        active_node, last_node_boundary,
-                    )) * 1000),
-                ),
+            failed_duration = max(
+                1, int((time.monotonic() - node_started_at.get(
+                    active_node, last_node_boundary,
+                )) * 1000),
             )
+            running_id = running_step_ids.pop(active_node, None)
+            if running_id is not None:
+                agent_run_crud.finish_step(
+                    sdb, running_id, teacher_id,
+                    status="failed",
+                    error_code=AGENT_BUDGET_EXCEEDED,
+                    duration_ms=failed_duration,
+                )
+            else:
+                agent_run_crud.append_step(
+                    sdb, run_id=run.id, user_id=teacher_id,
+                    node_name=active_node, status="failed",
+                    error_code=AGENT_BUDGET_EXCEEDED,
+                    duration_ms=failed_duration,
+                )
         agent_run_crud.fail_run(sdb, run.id, user_id=teacher_id, error_code=AGENT_BUDGET_EXCEEDED)
         emit({"type": "run.failed", "data": {
             "error_code": AGENT_BUDGET_EXCEEDED,
@@ -501,22 +611,36 @@ def _orchestrate_inner(
             status="failed",
             error_code=AGENT_BUDGET_EXCEEDED,
         )
-    except Exception:
+    except Exception as exc:
         logger.exception("Teacher run crashed: run_id=%s", run.id)
+        # 模型超时映射为独立稳定码，便于与普通失败区分（规划 4.2）
+        error_code = (
+            AGENT_MODEL_TIMEOUT if is_model_timeout(exc) else AGENT_CHAT_ERROR
+        )
         if active_node and active_node not in persisted_nodes:
-            agent_run_crud.append_step(
-                sdb, run_id=run.id, user_id=teacher_id,
-                node_name=active_node, status="failed",
-                error_code=AGENT_CHAT_ERROR,
-                duration_ms=max(
-                    1, int((time.monotonic() - node_started_at.get(
-                        active_node, last_node_boundary,
-                    )) * 1000),
-                ),
+            failed_duration = max(
+                1, int((time.monotonic() - node_started_at.get(
+                    active_node, last_node_boundary,
+                )) * 1000),
             )
-        agent_run_crud.fail_run(sdb, run.id, user_id=teacher_id, error_code=AGENT_CHAT_ERROR)
+            running_id = running_step_ids.pop(active_node, None)
+            if running_id is not None:
+                agent_run_crud.finish_step(
+                    sdb, running_id, teacher_id,
+                    status="failed",
+                    error_code=error_code,
+                    duration_ms=failed_duration,
+                )
+            else:
+                agent_run_crud.append_step(
+                    sdb, run_id=run.id, user_id=teacher_id,
+                    node_name=active_node, status="failed",
+                    error_code=error_code,
+                    duration_ms=failed_duration,
+                )
+        agent_run_crud.fail_run(sdb, run.id, user_id=teacher_id, error_code=error_code)
         emit({"type": "run.failed", "data": {
-            "error_code": AGENT_CHAT_ERROR,
+            "error_code": error_code,
             "message": SAFE_CHAT_ERROR_MESSAGE,
         }})
         return OrchestrationResult(
@@ -524,7 +648,7 @@ def _orchestrate_inner(
             final_answer=SAFE_CHAT_ERROR_MESSAGE,
             events=emitted_events,
             status="failed",
-            error_code=AGENT_CHAT_ERROR,
+            error_code=error_code,
         )
 
     # 6. 原子 finalize：最终消息 + 结构化产物 + run.completed
@@ -533,6 +657,7 @@ def _orchestrate_inner(
         sdb, run_id=run.id, user_id=teacher_id,
         final_answer=final_answer,
         artifacts=_build_artifacts(final_state),
+        usage=run_usage or None,
     ):
         # 取消竞态：最后节点完成后、finalize 前用户取消了运行
         emit({
@@ -554,6 +679,11 @@ def _orchestrate_inner(
     emit({"type": "run.completed", "data": {
         "final_answer_length": len(final_answer),
     }})
+    _record_model_usage(run_usage, usage_calls)
+    _write_session_summary(
+        sdb, session_id=session_id, user_id=teacher_id,
+        user_message=message, final_answer=final_answer,
+    )
 
     return OrchestrationResult(
         run_id=run.id,
@@ -771,7 +901,6 @@ def orchestrate_student_run(
 
         graph = build_student_graph(
             subagents,
-            checkpointer=get_graph_checkpointer(),
             is_cancelled=_is_cancelled,
         )
         try:
@@ -783,7 +912,7 @@ def orchestrate_student_run(
                 "recent_messages": recent_messages,
                 "runtime_budget": budget or default_run_budget(),
                 "visited_nodes": [],
-            }, config={"configurable": {"thread_id": run.id}})
+            })
             decision = final_state.get("intent")
             if decision is not None:
                 agent_run_crud.update_run_route(
@@ -802,10 +931,12 @@ def orchestrate_student_run(
                     status="completed",
                 )
             final_answer = final_state.get("final_answer", "")
+            run_usage = final_state.get("usage") or {}
             if _finalize_run_or_detect_cancel_race(
                 sdb, run_id=run.id, user_id=student_id,
                 final_answer=final_answer,
                 artifacts=_build_artifacts(final_state),
+                usage=run_usage or None,
             ):
                 # 取消竞态：最后节点完成后、finalize 前用户取消了运行
                 emit({
@@ -823,6 +954,11 @@ def orchestrate_student_run(
                 emit({"type": "agent.completed", "data": {"agent": node}})
             emit({"type": "content.delta", "data": {"content": final_answer}})
             emit({"type": "run.completed", "data": {}})
+            _record_model_usage(run_usage, 1 if run_usage else 0)
+            _write_session_summary(
+                sdb, session_id=session_id, user_id=student_id,
+                user_message=message, final_answer=final_answer,
+            )
             return OrchestrationResult(
                 run_id=run.id,
                 final_answer=final_answer,
@@ -861,18 +997,23 @@ def orchestrate_student_run(
                 status="failed",
                 error_code=AGENT_BUDGET_EXCEEDED,
             )
-        except Exception:
+        except Exception as exc:
             logger.exception("Student run crashed: run_id=%s", run.id)
+            error_code = (
+                AGENT_MODEL_TIMEOUT
+                if is_model_timeout(exc)
+                else AGENT_CHAT_ERROR
+            )
             agent_run_crud.fail_run(
                 sdb,
                 run.id,
                 user_id=student_id,
-                error_code=AGENT_CHAT_ERROR,
+                error_code=error_code,
             )
             failed_event = {
                 "type": "run.failed",
                 "data": {
-                    "error_code": AGENT_CHAT_ERROR,
+                    "error_code": error_code,
                     "message": SAFE_CHAT_ERROR_MESSAGE,
                 },
             }
@@ -882,7 +1023,7 @@ def orchestrate_student_run(
                 final_answer=SAFE_CHAT_ERROR_MESSAGE,
                 events=emitted_events,
                 status="failed",
-                error_code=AGENT_CHAT_ERROR,
+                error_code=error_code,
             )
     finally:
         if owns_db:
@@ -1098,7 +1239,6 @@ def orchestrate_admin_run(
 
         graph = build_admin_graph(
             subagents,
-            checkpointer=get_graph_checkpointer(),
             is_cancelled=_is_cancelled,
         )
         actor = ActorContext(
@@ -1116,7 +1256,7 @@ def orchestrate_admin_run(
                 "recent_messages": recent_messages,
                 "runtime_budget": budget or default_run_budget(),
                 "visited_nodes": [],
-            }, config={"configurable": {"thread_id": run.id}})
+            })
             decision = final_state.get("intent")
             if decision is not None:
                 agent_run_crud.update_run_route(
@@ -1135,10 +1275,12 @@ def orchestrate_admin_run(
                     status="completed",
                 )
             final_answer = final_state.get("final_answer", "")
+            run_usage = final_state.get("usage") or {}
             if _finalize_run_or_detect_cancel_race(
                 sdb, run_id=run.id, user_id=admin_id,
                 final_answer=final_answer,
                 artifacts=_build_artifacts(final_state),
+                usage=run_usage or None,
             ):
                 # 取消竞态：最后节点完成后、finalize 前用户取消了运行
                 emit({
@@ -1156,6 +1298,11 @@ def orchestrate_admin_run(
                 emit({"type": "agent.completed", "data": {"agent": node}})
             emit({"type": "content.delta", "data": {"content": final_answer}})
             emit({"type": "run.completed", "data": {}})
+            _record_model_usage(run_usage, 1 if run_usage else 0)
+            _write_session_summary(
+                sdb, session_id=session_id, user_id=admin_id,
+                user_message=message, final_answer=final_answer,
+            )
             return OrchestrationResult(
                 run_id=run.id,
                 final_answer=final_answer,
@@ -1194,18 +1341,23 @@ def orchestrate_admin_run(
                 status="failed",
                 error_code=AGENT_BUDGET_EXCEEDED,
             )
-        except Exception:
+        except Exception as exc:
             logger.exception("Admin run crashed: run_id=%s", run.id)
+            error_code = (
+                AGENT_MODEL_TIMEOUT
+                if is_model_timeout(exc)
+                else AGENT_CHAT_ERROR
+            )
             agent_run_crud.fail_run(
                 sdb,
                 run.id,
                 user_id=admin_id,
-                error_code=AGENT_CHAT_ERROR,
+                error_code=error_code,
             )
             failed_event = {
                 "type": "run.failed",
                 "data": {
-                    "error_code": AGENT_CHAT_ERROR,
+                    "error_code": error_code,
                     "message": SAFE_CHAT_ERROR_MESSAGE,
                 },
             }
@@ -1215,7 +1367,7 @@ def orchestrate_admin_run(
                 final_answer=SAFE_CHAT_ERROR_MESSAGE,
                 events=emitted_events,
                 status="failed",
-                error_code=AGENT_CHAT_ERROR,
+                error_code=error_code,
             )
     finally:
         if owns_db:

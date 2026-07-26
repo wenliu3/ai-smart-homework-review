@@ -15,6 +15,7 @@ from pydantic import ValidationError
 
 from ..contracts import ReviewResult, TeacherIntent
 from ..registry import AgentRegistry, agent_registry
+from .messages import collect_invoke_usage
 from ..tools.common import TeacherContext
 
 # 安全审核 Prompt（注入到 LLM 输入）
@@ -79,7 +80,10 @@ def create_node(db, registry: AgentRegistry | None = None) -> Callable:
             ),
         )
         review = _structured_review_or_reject(result)
-        return {"review": review}
+        return {
+            "review": review,
+            "usage": collect_invoke_usage(result),
+        }
 
     return final_reviewer_node
 

@@ -1,5 +1,5 @@
 """学生主管 LangGraph：辅导、反馈解释、学习规划与防代写。"""
-from typing import TypedDict
+from typing import Annotated, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
@@ -25,6 +25,18 @@ _PROHIBITED_RESPONSE = (
     "我可以通过拆解题目、提示关键概念、检查你的思路来帮助你自己完成。"
 )
 _SAFE_REJECTION = "这次回答没有通过学生安全审核，我可以换成提示和步骤引导。"
+
+
+
+
+def _accumulate_usage(left: dict, right: dict) -> dict:
+    """usage 通道 reducer：多个节点各自回传用量，按键累加成运行总量。"""
+    left = left or {}
+    right = right or {}
+    return {
+        key: left.get(key, 0) + right.get(key, 0)
+        for key in {*left, *right}
+    }
 
 
 class StudentAgentState(TypedDict, total=False):

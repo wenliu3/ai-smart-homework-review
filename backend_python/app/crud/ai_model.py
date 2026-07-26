@@ -269,3 +269,25 @@ def get_stats(db: Session, code: str) -> dict:
     if not model:
         raise NotFoundException(10015, "模型不存在")
     return {"dailyUsage": [], "monthlyUsage": [], "recentActivity": []}
+
+
+def increment_usage(db: Session, model_id: int, calls: int, tokens: int) -> None:
+    """原子累加模型调用次数与 Token 总量（规划 4.1）。
+
+    多 worker 并发安全：单条 UPDATE 自增，不做读-改-写。
+    统计尽力而为，任何失败由调用方吞掉，不影响业务运行。
+    """
+    from sqlalchemy import func, update as sa_update
+
+    if calls <= 0 and tokens <= 0:
+        return
+    db.execute(
+        sa_update(AiModel)
+        .where(AiModel.id == model_id)
+        .values(
+            total_usage=func.coalesce(AiModel.total_usage, 0) + max(calls, 0),
+            total_tokens=func.coalesce(AiModel.total_tokens, 0) + max(tokens, 0),
+            last_used_at=datetime.now(),
+        )
+    )
+    db.commit()

@@ -1,5 +1,5 @@
 """管理员主管 LangGraph：聚合运营、审计和模型治理。"""
-from typing import TypedDict
+from typing import Annotated, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
@@ -19,6 +19,18 @@ AUDIT_ANALYSIS_NODE = "audit_analysis_agent"
 MODEL_GOVERNANCE_NODE = "model_governance_agent"
 ADMIN_FINAL_REVIEWER_NODE = "admin_final_reviewer"
 PERSIST_APPROVAL_NODE = "persist_action_draft"
+
+
+
+
+def _accumulate_usage(left: dict, right: dict) -> dict:
+    """usage 通道 reducer：多个节点各自回传用量，按键累加成运行总量。"""
+    left = left or {}
+    right = right or {}
+    return {
+        key: left.get(key, 0) + right.get(key, 0)
+        for key in {*left, *right}
+    }
 
 
 class AdminAgentState(TypedDict, total=False):
@@ -43,6 +55,7 @@ class AdminAgentState(TypedDict, total=False):
     run_id: str
     action_draft: object
     approval_id: str
+    usage: Annotated[dict, _accumulate_usage]
 
 
 def build_admin_graph(subagents, checkpointer=None, is_cancelled=None):

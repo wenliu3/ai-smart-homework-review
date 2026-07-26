@@ -13,7 +13,11 @@ from pydantic import ValidationError
 from ..contracts import SpecialistResponse
 from ..registry import AgentRegistry, agent_registry
 from ..tools.common import TeacherContext
-from .messages import build_specialist_messages, verify_specialist_evidence
+from .messages import (
+    build_specialist_messages,
+    collect_invoke_usage,
+    verify_specialist_evidence,
+)
 
 
 def create_node(db, registry: AgentRegistry | None = None) -> Callable:
@@ -36,6 +40,7 @@ def create_node(db, registry: AgentRegistry | None = None) -> Callable:
             )
         except (KeyError, TypeError, ValidationError):
             return {
+                "usage": collect_invoke_usage(result),
                 "candidate_answer": "",
                 "evidence_refs": [],
                 "limitations": ["专业 Agent 未返回有效的结构化结果"],
@@ -43,6 +48,7 @@ def create_node(db, registry: AgentRegistry | None = None) -> Callable:
             }
         response = verify_specialist_evidence(response, result)
         return {
+            "usage": collect_invoke_usage(result),
             "candidate_answer": response.answer,
             "evidence_refs": response.evidence_refs,
             "limitations": response.limitations,

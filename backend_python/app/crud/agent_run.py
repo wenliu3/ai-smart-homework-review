@@ -143,6 +143,7 @@ def finalize_run(
     final_output: str,
     assistant_message: str | None = None,
     artifacts: list[dict] | None = None,
+    usage: dict | None = None,
 ) -> AgentRun:
     """原子完成运行：同一 PostgreSQL 事务提交最终消息、Artifact 和 run.completed。
 
@@ -150,6 +151,7 @@ def finalize_run(
     - `artifacts` 列表每项形如
       `{"artifact_type": "...", "schema_version": "...", "payload": {...}}`。
     - `assistant_message` 提供时写入 agent_messages 并关联本次 run_id。
+    - `usage` 提供且非空时写入 run.usage_json（规划 4.1）。
     """
     run = _load_owned_run(db, run_id, user_id, for_update=True)
     if run.status not in {"running", "processing"}:
@@ -158,6 +160,8 @@ def finalize_run(
         run.status = "completed"
         run.final_output = final_output
         run.finished_at = datetime.now()
+        if usage:
+            run.usage_json = usage
 
         if assistant_message is not None:
             db.add(AgentMessage(
@@ -220,6 +224,57 @@ def append_step(
         duration_ms=duration_ms,
     )
     db.add(step)
+    db.commit()
+    db.refresh(step)
+    return step
+
+
+def start_step(
+    db: Session,
+    run_id: str,
+    user_id: int,
+    node_name: str,
+) -> AgentStep:
+    """节点开始执行时先落一条 running Step（规划 4.4 生命周期）。"""
+    return append_step(
+        db,
+        run_id=run_id,
+        user_id=user_id,
+        node_name=node_name,
+        status="running",
+    )
+
+
+def finish_step(
+    db: Session,
+    step_id: int,
+    user_id: int,
+    *,
+    status: str,
+    output: dict | None = None,
+    evidence_refs: list[str] | None = None,
+    usage: dict | None = None,
+    error_code: str | None = None,
+    duration_ms: int = 0,
+) -> AgentStep | None:
+    """原地把 running Step 收口为 completed/failed/cancelled。跨用户返回 None。"""
+    step = (
+        db.query(AgentStep)
+        .join(AgentRun, AgentRun.id == AgentStep.run_id)
+        .filter(AgentStep.id == step_id, AgentRun.user_id == user_id)
+        .first()
+    )
+    if step is None:
+        return None
+    step.status = status
+    if output is not None:
+        step.output_json = output
+    if evidence_refs is not None:
+        step.evidence_refs = evidence_refs
+    if usage:
+        step.usage_json = usage
+    step.error_code = error_code
+    step.duration_ms = duration_ms
     db.commit()
     db.refresh(step)
     return step

@@ -103,11 +103,31 @@ def get_owned_approval(
     ).first()
 
 
+def _sweep_expired_pending(db: Session, user_id: int) -> None:
+    """惰性过期：把本人已过期的 pending 草案批量标记为 expired。
+
+    待审批列表因此不再永久展示过期项，历史标签仍可见（规划 4.4）。
+    只动本人的行，避免一次列表查询扫全表。
+    """
+    swept = (
+        db.query(AgentApproval)
+        .filter(
+            AgentApproval.requester_user_id == user_id,
+            AgentApproval.status == "pending",
+            AgentApproval.expires_at <= datetime.now(),
+        )
+        .update({AgentApproval.status: "expired"}, synchronize_session=False)
+    )
+    if swept:
+        db.commit()
+
+
 def list_owned_approvals(
     db: Session,
     user_id: int,
     status: str | None = None,
 ) -> list[AgentApproval]:
+    _sweep_expired_pending(db, user_id)
     query = db.query(AgentApproval).filter(
         AgentApproval.requester_user_id == user_id,
     )

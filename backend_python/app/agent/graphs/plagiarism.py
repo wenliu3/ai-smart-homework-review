@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Callable, TypedDict
+from typing import Annotated, Callable, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
@@ -20,6 +20,18 @@ SAFE_EXPLANATION_FALLBACK = (
 )
 
 
+
+
+def _accumulate_usage(left: dict, right: dict) -> dict:
+    """usage 通道 reducer：多个节点各自回传用量，按键累加成运行总量。"""
+    left = left or {}
+    right = right or {}
+    return {
+        key: left.get(key, 0) + right.get(key, 0)
+        for key in {*left, *right}
+    }
+
+
 class PlagiarismState(TypedDict, total=False):
     deterministic_result: dict
     # 学生作业内容节选（截断后），供解释节点引用具体文本；不可信
@@ -28,6 +40,7 @@ class PlagiarismState(TypedDict, total=False):
     explanation: PlagiarismExplanation
     review: ReviewResult
     analysis: PlagiarismAnalysis
+    usage: Annotated[dict, _accumulate_usage]
     visited_nodes: list[str]
 
 

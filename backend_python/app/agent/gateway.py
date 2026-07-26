@@ -75,6 +75,8 @@ class ModelGateway:
                 model=f"openai:{config.model_name}",
                 api_key=config.api_key,
                 base_url=config.base_url,
+                # 瞬时错误（连接错误/429）同模型重试一次（规划 4.2）
+                max_retries=1,
                 **PROFILE_SETTINGS[profile],
             )
             # 淘汰同 profile 下配置过期的条目；不同 profile 允许共存

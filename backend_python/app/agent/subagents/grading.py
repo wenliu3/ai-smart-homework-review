@@ -15,10 +15,12 @@ from pydantic import ValidationError
 from ..contracts import GradingDraft
 from ..graphs.grading import GRADING_AGENT_NODE
 from ..registry import AgentRegistry, agent_registry
+from ..runtime import BudgetExceeded
 from ..tools.content import (
     build_grading_context,
     build_grading_message_content,
 )
+from .messages import collect_invoke_usage, merge_usage
 
 
 def _grading_prompt(state: dict, *, reviewer: bool) -> str:
@@ -62,10 +64,16 @@ def invoke_with_repair(
     messages = [HumanMessage(content=content)]
     last_error = ""
     raw_response = ""
+    total_usage: dict = {}
     for _attempt in range(2):
         if budget is not None:
+            # 剩余预算不足以完成一次模型调用时直接中断（规划 4.2），
+            # 避免调用中途被 Celery 软超时打断丢失产出
+            if budget.remaining_seconds < 5:
+                raise BudgetExceeded("剩余预算不足以发起模型调用")
             budget.consume_model_call()
         result = agent.invoke({"messages": messages})
+        total_usage = merge_usage(total_usage, collect_invoke_usage(result))
         raw = result.get("structured_response") if isinstance(result, dict) else None
         raw_response = (
             json.dumps(raw, ensure_ascii=False, default=str)
@@ -88,12 +96,18 @@ def invoke_with_repair(
                 )),
             ]
             continue
-        return {"review_draft" if reviewer else "grading_draft": draft}
-    return {"grading_failure": {
-        "stage": stage,
-        "error": last_error[:1000],
-        "raw_response": raw_response[:4000],
-    }}
+        return {
+            "review_draft" if reviewer else "grading_draft": draft,
+            "usage": total_usage,
+        }
+    return {
+        "grading_failure": {
+            "stage": stage,
+            "error": last_error[:1000],
+            "raw_response": raw_response[:4000],
+        },
+        "usage": total_usage,
+    }
 
 
 def create_node(db, registry: AgentRegistry | None = None) -> Callable:

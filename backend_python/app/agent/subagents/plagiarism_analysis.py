@@ -8,6 +8,7 @@ from langchain_core.messages import HumanMessage
 
 from ..contracts import PlagiarismExplanation
 from ..registry import AgentRegistry, agent_registry
+from .messages import collect_invoke_usage
 
 
 def create_node(db, registry: AgentRegistry | None = None) -> Callable:
@@ -38,7 +39,10 @@ def create_node(db, registry: AgentRegistry | None = None) -> Callable:
             result["structured_response"],
             strict=True,
         )
-        return {"explanation": explanation}
+        return {
+            "explanation": explanation,
+            "usage": collect_invoke_usage(result),
+        }
 
     return plagiarism_node
 

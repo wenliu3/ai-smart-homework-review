@@ -1,7 +1,7 @@
 """双 Agent 批改 LangGraph。"""
 from __future__ import annotations
 
-from typing import Callable, TypedDict
+from typing import Annotated, Callable, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
@@ -11,6 +11,18 @@ NORMALIZE_CONTENT_NODE = "normalize_submission_content"
 GRADING_AGENT_NODE = "grading_agent"
 GRADING_REVIEW_NODE = "grading_review_agent"
 GRADING_DECISION_NODE = "grading_decision"
+
+
+
+
+def _accumulate_usage(left: dict, right: dict) -> dict:
+    """usage 通道 reducer：多个节点各自回传用量，按键累加成运行总量。"""
+    left = left or {}
+    right = right or {}
+    return {
+        key: left.get(key, 0) + right.get(key, 0)
+        for key in {*left, *right}
+    }
 
 
 class GradingState(TypedDict, total=False):
@@ -28,6 +40,7 @@ class GradingState(TypedDict, total=False):
     # {stage, error, raw_response}；存在即跳过后续节点，任务层转人工
     grading_failure: dict
     outcome: GradingOutcome
+    usage: Annotated[dict, _accumulate_usage]
     visited_nodes: list[str]
 
 

@@ -16,6 +16,7 @@ from ..tools.approval import create_action_draft
 from ..tools.common import TeacherContext
 from .messages import (
     build_specialist_messages,
+    collect_invoke_usage,
     degraded_specialist_update,
     parse_specialist_response,
     verify_specialist_evidence,
@@ -138,9 +139,13 @@ def create_node(
         )
         response = parse_specialist_response(result, TeacherActionResponse)
         if response is None:
-            return degraded_specialist_update()
+            return {
+                **degraded_specialist_update(),
+                "usage": collect_invoke_usage(result),
+            }
         response = verify_specialist_evidence(response, result)
         update = {
+            "usage": collect_invoke_usage(result),
             "candidate_answer": response.answer,
             "evidence_refs": response.evidence_refs,
             "limitations": response.limitations,

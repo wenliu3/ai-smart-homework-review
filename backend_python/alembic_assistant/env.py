@@ -8,6 +8,7 @@ from sqlalchemy import engine_from_config, pool
 from app.assistant_database import AssistantBase
 from app.config import settings
 from app.models.agent_chat_message import AgentChatMessage  # noqa: F401
+from app.models.agent_feedback import AgentFeedback  # noqa: F401
 from app.models.agent_approval import AgentApproval  # noqa: F401
 
 config = context.config

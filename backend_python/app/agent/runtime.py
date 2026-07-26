@@ -59,6 +59,29 @@ class RunBudget:
             raise BudgetExceeded("Agent 运行超时")
 
 
+def is_model_timeout(exc: BaseException) -> bool:
+    """判断异常是否属于模型调用超时族（规划 4.2）。
+
+    覆盖 openai.APITimeoutError 与 httpx 超时族；供编排层把超时
+    映射为稳定错误码 AGENT_MODEL_TIMEOUT，与普通模型错误区分。
+    """
+    try:
+        import httpx
+
+        if isinstance(exc, httpx.TimeoutException):
+            return True
+    except ImportError:  # pragma: no cover
+        pass
+    try:
+        import openai
+
+        if isinstance(exc, openai.APITimeoutError):
+            return True
+    except ImportError:  # pragma: no cover
+        pass
+    return False
+
+
 def default_run_budget() -> RunBudget:
     """生产运行使用的固定安全预算。"""
     return RunBudget(max_nodes=8, max_tool_calls=12, timeout_seconds=45)
@@ -105,5 +128,6 @@ __all__ = [
     "build_actor_context",
     "default_run_budget",
     "grading_run_budget",
+    "is_model_timeout",
     "tool_budget_middleware",
 ]

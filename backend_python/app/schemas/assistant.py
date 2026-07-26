@@ -3,6 +3,8 @@
 所有身份字段（user_id / teacher_id / student_id）绝不出现在请求体中——
 身份只来自 `Depends(require_roles(...))` 的认证上下文。
 """
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -15,6 +17,17 @@ class CreateRunRequest(BaseModel):
 class CreateSessionRequest(BaseModel):
     """创建新会话。title 可选，默认"新会话"。"""
     title: str = Field(default="新会话", max_length=255)
+
+
+class RenameSessionRequest(BaseModel):
+    """重命名会话。空白标题由路由层拒绝（400 而非 422）。"""
+    title: str = Field(max_length=255)
+
+
+class SubmitFeedbackRequest(BaseModel):
+    """运行反馈：👍=1 / 👎=-1，其余取值 422。"""
+    rating: Literal[1, -1]
+    comment: str | None = Field(default=None, max_length=500)
 
 
 class RunResponse(BaseModel):

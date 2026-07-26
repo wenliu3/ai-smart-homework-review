@@ -141,3 +141,45 @@ def delete_session(db: Session, session_id: str, user_id: int) -> int:
     session.status = "archived"
     db.commit()
     return 1
+
+
+def update_summary(
+    db: Session,
+    session_id: str,
+    user_id: int,
+    summary: str,
+) -> int:
+    """finalize 后写回会话摘要（规划 4.4）。跨用户/已归档返回 0。"""
+    updated = (
+        db.query(AgentSession)
+        .filter(
+            AgentSession.id == session_id,
+            AgentSession.user_id == user_id,
+            AgentSession.status == "active",
+        )
+        .update(
+            {AgentSession.summary: summary[:500]},
+            synchronize_session=False,
+        )
+    )
+    db.commit()
+    return updated
+
+
+def rename_session(
+    db: Session,
+    session_id: str,
+    user_id: int,
+    title: str,
+) -> AgentSession | None:
+    """重命名会话。跨用户返回 None；空标题由路由层校验拒绝。"""
+    session = db.query(AgentSession).filter(
+        AgentSession.id == session_id,
+        AgentSession.user_id == user_id,
+    ).first()
+    if not session:
+        return None
+    session.title = title
+    db.commit()
+    db.refresh(session)
+    return session
