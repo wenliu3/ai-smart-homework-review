@@ -63,6 +63,7 @@
         @send="sendMessage"
         @stop="stopGenerating"
         @open-approvals="currentView = 'approval'"
+        @feedback="handleFeedback"
       />
 
       <AssistantHistoryView
@@ -73,6 +74,8 @@
         @back="currentView = 'chat'"
         @retry="loadSessionList"
         @select="loadSession"
+        @rename="handleRenameSession"
+        @delete="handleDeleteSession"
       />
 
       <AssistantApprovalView
@@ -92,14 +95,17 @@ import {
   Plus,
   Promotion,
 } from "@element-plus/icons-vue";
-import { ElMessage } from "element-plus";
+import { ElMessage, ElMessageBox } from "element-plus";
 
 import {
   cancelRun,
   createSession,
+  deleteSession,
   getSessionMessages,
   listSessions,
+  renameSession,
   streamAssistantRun,
+  submitRunFeedback,
   type AssistantSession,
 } from "@/api/assistant";
 import { parseApprovalRequired } from "./assistant/approval";
@@ -152,11 +158,13 @@ let sendGeneration = 0;
 function makeMessage(
   role: RenderedAssistantMessage["role"],
   content: string,
+  runId: string | null = null,
 ): RenderedAssistantMessage {
   return {
     role,
     content,
     html: renderSafeMarkdown(content),
+    runId,
   };
 }
 
@@ -247,7 +255,7 @@ async function sendMessage(text: string) {
         // 服务端消息列表不含审批卡片，覆盖后把本轮卡片挂回末尾
         messages.value = [
           ...(result.messages || []).map((message) =>
-            makeMessage(message.role, message.content),
+            makeMessage(message.role, message.content, message.runId),
           ),
           ...sessionApprovalCards.value,
         ];
@@ -310,6 +318,51 @@ async function newChat() {
   sessionId.value = null;
   currentView.value = "chat";
   nextTick(() => chatView.value?.focus());
+}
+
+async function handleFeedback(runId: string, rating: 1 | -1) {
+  try {
+    await submitRunFeedback(runId, rating);
+  } catch {
+    // 评分尽力而为：失败不打断对话，也不弹错
+  }
+}
+
+async function handleRenameSession(sessionId: string, currentTitle: string) {
+  try {
+    const { value } = await ElMessageBox.prompt("请输入新的会话标题", "重命名会话", {
+      inputValue: currentTitle,
+      confirmButtonText: "保存",
+      cancelButtonText: "取消",
+      inputValidator: (input: string) => !!input.trim() || "标题不能为空",
+    });
+    await renameSession(sessionId, value.trim());
+    await loadSessionList();
+  } catch {
+    // 用户取消或请求失败：列表保持原样
+  }
+}
+
+async function handleDeleteSession(targetSessionId: string) {
+  try {
+    await ElMessageBox.confirm(
+      "删除后该会话将从历史列表移除，确认删除？",
+      "删除会话",
+      { type: "warning", confirmButtonText: "删除", cancelButtonText: "取消" },
+    );
+  } catch {
+    return; // 用户取消
+  }
+  try {
+    await deleteSession(targetSessionId);
+    // 删除的是当前正打开的会话：复位到全新对话
+    if (sessionId.value === targetSessionId) {
+      await newChat();
+    }
+    await loadSessionList();
+  } catch {
+    ElMessage.error("删除会话失败");
+  }
 }
 
 async function loadSessionList() {

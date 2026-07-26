@@ -40,7 +40,30 @@
             去审批
           </el-button>
         </div>
-        <div v-else class="message-bubble" v-html="message.html"></div>
+        <div v-else class="message-bubble">
+          <div v-html="message.html"></div>
+          <div
+            v-if="message.role === 'assistant' && message.runId"
+            class="feedback-bar"
+          >
+            <button
+              type="button"
+              class="feedback-btn"
+              :class="{ active: feedbackGiven[message.runId] === 1 }"
+              :data-testid="`feedback-up-${message.runId}`"
+              title="有帮助"
+              @click="sendFeedback(message.runId, 1)"
+            >👍</button>
+            <button
+              type="button"
+              class="feedback-btn"
+              :class="{ active: feedbackGiven[message.runId] === -1 }"
+              :data-testid="`feedback-down-${message.runId}`"
+              title="没帮助"
+              @click="sendFeedback(message.runId, -1)"
+            >👎</button>
+          </div>
+        </div>
       </div>
 
       <div v-if="streamingContent" class="message-row is-ai">
@@ -133,9 +156,18 @@ const emit = defineEmits<{
   (event: "send", message: string): void;
   (event: "stop"): void;
   (event: "open-approvals"): void;
+  (event: "feedback", runId: string, rating: 1 | -1): void;
 }>();
 
 const draft = ref("");
+// 本地已评记忆：防重复点击刷请求；后端本身按 (run, user) upsert 幂等
+const feedbackGiven = ref<Record<string, 1 | -1>>({});
+
+function sendFeedback(runId: string, rating: 1 | -1) {
+  if (feedbackGiven.value[runId] === rating) return;
+  feedbackGiven.value = { ...feedbackGiven.value, [runId]: rating };
+  emit("feedback", runId, rating);
+}
 const input = ref<HTMLTextAreaElement>();
 const messageList = ref<HTMLElement>();
 
@@ -188,6 +220,10 @@ defineExpose({ focus, scrollToBottom });
 .is-user .message-avatar { background: #607be8; }
 .message-bubble { max-width: 78%; padding: 10px 13px; border-radius: 12px; background: white; color: #303133; line-height: 1.6; overflow-wrap: anywhere; box-shadow: 0 2px 8px rgba(0, 0, 0, .06); }
 .is-user .message-bubble { background: #607be8; color: white; }
+.feedback-bar { margin-top: 6px; display: flex; gap: 4px; }
+.feedback-btn { border: none; background: transparent; padding: 1px 5px; border-radius: 8px; font-size: 13px; line-height: 1.4; cursor: pointer; opacity: .45; }
+.feedback-btn:hover { opacity: .9; background: #f4f4f5; }
+.feedback-btn.active { opacity: 1; background: #f0edfa; }
 .approval-card { border-left: 3px solid #745fc1; }
 .approval-card-title { display: flex; align-items: center; gap: 6px; font-weight: 600; color: #745fc1; }
 .approval-card-summary { margin: 8px 0 0; }

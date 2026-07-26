@@ -35,3 +35,44 @@ describe("AssistantHistoryView", () => {
     expect(wrapper.emitted("select")?.[0]).toEqual(["session-1"]);
   });
 });
+
+describe("AssistantHistoryView 会话管理", () => {
+  const sessions = [{
+    sessionId: "session-9",
+    title: "微积分答疑",
+    status: "active",
+    createdAt: "2026-07-26T10:00:00",
+    updatedAt: "2026-07-26T12:00:00",
+  }];
+
+  function mountView() {
+    return mount(AssistantHistoryView, {
+      props: { sessions, loading: false, error: "" },
+      global: {
+        stubs: {
+          "el-icon": { template: "<i><slot /></i>" },
+          "el-button": { template: "<button><slot /></button>" },
+          "el-empty": { template: "<div />" },
+        },
+      },
+    });
+  }
+
+  it("点击改名图标抛 rename 且不触发 select", async () => {
+    const wrapper = mountView();
+
+    await wrapper.get('[data-testid="rename-session-9"]').trigger("click");
+
+    expect(wrapper.emitted("rename")?.[0]).toEqual(["session-9", "微积分答疑"]);
+    expect(wrapper.emitted("select")).toBeUndefined();
+  });
+
+  it("点击删除图标抛 delete 且不触发 select", async () => {
+    const wrapper = mountView();
+
+    await wrapper.get('[data-testid="delete-session-9"]').trigger("click");
+
+    expect(wrapper.emitted("delete")?.[0]).toEqual(["session-9"]);
+    expect(wrapper.emitted("select")).toBeUndefined();
+  });
+});

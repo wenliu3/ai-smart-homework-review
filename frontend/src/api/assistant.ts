@@ -531,6 +531,47 @@ export async function createSession(
 }
 
 /**
+ * 归档会话（软删除）。系统会话（批改/查重）不可删。
+ */
+export async function deleteSession(
+  sessionId: string,
+): Promise<{ sessionId: string; status: string }> {
+  return request({
+    url: `/assistant/sessions/${sessionId}`,
+    method: "delete",
+  });
+}
+
+/**
+ * 重命名会话。
+ */
+export async function renameSession(
+  sessionId: string,
+  title: string,
+): Promise<{ sessionId: string; title: string }> {
+  return request({
+    url: `/assistant/sessions/${sessionId}`,
+    method: "patch",
+    data: { title },
+  });
+}
+
+/**
+ * 对一次助手运行提交 👍(1)/👎(-1)；同 run 重复评分覆盖。
+ */
+export async function submitRunFeedback(
+  runId: string,
+  rating: 1 | -1,
+  comment?: string,
+): Promise<{ runId: string; rating: number }> {
+  return request({
+    url: `/assistant/runs/${runId}/feedback`,
+    method: "post",
+    data: comment ? { rating, comment } : { rating },
+  });
+}
+
+/**
  * 获取会话全部消息。
  */
 export async function getSessionMessages(

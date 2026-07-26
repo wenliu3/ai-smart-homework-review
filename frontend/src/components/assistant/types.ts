@@ -5,6 +5,8 @@ export interface RenderedAssistantMessage {
   /** 普通文本气泡，或聊天流中内嵌的待审批草案卡片。 */
   kind?: "text" | "approval";
   approval?: ApprovalCardData;
+  /** 产生该回答的运行 ID；有值的 assistant 消息才显示 👍/👎。 */
+  runId?: string | null;
 }
 
 /** approval.required 事件在聊天流里渲染成的卡片数据（只含安全字段）。 */

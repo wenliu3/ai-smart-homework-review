@@ -148,3 +148,60 @@ describe("AssistantChatView 审批卡片", () => {
     expect(mountWithApproval().text()).not.toContain("publish_assignment");
   });
 });
+
+describe("AssistantChatView 反馈按钮", () => {
+  const assistantMessage = {
+    role: "assistant" as const,
+    content: "这是回答",
+    html: "<p>这是回答</p>",
+    runId: "run-fb-1",
+  };
+
+  function mountWithMessages(messages: any[]) {
+    return mount(AssistantChatView, {
+      props: {
+        config: getAssistantRoleConfig("teacher")!,
+        messages,
+        streamingContent: "",
+        isGenerating: false,
+        currentPhase: "",
+      },
+      global: {
+        stubs: {
+          "el-icon": { template: "<i><slot /></i>" },
+          "el-button": { template: "<button><slot /></button>" },
+        },
+      },
+    });
+  }
+
+  it("有 runId 的助手消息显示 👍/👎，点击向上抛 feedback", async () => {
+    const wrapper = mountWithMessages([assistantMessage]);
+
+    await wrapper.get('[data-testid="feedback-up-run-fb-1"]').trigger("click");
+
+    expect(wrapper.emitted("feedback")?.[0]).toEqual(["run-fb-1", 1]);
+  });
+
+  it("重复点击同一评分不重复上报，换评分会上报", async () => {
+    const wrapper = mountWithMessages([assistantMessage]);
+
+    await wrapper.get('[data-testid="feedback-up-run-fb-1"]').trigger("click");
+    await wrapper.get('[data-testid="feedback-up-run-fb-1"]').trigger("click");
+    await wrapper.get('[data-testid="feedback-down-run-fb-1"]').trigger("click");
+
+    expect(wrapper.emitted("feedback")).toEqual([
+      ["run-fb-1", 1],
+      ["run-fb-1", -1],
+    ]);
+  });
+
+  it("用户消息与无 runId 的消息不渲染反馈按钮", () => {
+    const wrapper = mountWithMessages([
+      { role: "user", content: "问题", html: "<p>问题</p>" },
+      { role: "assistant", content: "旧回答", html: "<p>旧回答</p>" },
+    ]);
+
+    expect(wrapper.find('[data-testid^="feedback-"]').exists()).toBe(false);
+  });
+});
