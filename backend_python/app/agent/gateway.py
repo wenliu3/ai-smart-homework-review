@@ -59,13 +59,36 @@ class ModelGateway:
             raise BizException(MODEL_NOT_CONFIGURED_CODE, f"AI 模型「{config.name}」未配置 API Key")
         return config
 
+    def get_config_for_profile(
+        self, db: Session, profile: ModelProfile,
+    ) -> AiModel:
+        """按档位选模型（规划 5.3）：绑定 > 能力标签 > 默认链。
+
+        - profile_bindings 里显式绑定该档位的 active 模型优先；
+        - VISION_GRADER 其次选带 "vision" 能力标签的 active 模型；
+        - 都没有则回退 get_default_config（默认 → 任一 active）。
+        """
+        candidates = db.query(AiModel).filter(
+            AiModel.status == "active",
+        ).order_by(AiModel.id.asc()).all()
+        for config in candidates:
+            bindings = config.profile_bindings or {}
+            if bindings.get(profile.value) and (config.api_key or "").strip():
+                return config
+        if profile == ModelProfile.VISION_GRADER:
+            for config in candidates:
+                capabilities = config.capabilities or []
+                if "vision" in capabilities and (config.api_key or "").strip():
+                    return config
+        return self.get_default_config(db)
+
     def build_cache_key(self, db: Session, profile: ModelProfile, prompt_version: str) -> tuple:
         """多维缓存键：(agent_profile, model_id, model_updated_at, prompt_version)。"""
-        config = self.get_default_config(db)
+        config = self.get_config_for_profile(db, profile)
         return (profile.value, config.id, config.updated_at, prompt_version)
 
     def get_chat_model(self, db: Session, profile: ModelProfile, prompt_version: str = "v1") -> BaseChatModel:
-        config = self.get_default_config(db)
+        config = self.get_config_for_profile(db, profile)
         key = (profile.value, config.id, config.updated_at, prompt_version)
         with self._lock:
             cached = self._cache.get(key)

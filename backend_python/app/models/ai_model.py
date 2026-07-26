@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, JSON
 from ..database import Base
 from .base import TimestampMixin, ModelMixin
 
@@ -17,6 +17,9 @@ class AiModel(Base, TimestampMixin, ModelMixin):
     secret_key = Column(String(255), nullable=True)
     status = Column(String(20), default="inactive")
     is_default = Column(Boolean, default=False)
+    # 能力标签（规划 5.3）：["text","vision"]；档位绑定：{"vision_grader": true}
+    capabilities = Column(JSON, nullable=True)
+    profile_bindings = Column(JSON, nullable=True)
     total_usage = Column(Integer, default=0)
     total_tokens = Column(Integer, default=0)
     last_used_at = Column(DateTime, nullable=True)
