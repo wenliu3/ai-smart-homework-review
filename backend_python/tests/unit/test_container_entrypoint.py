@@ -1,6 +1,7 @@
 import re
 from pathlib import Path
 
+import pytest
 import yaml
 
 
@@ -116,6 +117,11 @@ def test_compose_requires_secrets_without_containing_their_values() -> None:
 
     for variable in ("MYSQL_ROOT_PASSWORD", "POSTGRES_PASSWORD", "JWT_SECRET"):
         assert f"${{{variable}:?" in compose_text
+
+    # .env.docker 是本地私密文件（gitignored）：CI 全新检出没有它，
+    # 只在本机存在时校验「真实密钥值不泄漏进 compose 文本」
+    if not (REPO_ROOT / ".env.docker").exists():
+        pytest.skip(".env.docker 不存在（CI 环境），跳过密钥泄漏比对")
 
     env_values = {
         line.split("=", 1)[0]: line.split("=", 1)[1]
