@@ -15,10 +15,17 @@ describe("assistant role config", () => {
     expect(isAssistantRole(role)).toBe(true);
   });
 
-  it("only grants the approval view to superadmin", () => {
-    expect(getAssistantRoleConfig("teacher")?.canApprove).toBe(false);
-    expect(getAssistantRoleConfig("student")?.canApprove).toBe(false);
+  it("grants the approval view to teacher and superadmin only", () => {
+    expect(getAssistantRoleConfig("teacher")?.canApprove).toBe(true);
     expect(getAssistantRoleConfig("superadmin")?.canApprove).toBe(true);
+    expect(getAssistantRoleConfig("student")?.canApprove).toBe(false);
+  });
+
+  it("tells teachers that write operations need their own approval", () => {
+    const teacher = getAssistantRoleConfig("teacher");
+
+    expect(teacher?.safetyNotice).toContain("审批");
+    expect(teacher?.capabilities.join("")).toContain("审批");
   });
 
   it("does not fall back to teacher for an unknown role", () => {

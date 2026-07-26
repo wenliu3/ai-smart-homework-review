@@ -15,10 +15,15 @@ const ROLE_CONFIGS: Record<AssistantRole, AssistantRoleConfig> = {
     role: "teacher",
     title: "AI教学助手",
     welcome: "你好！我是你的 AI 教学助手",
-    capabilities: ["教学数据查询", "教学策略建议", "批改与查重解释"],
+    capabilities: [
+      "教学数据查询",
+      "教学策略建议",
+      "批改与查重解释",
+      "写操作草案与审批",
+    ],
     inputPlaceholder: "请输入教学问题，回车发送，Shift+回车换行",
-    safetyNotice: "关键教学决策和写操作仍需由教师确认。",
-    canApprove: false,
+    safetyNotice: "发布、修改、删除和改分只会生成草案，需你本人在审批面板确认后才执行。",
+    canApprove: true,
   },
   student: {
     role: "student",

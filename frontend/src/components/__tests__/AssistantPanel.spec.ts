@@ -264,3 +264,228 @@ describe("AssistantPanel lifecycle", () => {
     );
   });
 });
+
+describe("AssistantPanel 审批卡片", () => {
+  // 教师角色 + 能读到 kind 的聊天视图桩
+  const ApprovalAwareChatStub = {
+    name: "AssistantChatView",
+    props: [
+      "config",
+      "messages",
+      "streamingContent",
+      "isGenerating",
+      "currentPhase",
+    ],
+    template: `
+      <div>
+        <div data-testid="messages">{{ messages.map((m) => m.content).join("|") }}</div>
+        <div data-testid="kinds">{{ messages.map((m) => m.kind || "text").join("|") }}</div>
+        <div data-testid="approval-ids">{{ messages.filter((m) => m.approval).map((m) => m.approval.approvalId).join("|") }}</div>
+        <button data-testid="send" @click="$emit('send', 'hello')" />
+        <button data-testid="open-approvals" @click="$emit('open-approvals')" />
+      </div>
+    `,
+    methods: {
+      focus() {},
+      scrollToBottom() {},
+    },
+  };
+
+  function mountTeacherPanel() {
+    return mount(AssistantPanel, {
+      props: { visible: true, role: "teacher" as const },
+      global: {
+        stubs: {
+          transition: false,
+          "el-icon": { template: "<i><slot /></i>" },
+          "el-button": { template: "<button><slot /></button>" },
+          "el-tooltip": { template: "<span><slot /></span>" },
+          AssistantChatView: ApprovalAwareChatStub,
+          AssistantHistoryView: true,
+          AssistantApprovalView: {
+            template: '<div data-testid="approval-view" />',
+          },
+        },
+      },
+    });
+  }
+
+  const approvalEvent = {
+    type: "approval.required",
+    data: {
+      approval_id: "approval-1",
+      action_type: "publish_assignment",
+      target_type: "assignment",
+      target_id: "7",
+      risk_level: "high",
+      summary: "发布《第三章作业》",
+      expires_at: "2026-07-26T20:00:00",
+    },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    apiMocks.createSession.mockResolvedValue({ sessionId: "session-1" });
+    apiMocks.listSessions.mockResolvedValue({ sessions: [] });
+    apiMocks.cancelRun.mockResolvedValue({
+      runId: "run-1",
+      status: "cancelled",
+    });
+    apiMocks.getSessionMessages.mockResolvedValue({
+      sessionId: "session-1",
+      messages: [
+        { role: "user", content: "hello" },
+        { role: "assistant", content: "已生成待审批草案" },
+      ],
+    });
+  });
+
+  it("approval.required 事件在对话里插入审批卡片", async () => {
+    apiMocks.streamAssistantRun.mockImplementation(
+      (_message: string, _sessionId: string, callbacks: any) => {
+        callbacks.onEvent({ type: "run.started", data: { run_id: "run-1" } });
+        callbacks.onEvent(approvalEvent);
+        return new AbortController();
+      },
+    );
+
+    const wrapper = mountTeacherPanel();
+    await wrapper.get('[data-testid="send"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="kinds"]').text()).toContain("approval");
+    expect(wrapper.get('[data-testid="approval-ids"]').text()).toBe(
+      "approval-1",
+    );
+  });
+
+  it("onDone 用服务端消息覆盖后审批卡片仍在", async () => {
+    let capturedCallbacks: any = null;
+    apiMocks.streamAssistantRun.mockImplementation(
+      (_message: string, _sessionId: string, callbacks: any) => {
+        capturedCallbacks = callbacks;
+        callbacks.onEvent({ type: "run.started", data: { run_id: "run-1" } });
+        callbacks.onEvent(approvalEvent);
+        return new AbortController();
+      },
+    );
+
+    const wrapper = mountTeacherPanel();
+    await wrapper.get('[data-testid="send"]').trigger("click");
+    await flushPromises();
+
+    capturedCallbacks.onDone("已生成待审批草案");
+    await flushPromises();
+
+    const messagesText = wrapper.get('[data-testid="messages"]').text();
+    expect(messagesText).toContain("已生成待审批草案");
+    expect(wrapper.get('[data-testid="approval-ids"]').text()).toBe(
+      "approval-1",
+    );
+  });
+
+  it("缺少 approval_id 的事件不插入卡片", async () => {
+    apiMocks.streamAssistantRun.mockImplementation(
+      (_message: string, _sessionId: string, callbacks: any) => {
+        callbacks.onEvent({ type: "run.started", data: { run_id: "run-1" } });
+        callbacks.onEvent({ type: "approval.required", data: { summary: "x" } });
+        return new AbortController();
+      },
+    );
+
+    const wrapper = mountTeacherPanel();
+    await wrapper.get('[data-testid="send"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="kinds"]').text()).not.toContain(
+      "approval",
+    );
+  });
+
+  it("第二轮完成刷新消息后，第一轮的审批卡片不被冲掉", async () => {
+    let round = 0;
+    let capturedCallbacks: any = null;
+    apiMocks.streamAssistantRun.mockImplementation(
+      (_message: string, _sessionId: string, callbacks: any) => {
+        capturedCallbacks = callbacks;
+        callbacks.onEvent({ type: "run.started", data: { run_id: "run-1" } });
+        callbacks.onEvent(
+          round === 0
+            ? approvalEvent
+            : {
+                ...approvalEvent,
+                data: { ...approvalEvent.data, approval_id: "approval-2" },
+              },
+        );
+        round += 1;
+        return new AbortController();
+      },
+    );
+
+    const wrapper = mountTeacherPanel();
+    await wrapper.get('[data-testid="send"]').trigger("click");
+    await flushPromises();
+    capturedCallbacks.onDone("第一轮回答");
+    await flushPromises();
+
+    await wrapper.get('[data-testid="send"]').trigger("click");
+    await flushPromises();
+    capturedCallbacks.onDone("第二轮回答");
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="approval-ids"]').text()).toBe(
+      "approval-1|approval-2",
+    );
+  });
+
+  it("新建对话清空本会话累积的审批卡片", async () => {
+    let capturedCallbacks: any = null;
+    apiMocks.streamAssistantRun.mockImplementation(
+      (_message: string, _sessionId: string, callbacks: any) => {
+        capturedCallbacks = callbacks;
+        callbacks.onEvent({ type: "run.started", data: { run_id: "run-1" } });
+        callbacks.onEvent(approvalEvent);
+        return new AbortController();
+      },
+    );
+
+    const wrapper = mountTeacherPanel();
+    await wrapper.get('[data-testid="send"]').trigger("click");
+    await flushPromises();
+    // 生成结束后「新建对话」才可点（生成中该按钮 disabled）
+    capturedCallbacks.onDone("已生成待审批草案");
+    await flushPromises();
+    expect(wrapper.get('[data-testid="approval-ids"]').text()).toBe(
+      "approval-1",
+    );
+
+    // 头部「新建对话」是 header-actions 里的第一个按钮
+    await wrapper.findAll(".header-actions button")[0].trigger("click");
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="approval-ids"]').text()).toBe("");
+    expect(wrapper.get('[data-testid="messages"]').text()).toBe("");
+  });
+
+  it("聊天卡片的「去审批」切到审批视图", async () => {
+    apiMocks.streamAssistantRun.mockImplementation(() => new AbortController());
+    const wrapper = mountTeacherPanel();
+
+    await wrapper.get('[data-testid="open-approvals"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="approval-view"]').exists()).toBe(true);
+  });
+
+  it("教师看得到审批入口，学生看不到", () => {
+    const teacher = mountTeacherPanel();
+    expect(
+      teacher.find('[data-testid="assistant-approvals"]').exists(),
+    ).toBe(true);
+
+    const student = mountPanel();
+    expect(
+      student.find('[data-testid="assistant-approvals"]').exists(),
+    ).toBe(false);
+  });
+});

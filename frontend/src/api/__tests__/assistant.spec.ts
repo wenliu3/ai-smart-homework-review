@@ -114,6 +114,19 @@ describe("parseSSEEvents", () => {
 // ========== mapEventToPhase：事件 → 安全阶段名称 ==========
 
 describe("mapEventToPhase", () => {
+  it("approval.required 映射为等待人工审批，且不回显 approvalId", () => {
+    const phase = mapEventToPhase({
+      type: "approval.required",
+      data: { approval_id: "approval-secret-1", summary: "发布作业" },
+    });
+
+    expect(phase).toEqual({
+      key: "approval.required",
+      label: "等待人工审批",
+    });
+    expect(phase?.label).not.toContain("approval-secret-1");
+  });
+
   it("run.started 映射到启动阶段", () => {
     const phase = mapEventToPhase({ type: "run.started", data: {} });
     expect(phase).not.toBeNull();

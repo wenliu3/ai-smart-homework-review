@@ -150,3 +150,115 @@ describe("AssistantApprovalView", () => {
     expect(wrapper.text()).toContain("请输入拒绝原因");
   });
 });
+
+describe("AssistantApprovalView 已处理标签", () => {
+  const executed = {
+    ...approval,
+    approvalId: "approval-done",
+    summary: "发布《第三章作业》",
+    actionType: "publish_assignment",
+    targetType: "assignment",
+    parameters: {
+      assignmentId: 7,
+      beforeSnapshot: { title: "第三章作业", status: "draft" },
+    },
+    status: "executed",
+    result: { success: true },
+  };
+
+  function mountView() {
+    return mount(AssistantApprovalView, {
+      global: {
+        stubs: {
+          "el-button": {
+            template: '<button :disabled="disabled"><slot /></button>',
+            props: ["disabled"],
+          },
+          "el-empty": { template: "<div />" },
+          "el-alert": { template: "<div><slot /></div>" },
+        },
+      },
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    listApprovals.mockResolvedValue({ items: [approval, executed] });
+    approveAction.mockResolvedValue({ status: "executed" });
+    rejectAction.mockResolvedValue({ ...approval, status: "rejected" });
+  });
+
+  it("默认只拉待审批，切到已处理后拉全量并剔除 pending", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    expect(listApprovals).toHaveBeenCalledWith("pending");
+
+    await wrapper.get('[data-testid="approval-tab-history"]').trigger("click");
+    await flushPromises();
+
+    expect(listApprovals).toHaveBeenLastCalledWith(undefined);
+    expect(wrapper.text()).toContain("发布《第三章作业》");
+    expect(wrapper.text()).not.toContain("更新模型配置");
+  });
+
+  it("已处理项不渲染批准/拒绝按钮，改为展示执行结果", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.get('[data-testid="approval-tab-history"]').trigger("click");
+    await flushPromises();
+
+    expect(
+      wrapper.find('[data-testid="approve-approval-done"]').exists(),
+    ).toBe(false);
+    expect(
+      wrapper.find('[data-testid="reject-approval-done"]').exists(),
+    ).toBe(false);
+    expect(wrapper.text()).toContain("执行成功");
+  });
+
+  it("切换标签会清掉未完成的二次确认状态", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    await wrapper.get('[data-testid="approve-approval-1"]').trigger("click");
+    expect(wrapper.text()).toContain("再次点击确认");
+
+    await wrapper.get('[data-testid="approval-tab-history"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('[data-testid="approval-tab-pending"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.text()).not.toContain("再次点击确认");
+    expect(wrapper.text()).toContain("批准并执行");
+  });
+
+  it("参数区用字段级 diff 渲染，不再输出原始 JSON", async () => {
+    listApprovals.mockResolvedValue({
+      items: [{
+        ...approval,
+        actionType: "update_assignment",
+        parameters: {
+          assignmentId: 7,
+          changes: { title: "新标题" },
+          beforeSnapshot: { title: "旧标题" },
+        },
+      }],
+    });
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("旧标题");
+    expect(wrapper.text()).toContain("新标题");
+    expect(wrapper.text()).not.toContain("beforeSnapshot");
+  });
+
+  it("操作类型显示中文而不是内部标识符", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+    await wrapper.get('[data-testid="approval-tab-history"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("发布作业");
+    expect(wrapper.text()).not.toContain("publish_assignment");
+  });
+});

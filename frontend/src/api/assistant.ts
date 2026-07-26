@@ -145,6 +145,10 @@ export function mapEventToPhase(event: AssistantEvent): RunPhase | null {
     case "content.delta":
       return { key: "content.delta", label: "正在生成回答" };
 
+    case "approval.required":
+      // 只给出阶段名，不回显 approvalId 等标识符
+      return { key: "approval.required", label: "等待人工审批" };
+
     case "run.completed":
       return { key: "run.completed", label: "已完成" };
 
@@ -532,7 +536,13 @@ export type ApprovalActionType =
   | "create_assignment_draft"
   | "create_ai_rule"
   | "submit_teacher_score"
-  | "update_model_config";
+  | "update_model_config"
+  | "publish_assignment"
+  | "update_assignment"
+  | "delete_assignment";
+
+// approval.required 的负载解析与动作中文名是纯展示逻辑，放在
+// components/assistant/approval.ts，避免组件单测 mock 本模块时被一并替换。
 
 export interface AssistantApproval {
   approvalId: string;

@@ -91,3 +91,60 @@ describe("AssistantChatView", () => {
     expect(wrapper.emitted("stop")).toHaveLength(1);
   });
 });
+
+describe("AssistantChatView 审批卡片", () => {
+  const approvalMessage = {
+    role: "assistant" as const,
+    content: "发布《第三章作业》",
+    html: "",
+    kind: "approval" as const,
+    approval: {
+      approvalId: "approval-1",
+      actionType: "publish_assignment",
+      targetType: "assignment",
+      targetId: "7",
+      riskLevel: "high",
+      summary: "发布《第三章作业》",
+      expiresAt: "2026-07-26T20:00:00",
+    },
+  };
+
+  function mountWithApproval() {
+    return mount(AssistantChatView, {
+      props: {
+        config: getAssistantRoleConfig("teacher")!,
+        messages: [approvalMessage],
+        streamingContent: "",
+        isGenerating: false,
+        currentPhase: "",
+      },
+      global: {
+        stubs: {
+          "el-icon": { template: "<i><slot /></i>" },
+          "el-button": { template: "<button><slot /></button>" },
+        },
+      },
+    });
+  }
+
+  it("把审批消息渲染成卡片而不是 Markdown 气泡", () => {
+    const wrapper = mountWithApproval();
+
+    const card = wrapper.get('[data-testid="chat-approval-card"]');
+    expect(card.text()).toContain("发布作业");
+    expect(card.text()).toContain("发布《第三章作业》");
+    expect(card.text()).toContain("需要你确认后才会执行");
+  });
+
+  it("点击「去审批」向上抛出 open-approvals", async () => {
+    const wrapper = mountWithApproval();
+
+    await wrapper.get('[data-testid="chat-open-approvals"]').trigger("click");
+
+    expect(wrapper.emitted("open-approvals")).toHaveLength(1);
+  });
+
+  it("卡片不暴露内部动作标识符", () => {
+    expect(mountWithApproval().text()).not.toContain("publish_assignment");
+  });
+});

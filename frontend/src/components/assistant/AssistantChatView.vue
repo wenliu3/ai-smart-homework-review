@@ -18,7 +18,29 @@
           <el-icon v-if="message.role === 'user'"><User /></el-icon>
           <el-icon v-else><Promotion /></el-icon>
         </div>
-        <div class="message-bubble" v-html="message.html"></div>
+        <div
+          v-if="message.kind === 'approval' && message.approval"
+          class="message-bubble approval-card"
+          data-testid="chat-approval-card"
+        >
+          <div class="approval-card-title">
+            <el-icon><DocumentChecked /></el-icon>
+            <span>待审批：{{ approvalActionLabel(message.approval.actionType) }}</span>
+          </div>
+          <p class="approval-card-summary">{{ message.approval.summary }}</p>
+          <p class="approval-card-hint">
+            该操作需要你确认后才会执行。
+          </p>
+          <el-button
+            size="small"
+            type="primary"
+            data-testid="chat-open-approvals"
+            @click="$emit('open-approvals')"
+          >
+            去审批
+          </el-button>
+        </div>
+        <div v-else class="message-bubble" v-html="message.html"></div>
       </div>
 
       <div v-if="streamingContent" class="message-row is-ai">
@@ -87,12 +109,14 @@
 import { nextTick, ref, watch } from "vue";
 import {
   ChatLineSquare,
+  DocumentChecked,
   Loading,
   Promotion,
   User,
   VideoPause,
 } from "@element-plus/icons-vue";
 
+import { approvalActionLabel } from "./approval";
 import { renderSafeMarkdown } from "./markdown";
 import type { AssistantRoleConfig } from "./role-config";
 import type { RenderedAssistantMessage } from "./types";
@@ -108,6 +132,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (event: "send", message: string): void;
   (event: "stop"): void;
+  (event: "open-approvals"): void;
 }>();
 
 const draft = ref("");
@@ -163,6 +188,10 @@ defineExpose({ focus, scrollToBottom });
 .is-user .message-avatar { background: #607be8; }
 .message-bubble { max-width: 78%; padding: 10px 13px; border-radius: 12px; background: white; color: #303133; line-height: 1.6; overflow-wrap: anywhere; box-shadow: 0 2px 8px rgba(0, 0, 0, .06); }
 .is-user .message-bubble { background: #607be8; color: white; }
+.approval-card { border-left: 3px solid #745fc1; }
+.approval-card-title { display: flex; align-items: center; gap: 6px; font-weight: 600; color: #745fc1; }
+.approval-card-summary { margin: 8px 0 0; }
+.approval-card-hint { margin: 4px 0 10px; font-size: 12px; color: #b88230; }
 .phase-indicator { display: flex; align-items: center; gap: 8px; color: #745fc1; font-size: 13px; padding-left: 42px; }
 .phase-icon { animation: spin 1.2s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

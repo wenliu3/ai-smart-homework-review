@@ -62,6 +62,7 @@
         :current-phase="currentPhase"
         @send="sendMessage"
         @stop="stopGenerating"
+        @open-approvals="currentView = 'approval'"
       />
 
       <AssistantHistoryView
@@ -101,6 +102,7 @@ import {
   streamAssistantRun,
   type AssistantSession,
 } from "@/api/assistant";
+import { parseApprovalRequired } from "./assistant/approval";
 import AssistantApprovalView from "./assistant/AssistantApprovalView.vue";
 import AssistantChatView from "./assistant/AssistantChatView.vue";
 import AssistantHistoryView from "./assistant/AssistantHistoryView.vue";
@@ -109,7 +111,10 @@ import {
   getAssistantRoleConfig,
   type AssistantRole,
 } from "./assistant/role-config";
-import type { RenderedAssistantMessage } from "./assistant/types";
+import type {
+  ApprovalCardData,
+  RenderedAssistantMessage,
+} from "./assistant/types";
 
 type AssistantView = "chat" | "history" | "approval";
 type ChatViewExposed = {
@@ -136,6 +141,10 @@ const historyError = ref("");
 const currentPhase = ref("");
 const currentRunId = ref<string | null>(null);
 const chatView = ref<ChatViewExposed>();
+// 本会话产生的审批卡片：服务端消息列表里没有它们，
+// onDone 用服务端快照覆盖消息后需要按顺序重新挂回去。
+// 按会话累积而非按轮次清空，否则第二轮完成时会把第一轮的卡片冲掉。
+const sessionApprovalCards = ref<RenderedAssistantMessage[]>([]);
 
 let abortController: AbortController | null = null;
 let sendGeneration = 0;
@@ -148,6 +157,18 @@ function makeMessage(
     role,
     content,
     html: renderSafeMarkdown(content),
+  };
+}
+
+function makeApprovalMessage(
+  approval: ApprovalCardData,
+): RenderedAssistantMessage {
+  return {
+    role: "assistant",
+    content: approval.summary,
+    html: "",
+    kind: "approval",
+    approval,
   };
 }
 
@@ -196,6 +217,14 @@ async function sendMessage(text: string) {
       if (event.type === "run.started" && event.data?.run_id) {
         currentRunId.value = String(event.data.run_id);
       }
+      if (event.type === "approval.required") {
+        const approval = parseApprovalRequired(event.data);
+        if (!approval) return;
+        const card = makeApprovalMessage(approval);
+        sessionApprovalCards.value.push(card);
+        messages.value.push(card);
+        scrollToBottom();
+      }
     },
     onPhase: (phase) => {
       if (generation !== sendGeneration) return;
@@ -215,9 +244,13 @@ async function sendMessage(text: string) {
         // finishRun 已解锁输入：await 期间用户可能已发新消息 / 新建对话 / 切换会话，
         // 旧会话快照不能覆盖当前消息列表。
         if (generation !== sendGeneration || sessionId.value !== sid) return;
-        messages.value = (result.messages || []).map((message) =>
-          makeMessage(message.role, message.content),
-        );
+        // 服务端消息列表不含审批卡片，覆盖后把本轮卡片挂回末尾
+        messages.value = [
+          ...(result.messages || []).map((message) =>
+            makeMessage(message.role, message.content),
+          ),
+          ...sessionApprovalCards.value,
+        ];
       } catch {
         if (generation !== sendGeneration || sessionId.value !== sid) return;
         if (streamedAnswer) {
@@ -273,6 +306,7 @@ async function newChat() {
   finishRun();
   streamingContent.value = "";
   messages.value = [];
+  sessionApprovalCards.value = [];
   sessionId.value = null;
   currentView.value = "chat";
   nextTick(() => chatView.value?.focus());
@@ -299,6 +333,8 @@ async function loadSession(selectedSessionId: string) {
   await cancelActiveRun();
   finishRun();
   streamingContent.value = "";
+  // 切换会话：审批卡片属于旧会话，不能带进新会话
+  sessionApprovalCards.value = [];
   try {
     const result = await getSessionMessages(selectedSessionId);
     sessionId.value = selectedSessionId;
@@ -317,6 +353,7 @@ async function resetForRoleChange() {
   finishRun();
   currentView.value = "chat";
   messages.value = [];
+  sessionApprovalCards.value = [];
   streamingContent.value = "";
   sessionId.value = null;
   sessions.value = [];
