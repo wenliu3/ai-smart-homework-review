@@ -1,6 +1,6 @@
 # AI智能作业批改系统
 
-> 基于 **FastAPI + Vue 3 + LangChain** 的全栈 AI 作业批改与教学辅助平台，支持多模态大模型接入、AI 自动批改、智能教学助手、文档查重、操作审计等核心能力。
+> 基于 **FastAPI + Vue 3 + LangGraph 多智能体** 的全栈 AI 作业批改与教学辅助平台。三种角色（管理员/教师/学生）各自拥有专属 AI 助手，支持多模态大模型接入、双 Agent 交叉批改、写操作人工审批、文档查重、操作审计等核心能力。
 
 ---
 
@@ -11,28 +11,31 @@
 | 技术 | 说明 |
 |------|------|
 | Vue 3 + TypeScript | 渐进式前端框架，组合式 API |
-| Vite 3 | 极速构建与热更新 |
+| Vite 3 | 极速构建与热更新（dev 端口 8080） |
 | Element Plus | 企业级 UI 组件库 |
-| Tailwind CSS 4 | 原子化 CSS 框架 |
 | Vuex 4 | 状态管理 |
-| Vue Router 4 | 前端路由与权限守卫 |
+| Vue Router 4 | 静态路由 + 按用户菜单动态注册（权限守卫） |
 | ECharts 5 | 数据可视化图表 |
 | WangEditor 5 | 富文本编辑器 |
-| Axios | HTTP 请求库 |
-| marked | Markdown 流式渲染 |
+| marked + DOMPurify | AI 回答 Markdown 安全渲染（防 XSS/外链数据外带） |
+| Axios | HTTP 请求库（401 自动刷新重试） |
+| Vitest | 前端单元测试 |
 
 ### 后端
 
 | 技术 | 说明 |
 |------|------|
 | FastAPI 0.139 | 高性能异步 Web 框架 |
-| Python 3.10+ | 运行环境 |
+| Python 3.12 | 运行环境 |
 | SQLAlchemy 2.0 | ORM 框架 |
-| MySQL 8.0 + PyMySQL | 关系型数据库 |
+| MySQL 8.0 | 业务数据库（用户/班级/作业/提交） |
+| PostgreSQL 16 | AI 助手会话库（运行/步骤/审批/反馈） |
+| Alembic ×2 | 双数据库独立迁移链 |
+| LangChain 1.x + LangGraph | 多智能体编排（StateGraph + 结构化输出契约） |
+| Celery + Redis | AI 批改异步任务队列（幂等投递 + 软超时） |
 | PyJWT + bcrypt | JWT 认证与密码加密 |
-| LangChain 1.0 + LangGraph | AI Agent 框架 |
-| httpx | 大模型 API 调用 |
 | python-docx / pdfplumber / Pillow | 文件解析（Word/PDF/图片） |
+| pytest | 后端测试（sqlite 替换双库，无需真实数据库） |
 
 ---
 
@@ -40,9 +43,9 @@
 
 | 角色 | 核心功能 |
 |------|----------|
-| 管理员 | 数据看板、用户管理、角色权限、菜单配置、大模型配置、**班级管理**、**操作日志** |
-| 教师 | 教学中心、班级管理、作业管理、AI批改规则、批改管理、**AI教学助手**、文档查重 |
-| 学生 | 学习中心、班级与作业、提交作业、查看批改结果 |
+| 管理员 | 数据看板、用户管理、角色权限、菜单配置、大模型配置、班级管理、操作日志、**AI 管理助手**（运营分析/脱敏审计/模型治理） |
+| 教师 | 教学中心、班级管理、作业管理、AI批改规则、批改管理、文档查重、**AI 教学助手**（数据查询/教学策略/**写操作审批闭环**） |
+| 学生 | 学习中心、班级与作业、提交作业、查看批改结果、**AI 学习助手**（启发辅导/反馈解释/学习规划，**内置防代写**） |
 
 ---
 
@@ -52,35 +55,10 @@
 
 ![登录页面](./docs/统一登录页.png)
 
-- 统一登录入口，支持管理员/教师/学生多角色
+- 统一登录入口，支持用户名/学号/邮箱三种登录方式
 - JWT 令牌认证 + Refresh Token 机制
 - 首次登录强制修改密码
 - bcrypt 密码加密存储
-
-![学生激活账户](./docs/学生激活账户.png)
-
----
-
-### 👨‍💼 管理员功能
-
-#### 数据看板
-
-![管理员看板](./docs/管理员看板.png)
-
-- 实时统计用户数量、作业数量、提交情况
-- 多维度数据图表展示
-- 系统运行状态监控
-
-#### 系统管理
-
-![管理员配置](./docs/管理员配置大模型和用户管理.png)
-
-- **用户管理**: 批量导入、编辑、删除用户（含关联数据自动清理）
-- **角色管理**: 基于 RBAC 的权限分配
-- **菜单管理**: 动态菜单配置
-- **班级管理**: 管理员可代任意教师创建/编辑/解散班级，更换授课教师
-- **AI模型配置**: 支持多模型接入（DeepSeek、Mimo等），实时测试连接、查询余额、编辑基本信息、模型默认互斥
-- **操作日志**: 中间件自动记录所有管理操作（创建/更新/删除/登录），支持按操作类型、模块、关键词筛选
 
 ---
 
@@ -92,69 +70,52 @@
 
 教师端主控台，一屏掌握班级状态、作业发布、AI 批改进度与学生成绩分析。
 
-#### 1. 班级管理
+#### 1. 班级与作业管理
 
 **创建班级**
 ![创建班级](./docs/教师端创建班级.png)
 
-- 自定义班级名称、描述和邀请码
-- 卡片式展示，支持搜索与筛选
-- 班级详情与实时数据统计
-
-**学生管理**
-![批量添加学生](./docs/教师端为班级批量添加学生.png)
-
-- 批量导入学生（Excel/CSV）
-- 学生通过邀请码自主加入
-- 学生状态管理（激活/暂停/移除）
-
-#### 2. 作业管理
-
 **发布作业**
 ![发布作业](./docs/教师发布作业.png)
-
-- 富文本编辑器支持多种格式
-- 设置作业截止时间与关联班级
-- 关联 AI 批改规则
 
 **配置AI批改规则**
 ![AI批改规则](./docs/教师配置ai批改规则.png)
 
-- 自定义评分标准与评价维度
-- AI 提示词模板管理
-- 规则复用与版本管理
+- 批量导入学生（Excel/CSV），学生通过邀请码自主加入
+- 富文本作业描述 + 参考附件，关联 AI 批改规则
+- 自定义评分标准、评价维度与提示词模板
 
-#### 3. 作业批改
+#### 2. 作业批改
 
 **查看作业详情**
 ![查看作业详情](./docs/教师端查看作业详情.png)
 
-- 学生提交列表与提交状态
-- AI 批改进度实时更新
-- 批改状态筛选
-
 **人工审核打分**
 ![人工打分](./docs/教师端批改作业人工打分.png)
 
-- 查看 AI 批改结果与评分依据
-- 人工复核与调整分数
-- 详细评语反馈与批改记录追溯
+- 双 Agent 交叉批改（主批改 + 独立复核），分维度结构化评分
+- 两次评分差异超满分 10%、证据不足或模型低置信时自动转人工
+- 教师可查看逐维度草案、复核调整分数并留痕
 
-#### 4. AI 教学助手
+#### 3. AI 教学助手（多智能体）
+
+**实时运行时间线** —— 提问后每个 Agent 的执行进度实时可见：
+
+![助手运行时间线](./docs/教师助手运行时间线.png)
+
+**数据查询与回答溯源** —— 回答标注数据引用条数与安全审核结果，支持 👍/👎 反馈：
 
 ![AI教学助手](./docs/教师端ai助手.png)
 
-基于 **LangChain 1.0 + LangGraph** 构建的智能教学助手，以悬浮面板形式嵌入教师工作台，支持 SSE 流式对话，可实时查询教学数据：
+**写操作审批闭环** —— 对助手说「发布/修改/删除作业」只会生成待审批草案，教师在审批面板看到**字段级差异对比**后确认才会执行：
 
-- **班级和学生信息** — "我的班级有哪些学生？"
-- **作业发布及提交情况** — "python程序语言作业提交了几份？"
-- **学生成绩查询** — "张三的AI批改分数是多少？"
-- **教学看板统计** — "今天AI批改了多少份作业？"
-- **待批改列表** — "还有哪些作业等着我批改？"
+![写操作审批](./docs/教师写操作审批.png)
 
-> 助手通过 `ToolRuntime` 上下文注入 `teacher_id`，工具参数中不暴露教师身份，从根源避免 LLM 越权查询。每个工具内部使用独立数据库连接，保证线程安全。
+- 意图路由：教学数据查询 / 教学策略建议 / 写操作起草 / 白名单外写请求明确拒绝
+- 每个回答经独立安全审核 Agent 复核后才逐段放行，绝不"先流出再撤回"
+- 审批草案服务端哈希签名 + 幂等键，执行前逐字节复验载荷与对象归属
 
-#### 5. 文档查重
+#### 4. 文档查重
 
 ![文档查重](./docs/教师端文档查重.png)
 
@@ -164,11 +125,9 @@
 
 - **文本维度**：字符 N-gram 重叠系数（抓整句照抄）+ jieba 分词 TF-IDF 余弦相似度（抓同义替换/语序打乱）
 - **图片维度**：感知哈希（aHash + dHash）+ 汉明距离，检测截图复制粘贴
-- **综合重复率** = 片段重合度 × 片段权重 + 主题相似度 × 主题权重
-- **参数可调**：教师可在查重界面自定义合格阈值、片段权重、主题权重，支持一键重置默认
-- 模板剔除：上传任务书/模板，比对前自动剔除模板内容
-- 自动公共片段识别：提交 ≥ 5 份时自动剔除全班共有的公共片段
-- 提交上限保护（单次最多 200 份），LRU 缓存避免重复计算
+- **综合重复率** = 片段重合度 × 片段权重 + 主题相似度 × 主题权重，阈值权重前端可调
+- 模板剔除 + 自动公共片段识别，避免同题作业误判；单次上限 200 份，LRU 缓存
+- 查重结果可由 AI 生成人话解释（解释 Agent 只能解读、禁止改数值或下抄袭定性，经审核后输出）
 
 ---
 
@@ -178,30 +137,80 @@
 
 ![学生学习中心](./docs/学生端-学习中心.png)
 
-学生端主界面，展示所有班级和待完成作业。
-
-#### 班级与作业
-
-![班级和作业](./docs/学生端班级和作业.png)
-
-- 查看加入的班级列表
-- 作业状态标识（待提交/已提交/已批改）
-
-#### 提交作业
+#### 提交作业与查看结果
 
 ![提交作业](./docs/学生提交作业.png)
 
-- 富文本编辑器答题
-- 支持图片、附件上传（Word/PDF）
-- 提交后自动触发 AI 多模态批改
-
-#### 查看结果
-
 ![查看结果](./docs/学生查看结果.png)
 
-- AI 批改结果实时查看
-- 详细评分维度展示
-- 教师评语查看与历史记录
+- 富文本答题 + 图片/附件上传（Word/PDF），提交后自动触发 AI 多模态批改
+- 批改进度实时轮询，分维度评分与教师评语可追溯
+
+#### AI 学习助手（防代写设计）
+
+![学生学习助手](./docs/学生端ai学习助手.png)
+
+- **启发式辅导**：苏格拉底式提问引导思路，不直接给可提交的完整答案
+- **三层防代写**：关键词识别 + LLM 意图兜底 + 服务端题面相似度比对（学生请求与进行中作业题面 4-gram 重合率超阈值即拒绝）
+- 反馈解释、学习规划仅基于本人数据，回答须携带服务端验证的证据引用
+
+---
+
+### 👨‍💼 管理员功能
+
+#### 数据看板与系统管理
+
+![管理员看板](./docs/管理员看板.png)
+
+![管理员配置](./docs/管理员配置大模型和用户管理.png)
+
+- **用户管理**: 批量导入、编辑、删除用户（含关联数据自动清理）
+- **角色管理**: 基于 RBAC 的权限分配；**菜单管理**: 动态菜单配置
+- **班级管理**: 管理员可代任意教师创建/编辑/解散班级，更换授课教师
+- **AI模型配置**: 多模型接入、真实测试连接、查询余额、能力标签（多模态/文本）与档位绑定、模型默认互斥
+- **操作日志**: 中间件自动记录所有管理操作，支持筛选，不可篡改
+
+#### AI 管理助手
+
+![管理员AI助手](./docs/管理员ai助手.png)
+
+- **运营分析**：用户规模、班级活跃度、作业提交量聚合统计
+- **脱敏审计**：登录失败/权限拒绝/高频端点聚合、Agent 运行成功率——只碰聚合数字，绝不透出用户明文数据
+- **模型治理**：Token 用量与成本分析、连通性探测（密钥自动脱敏）；配置变更只生成提案，须人工审批
+
+---
+
+## 🤖 多智能体架构
+
+每个角色一张 LangGraph 状态图，统一拓扑：**意图路由 → 专家 Agent → 独立安全审核 → 输出**。
+
+```
+用户消息 ──▶ 角色主管（关键词路由，未命中时单次 LLM 兜底分类）
+              │
+              ├─ 教师图：数据查询 / 教学策略 / 写操作起草（→ 审批草案）
+              ├─ 学生图：启发辅导 / 反馈解释 / 学习规划 / 代写拒绝
+              └─ 管理员图：运营分析 / 脱敏审计 / 模型治理
+                            │
+                    独立最终审核 Agent（不持有工具）
+                            │ 驳回→回退修订一次，再驳回→安全降级
+                            ▼
+              审核通过后按段落逐段流式放行（SSE）
+```
+
+**关键安全设计**：
+
+- **证据验证**：专家 Agent 声明的每条数据引用都与真实工具返回比对，编造的引用被服务端剔除并标注
+- **身份隔离**：`teacher_id`/`student_id` 由服务端上下文注入，绝不出现在 LLM 工具参数中，越权查询无从谈起
+- **写操作零直写**：Agent 图内绝不写业务库；草案经 SHA-256 载荷哈希 + 幂等账本 + 角色/归属/状态机/字段白名单五重复验后，由审批执行器落库
+- **稳定错误码**：内部异常绝不透传客户端，统一映射为 `AGENT_MODEL_TIMEOUT` 等稳定码 + 安全文案
+- **运行预算**：每轮对话限节点/工具/模型调用次数与时长；批改任务 ≤6 次模型调用 / 120 秒，超限走结构化降级而不是丢结果
+- **平台开关**：`MULTI_AGENT_ENABLED` 总开关 + 教师白名单灰度发布
+
+**AI 批改流水线**（Celery 异步）：
+
+内容规范化（富文本/docx/pdf/图片 → 不可信内容块）→ 主批改 Agent（多模态逐维度评分）→ 独立复核 Agent（不看首评盲评）→ 确定性比较：分差超 10% 满分 / 证据缺失 / 低置信 → 转教师人工，附机器可读原因。结构化校验失败先回喂重试一次，仍失败则降级转人工并保留原始输出留证——**绝不编造分数，绝不丢失结果**。
+
+**离线评测**：110 条脱敏用例——40 条路由用例（含 9 条关键词全 miss 的对抗样本）+ 70 条录制回放用例，回放录制的模型输出驱动真实解析/校验/修复重试/降级/查重管线，含多模态批改用例与人工评分校准（AI 与人工总分偏差 ≤ 满分 10%）。
 
 ---
 
@@ -209,52 +218,59 @@
 
 ### 环境要求
 
-- Node.js >= 16.0
-- Python >= 3.10
-- MySQL >= 8.0
+- Node.js >= 16、Python 3.12
+- MySQL >= 8.0（业务库，必需）
+- PostgreSQL >= 14（AI 助手会话库，必需）
+- Redis（仅 AI 批改异步队列需要；缺失时批改任务受控失败，其余功能不受影响）
 
-### 克隆项目
+### 本地开发
 
 ```bash
-git clone https://github.com/wenliu3/ai-smart-homework-review.git
+git clone git@github.com:wenliu3/ai-smart-homework-review.git
 cd ai-smart-homework-review
-```
 
-### 前端启动
+# 后端（端口 83）
+cd backend_python
+pip install -r requirements.txt
+cp .env.example .env          # 按需修改双库连接串
+alembic upgrade head          # 业务库迁移（MySQL）
+alembic -c alembic_assistant.ini upgrade head   # 会话库迁移（PostgreSQL）
+python seed.py                # 菜单/角色/账号/AI模型 种子数据（幂等）
+python generate_test_data.py  # 可选：班级/作业/提交等测试数据（幂等）
+python -m uvicorn app.main:app --host 0.0.0.0 --port 83 --reload
 
-```bash
-cd frontend
+# 批改队列 Worker（可选，需 Redis）
+python -m celery -A app.tasks.celery_app:celery_app worker --loglevel=info --queues=grading
+
+# 前端（端口 8080，/api 代理到 83）
+cd ../frontend
 npm install
 npm run dev
 ```
 
-访问 `http://localhost:5173` 即可查看项目。
+- 前端访问 `http://localhost:8080`，后端 API 文档 `http://localhost:83/api/docs`
+- 后端测试无需真实数据库：`cd backend_python && python -m pytest -q`
+- 前端测试：`cd frontend && npx vitest run`；类型检查：`npx vue-tsc --noEmit`
 
-### 后端启动
+### Docker 部署
 
 ```bash
-cd backend_python
-pip install -r requirements.txt
-cp .env.example .env      # 按需修改数据库连接信息
-python seed.py            # 初始化数据库与种子数据
-python generate_test_data.py  # 生成测试数据（教师/学生/班级/作业/提交）
-
-# 方式一：直接运行
-python -m app.main
-
-# 方式二：Uvicorn 热重载（开发推荐）
-python -m uvicorn app.main:app --host 0.0.0.0 --port 83 --reload
+cd frontend && npm install && npm run build && cd ..   # 前端镜像直接打包 dist
+cp .env.docker.example .env.docker                     # 修改其中的密钥
+docker compose --env-file .env.docker up -d
 ```
 
-启动后访问 API 文档: http://localhost:83/api/docs
+共 6 个服务：`mysql` / `postgres` / `redis` / `backend`（:8000，启动时自动执行双库迁移与种子数据）/ `worker`（Celery 批改队列）/ `frontend`（:80，nginx 反代 + SSE 专用配置）。三个数据库端口仅绑定 127.0.0.1。
 
 ### 默认账号
 
-| 角色 | 账号 | 密码 |
-|------|------|------|
-| 超级管理员 | admin | admin123 |
-| 教师 | teacher / teacher2 / teacher3 / teacher4 | 123456789 |
-| 学生 | 2024001 ~ 2024069 | 123456789 |
+| 角色 | 账号 | 密码 | 来源 |
+|------|------|------|------|
+| 超级管理员 | admin | admin123 | seed.py |
+| 教师 | teacher | 123456789 | seed.py |
+| 教师 | teacher2 ~ teacher4 | 123456789 | generate_test_data.py |
+| 学生 | 2024001 ~ 2024003 | 123456789（首登需改密） | seed.py |
+| 学生 | 2024041 起共 30 名 | 123456789 | generate_test_data.py |
 
 ---
 
@@ -262,118 +278,69 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 83 --reload
 
 ```
 ai-smart-homework-review/
-├── frontend/                        # 前端项目 (Vue 3 + TypeScript + Vite)
+├── frontend/                        # Vue 3 + TypeScript + Vite（dev :8080）
 │   ├── src/
-│   │   ├── api/                     # API 服务层
-│   │   │   ├── auth.ts              # 认证接口
-│   │   │   ├── chat.ts              # SSE 流式对话
-│   │   │   ├── ai-models.ts         # AI模型配置
-│   │   │   ├── logs.ts              # 操作日志
-│   │   │   ├── classes.ts           # 班级接口
-│   │   │   └── ...
-│   │   ├── assets/                  # 静态资源
-│   │   ├── components/              # 公共组件
-│   │   │   ├── AssistantPanel.vue   # AI 助手面板
+│   │   ├── api/                     # 每文件对应一个后端路由模块（16 个）
+│   │   │   ├── assistant.ts         # AI 助手 API + SSE 流式客户端
+│   │   │   └── auth.ts / classes.ts / correcting.ts / plagiarism.ts / ...
+│   │   ├── components/
+│   │   │   ├── AssistantPanel.vue   # 角色感知 AI 助手浮动面板
 │   │   │   ├── FloatingAssistantButton.vue
-│   │   │   ├── WangEditor.vue       # 富文本编辑器
-│   │   │   ├── PageHeader.vue       # 页面头部
-│   │   │   └── JoinClassDialog.vue  # 加入班级对话框
-│   │   ├── config/                  # 配置文件
-│   │   ├── layouts/                 # 布局组件
-│   │   ├── router/                  # 路由与权限守卫
-│   │   │   ├── index.ts             # 路由定义
-│   │   │   └── permission.ts        # 动态路由与权限控制
-│   │   ├── store/                   # Vuex 状态管理
-│   │   ├── types/                   # TypeScript 类型定义
-│   │   ├── utils/                   # 工具函数 (request.ts 等)
-│   │   ├── views/                   # 页面视图
-│   │   │   ├── system/              # 系统管理页面
-│   │   │   │   ├── users/           # 用户管理
-│   │   │   │   ├── roles/           # 角色管理
-│   │   │   │   ├── menus/           # 菜单管理
-│   │   │   │   ├── ai_model/        # AI模型配置
-│   │   │   │   ├── classes/         # 班级管理（管理员）
-│   │   │   │   └── logs/            # 操作日志
-│   │   │   ├── teacher/             # 教师页面
-│   │   │   │   ├── ai-rules/        # AI 批改规则
-│   │   │   │   ├── assignments/     # 作业管理
-│   │   │   │   ├── classes/         # 班级管理
-│   │   │   │   ├── correcting/      # 批改管理
-│   │   │   │   └── plagiarism/      # 文档查重
-│   │   │   ├── student/             # 学生页面
-│   │   │   └── dashboard/           # 仪表盘
-│   │   ├── App.vue
-│   │   └── main.ts
-│   ├── package.json
+│   │   │   ├── assistant/           # 助手子系统
+│   │   │   │   ├── AssistantChatView.vue / AssistantApprovalView.vue / AssistantHistoryView.vue
+│   │   │   │   ├── RunTimeline.vue  # 运行时间线可视化
+│   │   │   │   ├── ApprovalDiff.vue # 审批字段级 diff
+│   │   │   │   ├── markdown.ts      # marked + DOMPurify 安全渲染
+│   │   │   │   └── timeline.ts / artifacts.ts / approval.ts / diff.ts / role-config.ts
+│   │   │   └── WangEditor.vue / PageHeader.vue / ...
+│   │   ├── layouts/                 # AppLayout（含助手入口）/ TopNavLayout
+│   │   ├── router/                  # index.ts 静态路由 + permission.ts 动态菜单路由与守卫
+│   │   ├── store/                   # Vuex 4：app / auth / dashboard / user
+│   │   ├── utils/request.ts         # axios 封装（401 刷新重试队列）
+│   │   └── views/
+│   │       ├── dashboard/           # 三角色控制台（Admin/Teacher/Student）
+│   │       ├── teacher/             # ai-rules / assignments / classes / correcting / plagiarism
+│   │       ├── student/             # assignments / classes / submissions（AI 进度轮询）
+│   │       └── system/              # 管理员：users / roles / menus / classes / ai_model / logs
+│   ├── nginx.conf                   # Docker：反代 + SSE 禁缓冲
 │   └── vite.config.ts
 │
-├── backend_python/                  # 后端项目 (FastAPI + SQLAlchemy + LangChain)
+├── backend_python/                  # FastAPI 后端（dev :83，docker :8000）
 │   ├── app/
-│   │   ├── main.py                  # FastAPI 入口（含操作日志中间件注册）
-│   │   ├── config.py                # 配置读取
-│   │   ├── database.py              # SQLAlchemy 引擎与会话
-│   │   ├── deps.py                  # 依赖注入（JWT 鉴权 + 角色校验）
-│   │   ├── core/                    # 核心模块
-│   │   │   ├── security.py          # JWT + 密码加密
-│   │   │   ├── response.py          # 统一响应格式 (ok/error)
-│   │   │   ├── exceptions.py        # 全局异常处理 (BizException)
-│   │   │   └── utils.py             # 工具函数 (camel/snake 转换)
-│   │   ├── middleware/              # 中间件
-│   │   │   └── operation_log.py     # 操作日志中间件（自动记录写操作）
-│   │   ├── plagiarism/              # 查重模块（文本+图片双维度）
-│   │   │   ├── text.py              # 文本查重（N-gram + TF-IDF）
-│   │   │   ├── image.py             # 图片查重（感知哈希）
-│   │   │   ├── extractors.py        # 文件解析（Word/PDF/图片提取）
-│   │   │   ├── aggregator.py        # 双维度结果合并
-│   │   │   └── config.py            # 查重参数配置
-│   │   ├── models/                  # 数据库模型（12 张表）
-│   │   │   ├── user.py              # 用户
-│   │   │   ├── class_.py            # 班级
-│   │   │   ├── class_student.py     # 班级-学生关联
-│   │   │   ├── assignment.py        # 作业
-│   │   │   ├── submission.py        # 提交记录
-│   │   │   ├── ai_model.py          # AI模型配置
-│   │   │   ├── ai_rule.py           # AI批改规则
-│   │   │   ├── menu.py              # 菜单
-│   │   │   ├── role.py              # 角色
-│   │   │   ├── operation_log.py     # 操作日志
-│   │   │   ├── agent_chat_message.py # AI助手聊天记录
-│   │   │   └── refresh_token.py     # 刷新令牌
+│   │   ├── main.py                  # 入口（/api/docs，操作日志中间件）
+│   │   ├── database.py              # 业务库 MySQL（启动自动建库建表）
+│   │   ├── assistant_database.py    # 会话库 PostgreSQL（表结构由迁移管理）
+│   │   ├── deps.py                  # JWT 鉴权 + 角色校验依赖
+│   │   ├── core/                    # security / response(ok/error) / exceptions / utils
+│   │   ├── middleware/              # 操作日志中间件（自动记录写操作）
+│   │   ├── routers/                 # 15 个路由模块（薄层）：auth / users / classes /
+│   │   │                            #   assignments / submissions / correcting / assistant /
+│   │   │                            #   plagiarism / ai_models / ai_rules / dashboard / logs / ...
+│   │   ├── crud/                    # 全部业务逻辑（含审批状态机、审批执行器、反馈闭环）
+│   │   ├── models/                  # MySQL 12 表 + PostgreSQL 8 表（运行/步骤/审批/产物/反馈）
 │   │   ├── schemas/                 # Pydantic 请求/响应模型
-│   │   ├── crud/                    # 数据库操作层（业务逻辑）
-│   │   │   ├── user.py              # 用户CRUD（含删除关联清理）
-│   │   │   ├── class_.py            # 班级CRUD（含管理员代建/解散）
-│   │   │   ├── ai_model.py          # AI模型CRUD（测试连接/余额查询）
-│   │   │   ├── operation_log.py     # 操作日志CRUD
-│   │   │   ├── submission.py        # 提交CRUD（多模态AI批改）
-│   │   │   └── ...
-│   │   ├── routers/                 # API 路由（15 个模块）
-│   │   │   ├── auth.py              # 认证
-│   │   │   ├── users.py             # 用户管理
-│   │   │   ├── classes.py           # 班级
-│   │   │   ├── assignments.py       # 作业
-│   │   │   ├── submissions.py       # 提交
-│   │   │   ├── correcting.py        # 批改
-│   │   │   ├── chat.py              # AI 助手 SSE 流式接口
-│   │   │   ├── plagiarism.py        # 查重
-│   │   │   ├── ai_models.py         # 大模型配置
-│   │   │   ├── ai_rules.py          # 批改规则
-│   │   │   ├── logs.py              # 操作日志
-│   │   │   ├── dashboard.py         # 数据看板
-│   │   │   └── ...
-│   │   └── agent/                   # LangChain AI Agent
-│   │       ├── agent.py             # Agent 构建与 SSE 流式输出
-│   │       └── tools.py             # Agent 工具集（7 个教学查询工具）
-│   ├── uploads/                     # 上传文件目录
-│   ├── seed.py                      # 种子数据初始化（菜单/角色/用户/AI模型）
-│   ├── generate_test_data.py        # 测试数据生成（教师/学生/班级/作业/提交）
-│   ├── requirements.txt
-│   └── .env.example
+│   │   ├── agent/                   # LangGraph 多智能体运行时
+│   │   │   ├── service.py           # 三角色 SSE 编排；双库唯一交汇点
+│   │   │   ├── gateway.py           # 模型网关：档位选型 + 缓存 + 密钥脱敏
+│   │   │   ├── contracts.py         # 结构化契约：GradingDraft / ActionDraft / 稳定错误码
+│   │   │   ├── registry.py          # 17 个专家 Agent 注册表（版本化 Prompt）
+│   │   │   ├── runtime.py           # 运行预算 / 取消 / 身份上下文
+│   │   │   ├── graphs/              # teacher / student / admin / grading / plagiarism 状态图
+│   │   │   ├── supervisors/         # 各角色意图路由 + llm_router LLM 兜底
+│   │   │   ├── subagents/           # 专家节点（批改/复核/审核/辅导/审计/治理…）
+│   │   │   └── tools/               # 按角色隔离的只读工具（每工具独立 DB 会话）
+│   │   ├── plagiarism/              # 独立查重包：text / image / extractors / aggregator / highlight
+│   │   └── tasks/                   # Celery：grading 队列（幂等投递 + 软超时）
+│   ├── alembic/                     # 业务库迁移（MySQL）
+│   ├── alembic_assistant/           # 会话库迁移（PostgreSQL）
+│   ├── tests/                       # unit / integration / security / evals（110 条离线评测）
+│   ├── seed.py                      # 种子数据；generate_test_data.py 测试数据
+│   ├── Dockerfile / entrypoint.sh   # 容器内自动双库迁移（既有库先 stamp 基线）
+│   └── requirements.txt
 │
-├── docs/                            # 项目文档与截图
-├── CLAUDE.md                        # AI 编程助手配置与项目约定
-├── .gitignore
-├── LICENSE
+├── docs/                            # 功能截图 + docs/superpowers/（架构与规格文档）
+├── docker-compose.yml               # 6 服务编排
+├── .env.docker.example              # Docker 密钥模板
 └── README.MD
 ```
 
@@ -381,54 +348,36 @@ ai-smart-homework-review/
 
 ## 🎯 核心技术亮点
 
-### 1. AI 多模态批改
+### 1. 双 Agent 交叉批改（多模态）
 
-- 支持多模型接入（DeepSeek、Mimo等），管理员可在后台灵活配置并**真实测试连接、查询余额**
-- 教师自定义批改规则、评分维度与 AI 提示词模板
-- 学生提交后后台异步触发 AI 批改，**支持多模态输入**：
-  - docx 附件自动提取段落、表格、页眉页脚文字
-  - **docx 内嵌图片提取为 base64 发送给 AI（vision API）**
-  - **独立图片附件（截图/照片）编码发送给 AI**
-- **老师作业要求 + 参考附件同步发送给 AI**，AI 能对照要求评判学生是否达标
-- AI 返回格式严格约束（总分/维度分/优点/建议），正则解析提取分数
-- 分数解析失败返回 `None` 并标注"请教师人工复核"，绝不生成随机分数
+- 主批改与独立复核两个 Agent 各自逐维度评分，复核不看首评、含图提交自动切换视觉档位模型
+- docx 段落/表格/内嵌图、PDF 文本、独立图片附件统一规范化为**显式不可信内容块**后进入模型，作业要求与参考附件同步注入
+- 结构化评分契约：逐项校验不超满分、与版本化量表完整对应，总分后端汇总，**绝不信任模型的自然语言总分**
+- 分差超限/证据缺失/低置信自动转人工；解析失败降级保留原始输出留证，绝不编造分数
 
-### 2. AI 教学助手（LangChain Agent）
+### 2. 写操作人工审批闭环
 
-- 基于 LangChain 1.0 `create_agent` + LangGraph 构建多工具 Agent
-- 7 个教学数据查询工具：班级学生、作业提交、学生成绩、看板统计、待批改列表等
-- SSE 流式响应，逐字输出，实时对话体验
-- 通过 `ToolRuntime` 上下文注入 `teacher_id`，LLM 无法越权查询其他教师数据
-- Agent 工具内部使用独立数据库短连接，避免 SSE 长连接耗尽连接池
+- 教师对助手说「发布/修改/删除作业、改分」→ 只生成 ActionDraft 草案，**图内零业务写入**
+- 服务端计算载荷哈希与幂等键，审批执行前逐字节复验 + 角色/对象归属/状态机/字段白名单检查
+- 前端审批面板字段级 diff（原值 → 新值红绿对照），MySQL 幂等账本防跨库崩溃后重复执行
 
-### 3. 文档查重
+### 3. 全链路可观测
 
-- 文本维度（N-gram + TF-IDF）+ 图片维度（感知哈希）双引擎查重
-- 综合重复率权重可前端动态调整，支持一键重置默认
-- 模板剔除 + 自动公共片段识别，避免同题作业误判
-- 提交数量上限保护（200 份），防止 O(n²) 算法在高并发下阻塞
-- OrderedDict LRU 缓存（maxsize=100），避免重复计算
+- SSE 结构化事件流：路由选择、每个 Agent 启动/完成、审批请求、逐段回答——前端渲染实时运行时间线
+- 每次运行的节点级 Step、Token 用量、产物（评分草案/审核结论）全部落库，👍/👎 反馈 + 教师改分差值自动采集
+- 管理员可审计 Agent 运行成功率与意图分布；受控正文访问需单独授权并留操作日志
 
-### 4. 操作审计
+### 4. 深度防御安全
 
-- **Starlette 中间件自动拦截所有 `/api/*` 下 POST/PUT/DELETE 请求**
-- 从 JWT 提取操作人，匹配模块名，写入操作日志表
-- 管理员可在后台按操作类型、模块、关键词筛选日志
-- 日志表**不可修改/不可删除**，保证审计完整性
+- 三角色最终审核 Agent 独立复核每个回答；证据引用与真实工具返回逐条比对，编造引用即剔除
+- 学生防代写三层防护；管理员审计只碰聚合数据；密钥全链路脱敏（网关/工具/审批载荷契约层拒绝）
+- 提示注入隔离：学生提交内容以不可信块进入批改模型；内部异常映射稳定错误码，绝不泄漏栈信息
 
-### 5. 权限与安全
+### 5. 工程化保障
 
-- 基于 RBAC 的角色权限控制，动态菜单生成
-- JWT + Refresh Token 机制，支持主动登出
-- 文件上传大小限制（20MB），防止 OOM
-- 前端路由守卫 + 后端接口双重鉴权
-- 用户删除自动清理关联数据（class_students/submissions/refresh_tokens），同步更新班级人数
-
-### 6. 管理员全局管理能力
-
-- **班级管理**：代任意教师创建/编辑/解散班级，更换授课教师
-- **AI模型配置**：测试连接/查询余额/编辑基本信息/模型默认互斥
-- **操作日志**：全量审计，支持筛选
+- 双数据库双 Alembic 迁移链，容器启动自动迁移（既有库先 stamp 基线再升级）
+- 后端 600+ 测试用 per-process sqlite 双库替身，无真实数据库即可全量回归；前端 Vitest 组件/模块测试
+- 110 条离线评测（路由对抗样本 + 录制回放）把真实生产代码路径纳入回归
 
 ---
 
