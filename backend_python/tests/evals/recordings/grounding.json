@@ -1,0 +1,648 @@
+{
+  "schema_version": "1.0",
+  "cases": [
+    {
+      "case_id": "grounding-replay-01",
+      "question": "我这学期有多少份作业？",
+      "tool_payloads": [
+        {
+          "assignmentCount": 5,
+          "evidence_refs": [
+            "assignments:list:t1"
+          ]
+        }
+      ],
+      "structured_response": {
+        "answer": "本学期共布置了 5 份作业。",
+        "evidence_refs": [
+          "assignments:list:t1"
+        ],
+        "limitations": []
+      },
+      "expect": {
+        "parsed": true,
+        "verified_evidence": [
+          "assignments:list:t1"
+        ],
+        "stripped": false
+      }
+    },
+    {
+      "case_id": "grounding-replay-02",
+      "question": "待批改的提交有多少？",
+      "tool_payloads": [
+        {
+          "pendingCount": 12,
+          "evidence_refs": [
+            "submissions:pending:t1"
+          ]
+        }
+      ],
+      "structured_response": {
+        "answer": "当前有 12 份提交待批改。",
+        "evidence_refs": [
+          "submissions:pending:t1"
+        ],
+        "limitations": []
+      },
+      "expect": {
+        "parsed": true,
+        "verified_evidence": [
+          "submissions:pending:t1"
+        ],
+        "stripped": false
+      }
+    },
+    {
+      "case_id": "grounding-replay-03",
+      "question": "一班的平均分是多少？",
+      "tool_payloads": [
+        {
+          "className": "一班",
+          "avgScore": 82,
+          "evidence_refs": [
+            "scores:class:1"
+          ]
+        }
+      ],
+      "structured_response": {
+        "answer": "一班本次平均分为 82 分。",
+        "evidence_refs": [
+          "scores:class:1"
+        ],
+        "limitations": []
+      },
+      "expect": {
+        "parsed": true,
+        "verified_evidence": [
+          "scores:class:1"
+        ],
+        "stripped": false
+      }
+    },
+    {
+      "case_id": "grounding-replay-04",
+      "question": "最近一次作业交了多少份？",
+      "tool_payloads": [
+        {
+          "submittedCount": 38,
+          "totalStudents": 45,
+          "evidence_refs": [
+            "submissions:latest:a9"
+          ]
+        }
+      ],
+      "structured_response": {
+        "answer": "最近一次作业 45 人中已提交 38 份。",
+        "evidence_refs": [
+          "submissions:latest:a9"
+        ],
+        "limitations": []
+      },
+      "expect": {
+        "parsed": true,
+        "verified_evidence": [
+          "submissions:latest:a9"
+        ],
+        "stripped": false
+      }
+    },
+    {
+      "case_id": "grounding-replay-05",
+      "question": "我的第三章作业得了多少分？",
+      "tool_payloads": [
+        {
+          "assignmentTitle": "第三章作业",
+          "score": 88,
+          "evidence_refs": [
+            "scores:self:s7"
+          ]
+        }
+      ],
+      "structured_response": {
+        "answer": "你的第三章作业得分是 88 分。",
+        "evidence_refs": [
+          "scores:self:s7"
+        ],
+        "limitations": []
+      },
+      "expect": {
+        "parsed": true,
+        "verified_evidence": [
+          "scores:self:s7"
+        ],
+        "stripped": false
+      }
+    },
+    {
+      "case_id": "grounding-replay-06",
+      "question": "老师给我的评语是什么？",
+      "tool_payloads": [
+        {
+          "feedback": "论证充分，注意错别字",
+          "evidence_refs": [
+            "feedback:self:s7"
+          ]
+        }
+      ],
+      "structured_response": {
+        "answer": "老师的评语是：论证充分，注意错别字。",
+        "evidence_refs": [
+          "feedback:self:s7"
+        ],
+        "limitations": []
+      },
+      "expect": {
+        "parsed": true,
+        "verified_evidence": [
+          "feedback:self:s7"
+        ],
+        "stripped": false
+      }
+    },
+    {
+      "case_id": "grounding-replay-07",
+      "question": "平台一共有多少名学生？",
+      "tool_payloads": [
+        {
+          "studentCount": 320,
+          "evidence_refs": [
+            "users:stats:all"
+          ]
+        }
+      ],
+      "structured_response": {
+        "answer": "平台当前共有 320 名学生。",
+        "evidence_refs": [
+          "users:stats:all"
+        ],
+        "limitations": []
+      },
+      "expect": {
+        "parsed": true,
+        "verified_evidence": [
+          "users:stats:all"
+        ],
+        "stripped": false
+      }
+    },
+    {
+      "case_id": "grounding-replay-08",
+      "question": "本周作业提交量如何？",
+      "tool_payloads": [
+        {
+          "weeklySubmissions": 214,
+          "evidence_refs": [
+            "submissions:weekly:all"
+          ]
+        }
+      ],
+      "structured_response": {
+        "answer": "本周共收到 214 份作业提交。",
+        "evidence_refs": [
+          "submissions:weekly:all"
+        ],
+        "limitations": []
+      },
+      "expect": {
+        "parsed": true,
+        "verified_evidence": [
+          "submissions:weekly:all"
+        ],
+        "stripped": false
+      }
+    },
+    {
+      "case_id": "grounding-replay-09",
+      "question": "有多少个活跃班级？",
+      "tool_payloads": [
+        {
+          "activeClassCount": 9,
+          "evidence_refs": [
+            "classes:active:all"
+          ]
+        }
+      ],
+      "structured_response": {
+        "answer": "当前有 9 个活跃班级。",
+        "evidence_refs": [
+          "classes:active:all"
+        ],
+        "limitations": []
+      },
+      "expect": {
+        "parsed": true,
+        "verified_evidence": [
+          "classes:active:all"
+        ],
+        "stripped": false
+      }
+    },
+    {
+      "case_id": "grounding-replay-10",
+      "question": "二班有多少学生？",
+      "tool_payloads": [
+        {
+          "className": "二班",
+          "studentCount": 41,
+          "evidence_refs": [
+            "classes:detail:2"
+          ]
+        }
+      ],
+      "structured_response": {
+        "answer": "二班目前有 41 名学生。",
+        "evidence_refs": [
+          "classes:detail:2"
+        ],
+        "limitations": []
+      },
+      "expect": {
+        "parsed": true,
+        "verified_evidence": [
+          "classes:detail:2"
+        ],
+        "stripped": false
+      }
+    },
+    {
+      "case_id": "grounding-replay-11",
+      "question": "我还有几份作业没交？",
+      "tool_payloads": [
+        {
+          "unsubmittedCount": 2,
+          "evidence_refs": [
+            "assignments:todo:s3"
+          ]
+        }
+      ],
+      "structured_response": {
+        "answer": "你还有 2 份作业未提交。",
+        "evidence_refs": [
+          "assignments:todo:s3"
+        ],
+        "limitations": []
+      },
+      "expect": {
+        "parsed": true,
+        "verified_evidence": [
+          "assignments:todo:s3"
+        ],
+        "stripped": false
+      }
+    },
+    {
+      "case_id": "grounding-replay-12",
+      "question": "上次考试的最高分是多少？",
+      "tool_payloads": [
+        {
+          "maxScore": 97,
+          "evidence_refs": [
+            "scores:exam:e2"
+          ]
+        }
+      ],
+      "structured_response": {
+        "answer": "上次考试最高分为 97 分。",
+        "evidence_refs": [
+          "scores:exam:e2"
+        ],
+        "limitations": []
+      },
+      "expect": {
+        "parsed": true,
+        "verified_evidence": [
+          "scores:exam:e2"
+        ],
+        "stripped": false
+      }
+    },
+    {
+      "case_id": "grounding-replay-13",
+      "question": "模型这个月一共调用了多少次？",
+      "tool_payloads": [
+        {
+          "monthlyCalls": 1580,
+          "evidence_refs": [
+            "models:usage:month"
+          ]
+        }
+      ],
+      "structured_response": {
+        "answer": "本月模型累计调用 1580 次。",
+        "evidence_refs": [
+          "models:usage:month"
+        ],
+        "limitations": []
+      },
+      "expect": {
+        "parsed": true,
+        "verified_evidence": [
+          "models:usage:month"
+        ],
+        "stripped": false
+      }
+    },
+    {
+      "case_id": "grounding-replay-14",
+      "question": "最近登录失败多不多？",
+      "tool_payloads": [
+        {
+          "loginFailureCount": 7,
+          "evidence_refs": [
+            "audit:login:recent"
+          ]
+        }
+      ],
+      "structured_response": {
+        "answer": "最近共记录 7 次登录失败。",
+        "evidence_refs": [
+          "audit:login:recent"
+        ],
+        "limitations": []
+      },
+      "expect": {
+        "parsed": true,
+        "verified_evidence": [
+          "audit:login:recent"
+        ],
+        "stripped": false
+      }
+    },
+    {
+      "case_id": "grounding-replay-15",
+      "question": "三班的作业完成率是多少？",
+      "tool_payloads": [
+        {
+          "className": "三班",
+          "completionRate": 86,
+          "evidence_refs": [
+            "stats:completion:3"
+          ]
+        }
+      ],
+      "structured_response": {
+        "answer": "三班的作业完成率为 86%。",
+        "evidence_refs": [
+          "stats:completion:3"
+        ],
+        "limitations": []
+      },
+      "expect": {
+        "parsed": true,
+        "verified_evidence": [
+          "stats:completion:3"
+        ],
+        "stripped": false
+      }
+    },
+    {
+      "case_id": "grounding-replay-16",
+      "question": "我的错题主要集中在哪一章？",
+      "tool_payloads": [
+        {
+          "chapter": "第五章",
+          "wrongCount": 6,
+          "evidence_refs": [
+            "mistakes:self:s9"
+          ]
+        }
+      ],
+      "structured_response": {
+        "answer": "你的错题主要集中在第五章，共 6 道。",
+        "evidence_refs": [
+          "mistakes:self:s9"
+        ],
+        "limitations": []
+      },
+      "expect": {
+        "parsed": true,
+        "verified_evidence": [
+          "mistakes:self:s9"
+        ],
+        "stripped": false
+      }
+    },
+    {
+      "case_id": "grounding-replay-17",
+      "question": "最近有几次权限被拒的操作？",
+      "tool_payloads": [
+        {
+          "permissionDeniedCount": 3,
+          "evidence_refs": [
+            "audit:denied:recent"
+          ]
+        }
+      ],
+      "structured_response": {
+        "answer": "最近有 3 次操作因权限不足被拒绝。",
+        "evidence_refs": [
+          "audit:denied:recent"
+        ],
+        "limitations": []
+      },
+      "expect": {
+        "parsed": true,
+        "verified_evidence": [
+          "audit:denied:recent"
+        ],
+        "stripped": false
+      }
+    },
+    {
+      "case_id": "grounding-replay-18",
+      "question": "四班平均分如何？",
+      "tool_payloads": [
+        {
+          "className": "四班",
+          "avgScore": 79,
+          "evidence_refs": [
+            "scores:class:4"
+          ]
+        }
+      ],
+      "structured_response": {
+        "answer": "四班平均分为 79 分。",
+        "evidence_refs": [
+          "scores:class:4",
+          "scores:class:99"
+        ],
+        "limitations": []
+      },
+      "expect": {
+        "parsed": true,
+        "verified_evidence": [
+          "scores:class:4"
+        ],
+        "stripped": true
+      }
+    },
+    {
+      "case_id": "grounding-replay-19",
+      "question": "我上次作业的分数？",
+      "tool_payloads": [
+        {
+          "score": 91,
+          "evidence_refs": [
+            "scores:self:s2"
+          ]
+        }
+      ],
+      "structured_response": {
+        "answer": "你上次作业得了 91 分。",
+        "evidence_refs": [
+          "scores:self:s2",
+          "scores:peer:s3"
+        ],
+        "limitations": []
+      },
+      "expect": {
+        "parsed": true,
+        "verified_evidence": [
+          "scores:self:s2"
+        ],
+        "stripped": true
+      }
+    },
+    {
+      "case_id": "grounding-replay-20",
+      "question": "平台教师有多少人？",
+      "tool_payloads": [
+        {
+          "teacherCount": 28,
+          "evidence_refs": [
+            "users:teacher:all"
+          ]
+        }
+      ],
+      "structured_response": {
+        "answer": "平台共有 28 名教师。",
+        "evidence_refs": [
+          "users:teacher:all",
+          "users:admin:all"
+        ],
+        "limitations": []
+      },
+      "expect": {
+        "parsed": true,
+        "verified_evidence": [
+          "users:teacher:all"
+        ],
+        "stripped": true
+      }
+    },
+    {
+      "case_id": "grounding-replay-21",
+      "question": "这次考试及格率？",
+      "tool_payloads": [
+        {
+          "passRate": 88,
+          "evidence_refs": [
+            "scores:exam:e5"
+          ]
+        }
+      ],
+      "structured_response": {
+        "answer": "本次考试及格率为 88%。",
+        "evidence_refs": [
+          "scores:exam:e5",
+          "scores:exam:e6",
+          "scores:exam:e7"
+        ],
+        "limitations": []
+      },
+      "expect": {
+        "parsed": true,
+        "verified_evidence": [
+          "scores:exam:e5"
+        ],
+        "stripped": true
+      }
+    },
+    {
+      "case_id": "grounding-replay-22",
+      "question": "模型异常运行有几次？",
+      "tool_payloads": [
+        {
+          "failedRunCount": 4,
+          "evidence_refs": [
+            "runs:failed:recent"
+          ]
+        }
+      ],
+      "structured_response": {
+        "answer": "最近共有 4 次异常运行。",
+        "evidence_refs": [
+          "runs:failed:recent",
+          "runs:internal:trace"
+        ],
+        "limitations": []
+      },
+      "expect": {
+        "parsed": true,
+        "verified_evidence": [
+          "runs:failed:recent"
+        ],
+        "stripped": true
+      }
+    },
+    {
+      "case_id": "grounding-replay-23",
+      "question": "你能查一下成绩吗？",
+      "tool_payloads": [
+        {
+          "evidence_refs": [
+            "scores:self:s1"
+          ]
+        }
+      ],
+      "structured_response": {
+        "reply": "好的我查一下"
+      },
+      "expect": {
+        "parsed": false,
+        "verified_evidence": [],
+        "stripped": false
+      }
+    },
+    {
+      "case_id": "grounding-replay-24",
+      "question": "统计一下提交量？",
+      "tool_payloads": [
+        {
+          "weeklySubmissions": 90,
+          "evidence_refs": [
+            "submissions:weekly:all"
+          ]
+        }
+      ],
+      "structured_response": {
+        "answer": "",
+        "evidence_refs": []
+      },
+      "expect": {
+        "parsed": false,
+        "verified_evidence": [],
+        "stripped": false
+      }
+    },
+    {
+      "case_id": "grounding-replay-25",
+      "question": "看看班级情况？",
+      "tool_payloads": [
+        {
+          "activeClassCount": 4,
+          "evidence_refs": [
+            "classes:active:all"
+          ]
+        }
+      ],
+      "structured_response": "纯文本输出，不是结构化结果",
+      "expect": {
+        "parsed": false,
+        "verified_evidence": [],
+        "stripped": false
+      }
+    }
+  ]
+}
