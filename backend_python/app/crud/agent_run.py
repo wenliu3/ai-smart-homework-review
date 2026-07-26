@@ -323,6 +323,15 @@ def list_artifacts(db: Session, run_id: str, user_id: int) -> list[AgentArtifact
     return list_artifacts_unscoped(db, run_id)
 
 
+def get_run_unscoped(db: Session, run_id: str) -> AgentRun | None:
+    """不做归属校验的运行读取。
+
+    仅供受控正文访问端点（superadmin + 授权理由 + 审计日志）调用；
+    面向普通请求的路径必须走带 user_id 的 get_run。
+    """
+    return db.query(AgentRun).filter(AgentRun.id == run_id).first()
+
+
 def list_artifacts_unscoped(db: Session, run_id: str) -> list[AgentArtifact]:
     """不做归属校验的 Artifact 读取。
 

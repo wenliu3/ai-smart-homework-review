@@ -26,6 +26,22 @@ class Settings(BaseSettings):
     # （assistant_database.py: pool_size=5 + max_overflow=10 = 15），
     # 留出余量给普通请求，避免满载时 worker 等待连接直至池超时（默认 30 秒）。
     AGENT_STREAM_MAX_CONCURRENCY: int = 12
+    # 多智能体助手总开关（规划 5.6）：False 时新版 /assistant/runs/stream 整体关闭
+    MULTI_AGENT_ENABLED: bool = True
+    # 教师白名单灰度：逗号分隔教师 ID；空串 = 全部教师放行。
+    # 只约束教师角色，学生/管理员不受影响。
+    MULTI_AGENT_TEACHER_WHITELIST: str = ""
+
+    def multi_agent_teacher_allowed(self, teacher_id: int) -> bool:
+        whitelist = self.MULTI_AGENT_TEACHER_WHITELIST.strip()
+        if not whitelist:
+            return True
+        allowed = {
+            item.strip()
+            for item in whitelist.split(",")
+            if item.strip()
+        }
+        return str(teacher_id) in allowed
 
     @property
     def upload_path(self) -> Path:

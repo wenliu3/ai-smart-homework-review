@@ -29,6 +29,7 @@ from ..agent.service import (
 )
 from ..agent.tools.approval import create_action_draft
 from ..assistant_database import get_assistant_db
+from ..config import settings
 from ..database import get_db
 from ..core.exceptions import BadRequestException, NotFoundException
 from ..core.response import ok
@@ -44,6 +45,7 @@ from ..deps import require_roles
 from ..models import User
 from ..schemas.assistant import (
     ApproveActionRequest,
+    ContentAccessRequest,
     CreateActionDraftRequest,
     CreateRunRequest,
     CreateSessionRequest,
@@ -66,6 +68,14 @@ def stream_run(
     actor: User = Depends(require_roles("teacher", "student", "superadmin")),
 ):
     """启动一次教师助手运行，以 JSON SSE 流式返回事件。"""
+    # 平台开关与教师白名单灰度（规划 5.6）：闸门在流式开始前，返回普通 400
+    if not settings.MULTI_AGENT_ENABLED:
+        raise BadRequestException(10011, "AI 助手暂未开放，请稍后再试")
+    if (
+        actor.role == "teacher"
+        and not settings.multi_agent_teacher_allowed(actor.id)
+    ):
+        raise BadRequestException(10011, "AI 助手灰度中，当前账号暂未开放")
     if not _SESSION_ID_PATTERN.match(req.session_id):
         raise BadRequestException(10011, "session_id 格式非法，需为 8-64 位字母数字/下划线/连字符")
     if agent_session_crud.is_system_session_id(req.session_id):
@@ -80,6 +90,7 @@ def stream_run(
                 message=req.message,
                 session_id=req.session_id,
                 request_id=request_id,
+                page_context=req.page_context,
             )
         elif actor.role == "student":
             events = stream_student_events(
@@ -87,6 +98,7 @@ def stream_run(
                 message=req.message,
                 session_id=req.session_id,
                 request_id=request_id,
+                page_context=req.page_context,
             )
         else:
             events = stream_admin_events(
@@ -94,6 +106,7 @@ def stream_run(
                 message=req.message,
                 session_id=req.session_id,
                 request_id=request_id,
+                page_context=req.page_context,
             )
         for evt in events:
             yield format_sse_event(data_str=evt.data, event=evt.event)
@@ -221,6 +234,53 @@ def list_run_artifacts(
             }
             for item in artifacts
         ],
+    })
+
+
+# ========== 受控正文访问（规格 §14.2） ==========
+
+@router.post("/assistant/admin/runs/{run_id}/content-access")
+def admin_run_content_access(
+    run_id: str,
+    req: ContentAccessRequest,
+    actor: User = Depends(require_roles("superadmin")),
+    db: Session = Depends(get_db),
+    sdb: Session = Depends(get_assistant_db),
+):
+    """管理员受控读取运行正文：必须提供授权理由，且每次访问写操作日志。
+
+    审计日志只记 run_id 与理由，绝不落正文内容。
+    """
+    if not _RUN_ID_PATTERN.match(run_id):
+        raise BadRequestException(10011, "run_id 格式非法")
+    reason = req.reason.strip()
+    if not reason:
+        raise BadRequestException(10011, "必须提供访问理由")
+    run = agent_run_crud.get_run_unscoped(sdb, run_id)
+    if run is None:
+        raise NotFoundException(10015, "运行不存在")
+
+    from ..models import OperationLog
+
+    db.add(OperationLog(
+        operator=actor.username,
+        operator_name=actor.name,
+        action="查询",
+        module="运行审计",
+        description=f"受控访问运行正文 run_id={run_id}，理由：{reason[:200]}",
+        method="POST",
+        endpoint=f"/api/assistant/admin/runs/{run_id}/content-access",
+        status_code=200,
+    ))
+    db.commit()
+
+    return ok({
+        "runId": run.id,
+        "status": run.status,
+        "intent": run.intent,
+        "finalOutput": run.final_output,
+        "sessionId": run.session_id,
+        "ownerUserId": run.user_id,
     })
 
 

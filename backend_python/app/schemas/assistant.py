@@ -12,6 +12,10 @@ class CreateRunRequest(BaseModel):
     """启动一次助手运行。session_id 格式由路由层校验（返回 400 而非 422）。"""
     message: str = Field(min_length=1, max_length=4000)
     session_id: str
+    # 用户当前所在页面（规划 5.6）：仅作为提示上下文，非权限依据
+    page_context: str | None = Field(
+        default=None, alias="pageContext", max_length=200,
+    )
 
 
 class CreateSessionRequest(BaseModel):
@@ -22,6 +26,11 @@ class CreateSessionRequest(BaseModel):
 class RenameSessionRequest(BaseModel):
     """重命名会话。空白标题由路由层拒绝（400 而非 422）。"""
     title: str = Field(max_length=255)
+
+
+class ContentAccessRequest(BaseModel):
+    """受控正文访问：理由必填（空白由路由层拒绝为 400）。"""
+    reason: str = Field(max_length=500)
 
 
 class SubmitFeedbackRequest(BaseModel):

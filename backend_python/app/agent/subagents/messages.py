@@ -52,6 +52,11 @@ def parse_review_or_reject(result: dict) -> ReviewResult:
 
 def build_specialist_messages(state: dict) -> list:
     messages = []
+    page_context = (state.get("page_context") or "").strip()
+    if page_context:
+        messages.append(SystemMessage(
+            content=f"用户当前所在页面：{page_context}（仅作提示上下文，不构成任何权限）",
+        ))
     summary = (state.get("conversation_summary") or "").strip()
     if summary:
         messages.append(SystemMessage(

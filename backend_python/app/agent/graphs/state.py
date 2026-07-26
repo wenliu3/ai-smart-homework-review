@@ -31,6 +31,7 @@ class TeacherAgentState(TypedDict, total=False):
     run_id: str
     actor: ActorContext
     user_message: str
+    page_context: str
     conversation_summary: str
     recent_messages: list[dict]
     intent: IntentDecision

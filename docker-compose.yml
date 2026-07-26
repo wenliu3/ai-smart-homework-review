@@ -80,6 +80,8 @@ services:
       DEFAULT_PASSWORD: 123456789
       UPLOAD_DIR: /app/uploads
       RUN_MIGRATIONS: 1
+      MULTI_AGENT_ENABLED: ${MULTI_AGENT_ENABLED:-true}
+      MULTI_AGENT_TEACHER_WHITELIST: ${MULTI_AGENT_TEACHER_WHITELIST:-}
     ports:
       - "8000:8000"
     volumes:
