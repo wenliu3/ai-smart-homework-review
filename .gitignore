@@ -99,6 +99,7 @@ backend_python/uploads/*
 .codebuddy/
 .workbuddy/
 .workbuddy
+.agents/
 
 # ===== 论文/报告生成 =====
 /gen_report.py
