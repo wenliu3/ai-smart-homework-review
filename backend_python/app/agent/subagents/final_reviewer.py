@@ -27,13 +27,23 @@ _REVIEW_TEMPLATE = """请审核以下候选回答是否安全合规。
 审核要点：
 1. 不包含密码、邮箱、电话、API Key、内部数据库 ID 等敏感信息。
 2. 不包含未由工具数据支撑的编造内容。
-3. 不包含或暗示可以执行写操作（发布、修改、删除、改分等）。
+3. {write_rule}
 4. 不泄露其他教师或学生的数据。
 
 请返回 JSON 格式：
 - 如果通过：{{"approved": true, "issues": []}}
 - 如果拒绝：{{"approved": false, "issues": ["具体问题1", "具体问题2"]}}
 """
+
+# 只读意图：任何写操作承诺都是红线
+_WRITE_RULE_DEFAULT = "不包含或暗示可以执行写操作（发布、修改、删除、改分等）。"
+# 写操作起草意图：回答本来就要描述「已起草待审批操作」，红线换成执行承诺。
+# 若沿用默认红线，真实模型会按字面把整条写操作闭环全部拒掉。
+_WRITE_RULE_ACTION_DRAFT = (
+    "该回答对应一个待审批的操作草案：只能说明草案已生成、"
+    "需教师本人在审批面板确认后才会执行；"
+    "如果声称操作已经执行、将自动执行或无需审批，必须拒绝。"
+)
 
 
 def _structured_review_or_reject(result: dict) -> ReviewResult:
@@ -69,7 +79,17 @@ def create_node(db, registry: AgentRegistry | None = None) -> Callable:
             )}
         actor = state["actor"]
         agent = reg.get_specialist("final_reviewer", db)
-        prompt = _REVIEW_TEMPLATE.format(candidate=candidate)
+        is_action_draft = (
+            intent is not None
+            and intent.intent == TeacherIntent.ACTION_DRAFT
+        )
+        prompt = _REVIEW_TEMPLATE.format(
+            candidate=candidate,
+            write_rule=(
+                _WRITE_RULE_ACTION_DRAFT if is_action_draft
+                else _WRITE_RULE_DEFAULT
+            ),
+        )
         if evidence_refs:
             prompt += "\n服务端证据引用：\n" + "\n".join(evidence_refs)
         result = agent.invoke(

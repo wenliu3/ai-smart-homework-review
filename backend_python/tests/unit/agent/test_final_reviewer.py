@@ -91,6 +91,71 @@ def test_reviewer_rejects_factual_answer_without_evidence_before_model_call():
     assert "证据" in review.issues[0]
 
 
+class _RecordingAgent:
+    """记录发给模型的 prompt，便于断言审核要点按意图切换。"""
+
+    def __init__(self, result):
+        self._result = result
+        self.prompts: list[str] = []
+
+    def invoke(self, payload, **kwargs):
+        self.prompts.append(payload["messages"][-1].content)
+        return self._result
+
+
+class _RecordingRegistry:
+    def __init__(self, agent):
+        self._agent = agent
+
+    def get_specialist(self, name, db):
+        assert name == "final_reviewer"
+        return self._agent
+
+
+def test_reviewer_swaps_write_rule_for_action_draft_intent():
+    """ACTION_DRAFT 的候选回答必然要描述「已起草待审批操作」——
+    审核红线必须换成「不得声称已执行/将自动执行」，否则真实模型
+    会按字面把整条写操作闭环全部拒掉（真实环境已复现）。"""
+    agent = _RecordingAgent({
+        "messages": [AIMessage(content="审核完成")],
+        "structured_response": ReviewResult(approved=True, issues=[]),
+    })
+    node = create_node(db=object(), registry=_RecordingRegistry(agent))
+    state = _state()
+    state.update({
+        "candidate_answer": "已为您起草发布作业《计算机发展史小论文》的操作草案。",
+        "intent": IntentDecision(
+            intent=TeacherIntent.ACTION_DRAFT,
+            target_agent="teacher_action",
+        ),
+    })
+
+    review = node(state)["review"]
+
+    assert review.approved is True
+    prompt = agent.prompts[-1]
+    assert "不包含或暗示可以执行写操作" not in prompt
+    assert "待审批" in prompt
+    assert "声称操作已经执行" in prompt
+
+
+def test_reviewer_keeps_write_rule_for_readonly_intents():
+    agent = _RecordingAgent({
+        "messages": [AIMessage(content="审核完成")],
+        "structured_response": ReviewResult(approved=True, issues=[]),
+    })
+    node = create_node(db=object(), registry=_RecordingRegistry(agent))
+    state = _state()
+    state["intent"] = IntentDecision(
+        intent=TeacherIntent.TEACHING_DATA,
+        target_agent="teaching_data",
+    )
+
+    node(state)
+
+    assert "不包含或暗示可以执行写操作" in agent.prompts[-1]
+
+
 def test_reviewer_allows_casual_chat_without_business_evidence():
     node = create_node(db=object(), registry=_FakeRegistry({
         "messages": [AIMessage(content="审核完成")],
