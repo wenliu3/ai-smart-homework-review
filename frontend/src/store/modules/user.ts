@@ -42,6 +42,8 @@ const mutations = {
       localStorage.setItem("userInfo", JSON.stringify(state.userInfo));
       if (state.userInfo.token) {
         localStorage.setItem("token", state.userInfo.token);
+      } else {
+        localStorage.removeItem("token");
       }
     } else {
       localStorage.removeItem("userInfo");
@@ -106,6 +108,7 @@ const actions = {
         isFirstLogin: response.isFirstLogin,
         ...(response.user || {}),
       };
+      await dispatch("auth/clearPermissions", null, { root: true });
       await dispatch("replaceSession", session);
 
       return response;
@@ -184,7 +187,6 @@ const actions = {
 
     if (!refreshTokenValue) {
       console.warn('未找到刷新令牌，可能用户未勾选"记住我"或令牌已过期');
-      commit("CLEAR_SESSION");
       throw new Error("登录已过期，请重新登录");
     }
 
@@ -216,9 +218,6 @@ const actions = {
         return response;
       } catch (error) {
         console.error("刷新token失败:", error);
-
-        // 刷新失败时清除所有用户会话信息
-        commit("CLEAR_SESSION");
 
         // 重新抛出错误供上层处理
         throw error;
