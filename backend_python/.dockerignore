@@ -3,5 +3,7 @@ __pycache__
 .env
 .git
 .gitignore
+.pytest_cache/
+.pytest-review-*/
 uploads/*
 !uploads/.gitkeep

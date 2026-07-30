@@ -30,6 +30,13 @@ def test_backend_image_uses_python_312() -> None:
     assert "FROM python:3.11" not in dockerfile
 
 
+def test_backend_dockerignore_excludes_pytest_runtime_directories() -> None:
+    dockerignore = _read("backend_python/.dockerignore")
+
+    assert ".pytest_cache/" in dockerignore
+    assert ".pytest-review-*/" in dockerignore
+
+
 def test_entrypoint_waits_for_all_runtime_dependencies() -> None:
     entrypoint = _read("backend_python/entrypoint.sh")
 
