@@ -54,53 +54,33 @@
               ></el-input>
             </el-form-item>
 
-            <!-- 登录方式选择 -->
-            <el-form-item v-if="!isRegister" label="登录方式" prop="loginType">
-              <el-segmented 
-                v-model="form.loginType" 
-                :options="[
-                  { label: '用户名登录', value: 'username' },
-                  { label: '学号登录', value: 'studentId' },
-                  { label: '邮箱登录', value: 'email' }
-                ]"
-                @change="handleLoginTypeChange"
-                class="w-full"
+            <!-- 登录账号：由后端自动识别用户名、邮箱或学号 -->
+            <el-form-item
+              v-if="!isRegister"
+              label="账号"
+              prop="account"
+              data-testid="login-account"
+            >
+              <el-input
+                v-model="form.account"
+                placeholder="请输入用户名、邮箱或学号"
+                autocomplete="username"
+                class="!rounded"
               />
             </el-form-item>
 
-            <!-- 用户名字段（登录） -->
-            <el-form-item v-if="!isRegister && form.loginType === 'username'" label="用户名" prop="username">
-              <el-input
-                v-model="form.username"
-                placeholder="请输入用户名"
-                class="!rounded"
-              ></el-input>
-            </el-form-item>
-
-            <!-- 学号字段 -->
-            <el-form-item v-if="!isRegister && form.loginType === 'studentId'" label="学号" prop="studentId">
-              <el-input
-                v-model="form.studentId"
-                placeholder="请输入学号"
-                class="!rounded"
-              ></el-input>
-            </el-form-item>
-
-            <!-- 邮箱字段 -->
-            <el-form-item v-if="isRegister || form.loginType === 'email'" label="邮箱" prop="email">
-              <el-input
-                v-model="form.email"
-                placeholder="请输入邮箱"
-                class="!rounded"
-              ></el-input>
+            <!-- 注册邮箱字段 -->
+            <el-form-item v-if="isRegister" label="邮箱" prop="email">
+              <el-input v-model="form.email" placeholder="请输入邮箱" class="!rounded" />
             </el-form-item>
 
             <!-- 密码字段 -->
-            <el-form-item label="密码" prop="password">
+            <el-form-item label="密码" prop="password" data-testid="login-password">
               <el-input
                 v-model="form.password"
                 placeholder="请输入密码"
                 type="password"
+                :autocomplete="isRegister ? 'new-password' : 'current-password'"
                 show-password
                 class="!rounded"
               ></el-input>
@@ -206,13 +186,12 @@ const error = ref<string | null>(null);
 
 // 表单数据
 const form = reactive({
+  account: "",
   username: "",
   email: "",
-  studentId: "",
   password: "",
   confirmPassword: "",
   rememberMe: true, // 默认勾选记住密码
-  loginType: "username", // 默认用户名登录
 });
 
 // 校验密码是否一致
@@ -224,16 +203,30 @@ const validateConfirmPassword = (rule: any, value: string, callback: any) => {
   }
 };
 
+const validateAccount = (
+  _rule: unknown,
+  value: string,
+  callback: (error?: Error) => void
+) => {
+  const account = value?.trim();
+  if (!account) {
+    callback(new Error("请输入用户名、邮箱或学号"));
+    return;
+  }
+  if (account.length > 255) {
+    callback(new Error("账号长度不能超过255个字符"));
+    return;
+  }
+  callback();
+};
+
 // 表单校验规则
 const rules = reactive<FormRules>({
+  account: [{ validator: validateAccount, trigger: "blur" }],
   username: [{ required: true, message: "请输入用户名", trigger: "blur" }],
   email: [
     { required: true, message: "请输入邮箱", trigger: "blur" },
     { type: "email", message: "请输入正确的邮箱格式", trigger: "blur" },
-  ],
-  studentId: [
-    { required: true, message: "请输入学号", trigger: "blur" },
-    { min: 1, max: 20, message: "学号长度应在1-20个字符之间", trigger: "blur" },
   ],
   password: [
     { required: true, message: "请输入密码", trigger: "blur" },
@@ -244,18 +237,6 @@ const rules = reactive<FormRules>({
     { validator: validateConfirmPassword, trigger: "blur" },
   ],
 });
-
-// 处理登录方式切换
-const handleLoginTypeChange = (value: string) => {
-  // 清空相应字段的值和错误信息
-  if (value === 'email') {
-    form.studentId = '';
-  } else if (value === 'studentId') {
-    form.email = '';
-  }
-  // 清除表单验证错误
-  formRef.value?.clearValidate(['email', 'studentId']);
-};
 
 // 处理忘记密码
 const handleForgotPassword = () => {
@@ -286,13 +267,8 @@ const submitForm = async () => {
 
           ElMessage.success("注册成功");
         } else {
-          // 登录逻辑 - 根据登录类型选择不同的字段
-          let identifier = form.username;
-          if (form.loginType === 'email') identifier = form.email;
-          else if (form.loginType === 'studentId') identifier = form.studentId;
-
           const loginData = {
-            usernameOrEmailOrStudentId: identifier,
+            usernameOrEmailOrStudentId: form.account.trim(),
             password: form.password,
             rememberMe: form.rememberMe,
           };
