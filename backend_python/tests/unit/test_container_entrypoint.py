@@ -146,12 +146,12 @@ def test_compose_requires_secrets_without_containing_their_values() -> None:
         assert env_values[variable] not in compose_text
 
 
-def test_compose_keeps_mysql_internal_and_binds_supporting_data_services_to_loopback() -> None:
+def test_compose_exposes_mysql_for_navicat_and_keeps_internal_backend_address() -> None:
     compose_text = _read("docker-compose.yml")
     compose = yaml.safe_load(compose_text)
 
     assert "docker compose --env-file .env.docker up -d" in compose_text
-    assert "ports" not in compose["services"]["mysql"]
+    assert compose["services"]["mysql"]["ports"] == ["127.0.0.1:3307:3306"]
     for service in ("postgres", "redis"):
         assert all(
             str(port).startswith("127.0.0.1:")
