@@ -27,6 +27,11 @@ let isRefreshing = false;
 // 等待刷新完成的请求队列
 let failedQueue: Array<{ resolve: Function; reject: Function }> = [];
 
+const clearAuthState = () => {
+  void store.dispatch("user/clearSession");
+  void store.dispatch("auth/clearPermissions");
+};
+
 // 处理等待队列中的请求
 const processQueue = (error: any, token: string | null = null) => {
   failedQueue.forEach(({ resolve, reject }) => {
@@ -55,13 +60,13 @@ service.interceptors.request.use(
         } else {
           // token包含非法字符，移除它并触发重新登录
           console.error("Invalid token format detected, removing token");
-          store.dispatch("auth/clearPermissions", null, { root: true });
+          clearAuthState();
           // 注意：这里不直接跳转，避免中断当前请求
         }
       } catch (e) {
         console.error("Error processing token:", e);
         // 出错时清除token
-        store.dispatch("auth/clearPermissions", null, { root: true });
+        clearAuthState();
       }
     }
     return config;
@@ -223,6 +228,7 @@ function handleAuthError(message: string, code?: string | number) {
   }
 
   isHandling401 = true; // 立即标记为正在处理
+  clearAuthState();
 
   // 获取对应的认证配置
   const config = getAuthConfig(code);
@@ -234,14 +240,6 @@ function handleAuthError(message: string, code?: string | number) {
     type: config.type,
   }).finally(() => {
     console.log("弹框关闭，开始清理状态");
-
-    // 清除登录状态
-    try {
-      store.dispatch("auth/clearPermissions", null, { root: true });
-      console.log("权限清理完成");
-    } catch (error) {
-      console.error("清理权限时出错:", error);
-    }
 
     // 如果需要重定向到登录页
     if (config.needRedirect) {

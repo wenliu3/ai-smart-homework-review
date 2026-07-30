@@ -36,6 +36,19 @@ const getters = {
 
 // 定义mutations
 const mutations = {
+  REPLACE_USER_INFO(state, userInfo) {
+    state.userInfo = userInfo ? { ...userInfo } : null;
+    if (state.userInfo) {
+      localStorage.setItem("userInfo", JSON.stringify(state.userInfo));
+      if (state.userInfo.token) {
+        localStorage.setItem("token", state.userInfo.token);
+      }
+    } else {
+      localStorage.removeItem("userInfo");
+      localStorage.removeItem("token");
+    }
+  },
+
   SET_USER_INFO(state, userInfo) {
     if (userInfo && state.userInfo) {
       // 如果已有用户信息则更新
@@ -55,29 +68,45 @@ const mutations = {
   SET_REFRESH_PROMISE(state, promise) {
     state.refreshPromise = promise;
   },
+
+  CLEAR_SESSION(state) {
+    state.userInfo = null;
+    state.refreshPromise = null;
+    localStorage.removeItem("userInfo");
+    localStorage.removeItem("token");
+  },
 };
 
 // 定义actions
 const actions = {
+  replaceSession({ commit }, userInfo) {
+    commit("REPLACE_USER_INFO", userInfo);
+  },
+
+  clearSession({ commit }) {
+    commit("CLEAR_SESSION");
+  },
+
   /**
    * 用户登录
    */
-  async login({ commit }, { usernameOrEmailOrStudentId, password, rememberMe = false }) {
+  async login(
+    { dispatch },
+    { usernameOrEmailOrStudentId, password, rememberMe = false }
+  ) {
     try {
       const response = await login({ usernameOrEmailOrStudentId, password, rememberMe });
 
-      // 保存token到localStorage
-      localStorage.setItem("token", response.token);
-
-      // 更新用户信息到Vuex
-      commit("SET_USER_INFO", {
+      // 新登录账号必须完整替换旧会话，避免角色特有字段残留。
+      const session = {
         token: response.token,
         refreshToken: response.refreshToken,
         tokenExpiresAt: Date.now() + response.expiresIn * 1000,
         mustChangePassword: response.mustChangePassword,
         isFirstLogin: response.isFirstLogin,
-        ...(response.user && response.user),
-      });
+        ...(response.user || {}),
+      };
+      await dispatch("replaceSession", session);
 
       return response;
     } catch (error) {
@@ -155,9 +184,7 @@ const actions = {
 
     if (!refreshTokenValue) {
       console.warn('未找到刷新令牌，可能用户未勾选"记住我"或令牌已过期');
-      // 清除用户信息并跳转到登录页
-      commit("SET_USER_INFO", null);
-      localStorage.removeItem("token");
+      commit("CLEAR_SESSION");
       throw new Error("登录已过期，请重新登录");
     }
 
@@ -190,9 +217,8 @@ const actions = {
       } catch (error) {
         console.error("刷新token失败:", error);
 
-        // 刷新失败时清除所有认证信息
-        commit("SET_USER_INFO", null);
-        localStorage.removeItem("token");
+        // 刷新失败时清除所有用户会话信息
+        commit("CLEAR_SESSION");
 
         // 重新抛出错误供上层处理
         throw error;
@@ -218,9 +244,8 @@ const actions = {
       // 即使后端登出失败，前端也要清理本地状态
       console.warn("后端登出失败，但继续清理本地状态:", error);
     } finally {
-      // 清除用户信息
-      commit("SET_USER_INFO", null);
-      localStorage.removeItem("token");
+      // 清除用户会话
+      commit("CLEAR_SESSION");
 
       // 清除权限信息
       await dispatch("auth/clearPermissions", null, { root: true });
