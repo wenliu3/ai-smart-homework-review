@@ -128,6 +128,31 @@ describe("user session state", () => {
     expect(store.state.user.userInfo.studentId).toBeUndefined();
   });
 
+  it("单独清理权限时不删除用户会话存储", async () => {
+    const store = createStore<any>({ modules: { auth } });
+    store.state.auth.roles = ["teacher"];
+    store.state.auth.permissions = ["assignment:grade"];
+    store.state.auth.menus = [{ path: "/teacher/assignments" }];
+    localStorage.setItem("token", "teacher-token");
+    localStorage.setItem(
+      "userInfo",
+      JSON.stringify({ token: "teacher-token", role: "teacher" })
+    );
+
+    await store.dispatch("auth/clearPermissions");
+
+    expect(store.state.auth).toMatchObject({
+      roles: [],
+      permissions: [],
+      menus: [],
+    });
+    expect(localStorage.getItem("token")).toBe("teacher-token");
+    expect(JSON.parse(localStorage.getItem("userInfo")!)).toEqual({
+      token: "teacher-token",
+      role: "teacher",
+    });
+  });
+
   it("缺少刷新令牌时只抛错，不清理现有会话", async () => {
     const store = createStore<any>({ modules: { user: userModule } });
     store.state.user.userInfo = { token: "existing-token", role: "teacher" };

@@ -68,8 +68,6 @@ export const auth = {
       localStorage.removeItem("permissions");
       localStorage.removeItem("menus");
       localStorage.removeItem("roles");
-      localStorage.removeItem("userInfo");
-      localStorage.removeItem("token");
     },
   },
 

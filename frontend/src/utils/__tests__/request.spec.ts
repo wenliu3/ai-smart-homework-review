@@ -93,7 +93,10 @@ describe("request auth response interceptor", () => {
 
   it("登录请求 401 保留账号密码错误且不刷新、不弹认证对话框", async () => {
     const { default: request } = await import("../request");
+    localStorage.setItem("token", "old-token");
+    let authorization: string | undefined;
     const adapter: AxiosAdapter = async (config) => {
+      authorization = getAuthorization(config);
       throw unauthorizedResponse(config, "账号或密码错误");
     };
 
@@ -101,6 +104,7 @@ describe("request auth response interceptor", () => {
       request({ url: "/v1/auth/login", method: "post", adapter })
     ).rejects.toThrow("账号或密码错误");
 
+    expect(authorization).toBeUndefined();
     expect(mocks.dispatch).not.toHaveBeenCalled();
     expect(mocks.confirm).not.toHaveBeenCalled();
   });
@@ -213,5 +217,65 @@ describe("request auth response interceptor", () => {
     ).toHaveLength(1);
     expect(mocks.confirm).toHaveBeenCalledTimes(1);
     await vi.waitFor(() => expect(mocks.routerPush).toHaveBeenCalledTimes(1));
+  });
+
+  it("刷新成功后重放仍为 401 时不二次刷新，并只清理提示一次", async () => {
+    const { default: request } = await import("../request");
+    localStorage.setItem("token", "old-token");
+    const refreshGate = deferred();
+    mocks.dispatch.mockImplementation((type: string) => {
+      if (type === "user/refreshToken") return refreshGate.promise;
+      return Promise.resolve();
+    });
+    const attempts = new Map<string, number>();
+    const adapter: AxiosAdapter = async (config) => {
+      const url = config.url!;
+      attempts.set(url, (attempts.get(url) ?? 0) + 1);
+      throw unauthorizedResponse(config, "新令牌仍无效");
+    };
+
+    const firstRequest = request({
+      url: "/teacher/assignments",
+      method: "get",
+      adapter,
+    });
+    const secondRequest = request({
+      url: "/teacher/classes",
+      method: "get",
+      adapter,
+    });
+    await vi.waitFor(() => {
+      expect(attempts.get("/teacher/assignments")).toBe(1);
+      expect(attempts.get("/teacher/classes")).toBe(1);
+      expect(mocks.dispatch).toHaveBeenCalledTimes(1);
+    });
+
+    localStorage.setItem("token", "new-token");
+    refreshGate.resolve();
+    const results = await Promise.allSettled([firstRequest, secondRequest]);
+
+    expect(results.map(({ status }) => status)).toEqual([
+      "rejected",
+      "rejected",
+    ]);
+    expect(
+      mocks.dispatch.mock.calls.filter(
+        ([type]) => type === "user/refreshToken"
+      )
+    ).toHaveLength(1);
+    expect(
+      mocks.dispatch.mock.calls.filter(
+        ([type]) => type === "user/clearSession"
+      )
+    ).toHaveLength(1);
+    expect(
+      mocks.dispatch.mock.calls.filter(
+        ([type]) => type === "auth/clearPermissions"
+      )
+    ).toHaveLength(1);
+    expect(mocks.confirm).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(mocks.routerPush).toHaveBeenCalledTimes(1));
+    expect(attempts.get("/teacher/assignments")).toBe(2);
+    expect(attempts.get("/teacher/classes")).toBe(2);
   });
 });

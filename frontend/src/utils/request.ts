@@ -138,11 +138,28 @@ service.interceptors.response.use(
       ElMessage.error(errorMessage);
       return Promise.reject(error);
     }
+
+    // 已使用新令牌重放后仍然 401：终止刷新链路并统一清理认证状态。
+    if (status === 401 && originalRequest?._retry) {
+      const errorMessage = getResponseErrorMessage(
+        error.response?.data,
+        "登录已过期，请重新登录"
+      );
+      const responseData = error.response?.data as any;
+      handleAuthError(
+        errorMessage,
+        responseData?.code || responseData?.errorCode
+      );
+      return Promise.reject(error);
+    }
     
     // 处理HTTP 401状态码
     if (
       shouldAttemptTokenRefresh(status, requestUrl, !!originalRequest._retry)
     ) {
+      // 首次 401 即标记，包含随后进入等待队列的请求，避免重放后二次刷新。
+      originalRequest._retry = true;
+
       // 如果正在刷新token，将请求加入队列
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
@@ -156,7 +173,6 @@ service.interceptors.response.use(
         });
       }
 
-      originalRequest._retry = true;
       isRefreshing = true;
 
       try {
