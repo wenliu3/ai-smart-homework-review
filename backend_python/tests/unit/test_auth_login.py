@@ -12,7 +12,7 @@ def login_teacher(db):
         email="login_teacher@test.local",
         student_id="2024999",
         password=hash_password("test-password"),
-        name="Login Teacher",
+        name="登录测试用户",
         role="teacher",
         status="active",
     )
