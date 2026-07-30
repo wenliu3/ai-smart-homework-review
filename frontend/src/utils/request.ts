@@ -4,6 +4,12 @@ import { ElMessage, ElMessageBox, ElLoading } from "element-plus";
 import router from "@/router";
 import store from "@/store";
 import { getAuthConfig } from "./auth-codes";
+import {
+  getResponseErrorMessage,
+  isPublicAuthRequest,
+  shouldAttachAccessToken,
+  shouldAttemptTokenRefresh,
+} from "./auth-request";
 
 // 创建axios实例
 const service = axios.create({
@@ -40,7 +46,7 @@ service.interceptors.request.use(
     // 从localStorage获取token，确保取到最新值
     const token = localStorage.getItem("token");
 
-    if (token) {
+    if (token && shouldAttachAccessToken(config.url)) {
       try {
         // 检查token是否有效（不包含非ASCII字符）
         if (/^[\x00-\x7F]*$/.test(token)) {
@@ -88,6 +94,9 @@ service.interceptors.response.use(
       console.log("处理401错误和认证相关错误码", res);
       const errorMsg = res.message || "未授权，请重新登录";
       const errorCode = res.code || res.errorCode;
+      if (isPublicAuthRequest(response.config.url)) {
+        return Promise.reject(new Error(errorMsg));
+      }
       handleAuthError(errorMsg, errorCode);
       return Promise.reject(new Error(errorMsg));
     } else {
@@ -101,10 +110,21 @@ service.interceptors.response.use(
   // 错误响应处理
   async (error: AxiosError) => {
     const originalRequest = error.config as any;
-    console.log("处理HTTP状态码", error.response?.status, originalRequest?.url);
+    const status = error.response?.status;
+    const requestUrl = originalRequest?.url;
+    console.log("处理HTTP状态码", status, requestUrl);
+
+    // 登录、注册等公开认证请求失败时保留后端消息，绝不能触发token刷新。
+    if (status === 401 && isPublicAuthRequest(requestUrl)) {
+      const errorMessage = getResponseErrorMessage(
+        error.response?.data,
+        requestUrl?.includes("/login") ? "账号或密码错误" : "认证请求失败"
+      );
+      return Promise.reject(new Error(errorMessage));
+    }
     
     // 处理HTTP 403状态码 - 仅提示权限不足，不清除登录状态
-    if (error.response?.status === 403) {
+    if (status === 403) {
       let errorMessage = "权限不足，无法访问该资源";
       if (error.response?.data && typeof error.response.data === "object") {
         const data = error.response.data as any;
@@ -115,16 +135,9 @@ service.interceptors.response.use(
     }
     
     // 处理HTTP 401状态码
-    if (error.response?.status === 401 && !originalRequest._retry) {
-      // 如果是刷新token接口本身返回401，直接处理认证错误，不要重试
-      if (originalRequest.url?.includes("/auth/refresh-token")) {
-        console.log("刷新token接口返回401，停止重试");
-        // 提取错误信息
-        let errorMessage = "登录会话已过期，请重新登录";
-        let errorCode = 10012;
-        handleAuthError(errorMessage, errorCode);
-        return Promise.reject(error);
-      }
+    if (
+      shouldAttemptTokenRefresh(status, requestUrl, !!originalRequest._retry)
+    ) {
       // 如果正在刷新token，将请求加入队列
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
