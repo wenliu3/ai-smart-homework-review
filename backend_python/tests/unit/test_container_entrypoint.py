@@ -158,3 +158,10 @@ def test_compose_exposes_mysql_for_navicat_and_keeps_internal_backend_address() 
             for port in compose["services"][service]["ports"]
         )
     assert "@mysql:3306/ai_smart_review" in compose["services"]["backend"]["environment"]["DATABASE_URL"]
+
+
+def test_frontend_nginx_resolves_service_names_only_with_docker_dns() -> None:
+    nginx_config = _read("frontend/nginx.conf")
+
+    assert "resolver 127.0.0.11 valid=30s ipv6=off;" in nginx_config
+    assert "8.8.8.8" not in nginx_config
