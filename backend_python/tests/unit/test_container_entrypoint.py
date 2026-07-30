@@ -133,13 +133,15 @@ def test_compose_requires_secrets_without_containing_their_values() -> None:
         assert env_values[variable] not in compose_text
 
 
-def test_compose_documents_env_file_and_binds_databases_to_loopback() -> None:
+def test_compose_keeps_mysql_internal_and_binds_supporting_data_services_to_loopback() -> None:
     compose_text = _read("docker-compose.yml")
     compose = yaml.safe_load(compose_text)
 
     assert "docker compose --env-file .env.docker up -d" in compose_text
-    for service in ("mysql", "postgres", "redis"):
+    assert "ports" not in compose["services"]["mysql"]
+    for service in ("postgres", "redis"):
         assert all(
             str(port).startswith("127.0.0.1:")
             for port in compose["services"][service]["ports"]
         )
+    assert "@mysql:3306/ai_smart_review" in compose["services"]["backend"]["environment"]["DATABASE_URL"]

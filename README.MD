@@ -260,7 +260,9 @@ cp .env.docker.example .env.docker                     # 修改其中的密钥
 docker compose --env-file .env.docker up -d
 ```
 
-共 6 个服务：`mysql` / `postgres` / `redis` / `backend`（:8000，启动时自动执行双库迁移与种子数据）/ `worker`（Celery 批改队列）/ `frontend`（:80，nginx 反代 + SSE 专用配置）。三个数据库端口仅绑定 127.0.0.1。
+共 6 个服务：`mysql` / `postgres` / `redis` / `backend`（:8000，启动时自动执行双库迁移与种子数据）/ `worker`（Celery 批改队列）/ `frontend`（:80，nginx 反代 + SSE 专用配置）。MySQL 仅在 Docker 内网通过 `mysql:3306` 访问，不映射宿主机端口；PostgreSQL 与 Redis 仅绑定 `127.0.0.1`。
+
+直接在 Windows 运行后端时使用 `localhost:3306` 连接 Windows MySQL；通过 Compose 运行后端时使用 `mysql:3306` 连接 Docker MySQL。
 
 ### 默认账号
 
