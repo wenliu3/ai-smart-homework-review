@@ -99,6 +99,7 @@ backend_python/uploads/*
 .codebuddy/
 .workbuddy/
 .workbuddy
+.worktrees/
 .agents/
 /AGENT.md
 /AGENTS.md
