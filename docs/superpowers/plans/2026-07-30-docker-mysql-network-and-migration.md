@@ -155,7 +155,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Docker MySQL 导入失败，保留 SQL 备份�
 docker exec ai-review-mysql sh -c 'mysql --user=root --password="$MYSQL_ROOT_PASSWORD" --batch ai_smart_review -e "SELECT (SELECT COUNT(*) FROM users) AS users, (SELECT COUNT(*) FROM assignments) AS assignments, (SELECT COUNT(*) FROM submissions) AS submissions, (SELECT COUNT(*) FROM agent_chat_messages) AS legacy_messages;"'
 ```
 
-预期：`users=38`、`assignments=20`、`submissions=189`、`legacy_messages=6`，与迁移前读取到的源数据库一致。
+预期：`users=34`、`assignments=20`、`submissions=189`、`legacy_messages=6`，与迁移前使用精确 `COUNT(*)` 读取到的源数据库一致。
 
 - [ ] **步骤 6：清理容器内临时副本但保留仓库外备份**
 
