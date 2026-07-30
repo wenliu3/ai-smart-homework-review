@@ -30,6 +30,12 @@ def test_backend_image_uses_python_312() -> None:
     assert "FROM python:3.11" not in dockerfile
 
 
+def test_backend_image_retries_transient_apt_download_failures() -> None:
+    dockerfile = _read("backend_python/Dockerfile")
+
+    assert dockerfile.count("Acquire::Retries=5") == 2
+
+
 def test_backend_dockerignore_excludes_pytest_runtime_directories() -> None:
     dockerignore = _read("backend_python/.dockerignore")
 

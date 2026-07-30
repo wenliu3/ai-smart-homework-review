@@ -3,7 +3,8 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # 安装编译工具（部分 Python 包需要）+ LibreOffice（docx→PDF）+ 中文字体（否则中文 PDF 乱码）
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get -o Acquire::Retries=5 update \
+    && apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
     gcc libffi-dev \
     libreoffice-writer \
     fonts-noto-cjk \
