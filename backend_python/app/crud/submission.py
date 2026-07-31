@@ -224,6 +224,8 @@ def get_my_submission(db: Session, assignment_id: int, student_id: int) -> dict:
     result = {
         "assignment": {
             "id": str(assignment.id), "title": assignment.title, "description": assignment.description,
+            "attachments": assignment.attachments or [],
+            "allowAttachments": bool(assignment.allow_attachments),
             "dueDate": assignment.end_date.isoformat() if assignment.end_date else None,
             "maxScore": 100, "rawMaxScore": max_score, "teacherName": assignment.teacher_name,
             "aiRule": assignment.ai_rule, "status": assignment.status,

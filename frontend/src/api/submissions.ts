@@ -22,6 +22,8 @@ export interface Assignment {
   id: string;
   title: string;
   description: string;
+  attachments: Attachment[];
+  allowAttachments: boolean;
   dueDate: string;
   maxScore: number;
   teacherName: string; // 教师姓名
