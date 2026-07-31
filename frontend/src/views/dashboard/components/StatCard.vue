@@ -1,65 +1,54 @@
 <template>
-  <div
+  <article
     class="stat-card"
     :class="[`stat-card--${variant}`, { 'stat-card--loading': loading }]"
   >
-    <div class="stat-card__icon" v-if="icon">
-      <component :is="iconComponent" :class="iconClass" />
+    <div class="stat-card__top">
+      <span class="stat-card__title">{{ title }}</span>
+      <span v-if="iconComponent" class="stat-card__icon">
+        <component :is="iconComponent" />
+      </span>
     </div>
 
-    <div class="stat-card__content">
-      <div class="stat-card__title">{{ title }}</div>
-      <div class="stat-card__value">
-        <span class="value-number">{{ formattedValue }}</span>
-        <span class="value-unit" v-if="unit">{{ unit }}</span>
-      </div>
-      <div class="stat-card__subtitle" v-if="subtitle">{{ subtitle }}</div>
+    <div class="stat-card__value">
+      <strong>{{ formattedValue }}</strong>
+      <span v-if="unit">{{ unit }}</span>
+    </div>
+    <p v-if="subtitle" class="stat-card__subtitle">{{ subtitle }}</p>
 
-      <!-- 趋势指示器 -->
-      <div class="stat-card__trend" v-if="trend">
-        <el-icon :class="trendIconClass">
-          <component :is="trendIcon" />
-        </el-icon>
-        <span :class="trendTextClass">{{ trendText }}</span>
-      </div>
-
-      <!-- 进度条 -->
-      <div
-        class="stat-card__progress"
-        v-if="showProgress && progress !== undefined"
-      >
-        <div class="progress-bar">
-          <div
-            class="progress-fill"
-            :style="{ width: `${Math.min(progress, 100)}%` }"
-          ></div>
-        </div>
-        <span class="progress-text">{{ progress }}%</span>
-      </div>
+    <div v-if="trend" class="stat-card__trend" :class="`is-${trend}`">
+      <el-icon><component :is="trendIcon" /></el-icon>
+      <span>{{ trendText }}</span>
     </div>
 
-    <!-- 加载状态 -->
-    <div class="stat-card__loading" v-if="loading">
-      <el-icon class="is-loading">
-        <Loading />
-      </el-icon>
+    <div
+      v-if="showProgress && progress !== undefined"
+      class="stat-card__progress"
+    >
+      <span
+        ><i :style="{ width: `${Math.min(Math.max(progress, 0), 100)}%` }"></i
+      ></span>
+      <small>{{ progress }}%</small>
     </div>
-  </div>
+
+    <div v-if="loading" class="stat-card__loading">
+      <el-icon class="is-loading"><Loading /></el-icon>
+    </div>
+  </article>
 </template>
 
 <script setup lang="ts">
 import { computed } from "vue";
 import {
-  Loading,
-  User,
-  School,
+  ArrowDown,
+  ArrowUp,
   Document,
   List,
-  // Robot, // 这个图标不存在，用其他替代
-  TrendCharts,
-  ArrowUp,
-  ArrowDown,
+  Loading,
   Minus,
+  School,
+  TrendCharts,
+  User,
 } from "@element-plus/icons-vue";
 
 interface Props {
@@ -82,210 +71,143 @@ const props = withDefaults(defineProps<Props>(), {
   showProgress: false,
 });
 
-// 图标映射
 const iconMap: Record<string, any> = {
   user: User,
   school: School,
   document: Document,
   list: List,
-  robot: TrendCharts, // 用TrendCharts替代Robot
+  robot: TrendCharts,
   trend: TrendCharts,
 };
 
-const iconComponent = computed(() => {
-  return props.icon ? iconMap[props.icon] || User : null;
-});
+const iconComponent = computed(() =>
+  props.icon ? iconMap[props.icon] || User : null
+);
 
-const iconClass = computed(() => {
-  return `stat-icon stat-icon--${props.variant}`;
-});
-
-// 格式化数值显示
 const formattedValue = computed(() => {
   if (props.loading) return "--";
-
-  if (typeof props.value === "number") {
-    // 大数值格式化
-    if (props.value >= 10000) {
-      return (props.value / 10000).toFixed(1) + "万";
-    } else if (props.value >= 1000) {
-      return (props.value / 1000).toFixed(1) + "k";
-    }
-    return props.value.toLocaleString();
-  }
-
-  return props.value;
+  if (typeof props.value !== "number") return props.value;
+  if (props.value >= 10000) return `${(props.value / 10000).toFixed(1)}万`;
+  if (props.value >= 1000) return `${(props.value / 1000).toFixed(1)}k`;
+  return props.value.toLocaleString();
 });
 
-// 趋势相关计算
 const trendIcon = computed(() => {
-  switch (props.trend) {
-    case "up":
-      return ArrowUp;
-    case "down":
-      return ArrowDown;
-    case "stable":
-      return Minus;
-    default:
-      return null;
-  }
-});
-
-const trendIconClass = computed(() => {
-  return `trend-icon trend-icon--${props.trend}`;
-});
-
-const trendTextClass = computed(() => {
-  return `trend-text trend-text--${props.trend}`;
+  if (props.trend === "up") return ArrowUp;
+  if (props.trend === "down") return ArrowDown;
+  return Minus;
 });
 
 const trendText = computed(() => {
-  if (!props.trendValue) return "";
-
   const prefix = props.trend === "up" ? "+" : props.trend === "down" ? "-" : "";
-  return `${prefix}${Math.abs(props.trendValue)}%`;
+  return props.trendValue !== undefined
+    ? `${prefix}${Math.abs(props.trendValue)}%`
+    : props.trend === "stable"
+    ? "保持稳定"
+    : "";
 });
 </script>
 
 <style scoped>
 .stat-card {
   position: relative;
-  background: #ffffff;
-  border-radius: 12px;
-  padding: 20px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-  border: 1px solid #f0f0f0;
-  transition: all 0.3s ease;
+  min-width: 0;
   overflow: hidden;
+  padding: 17px 18px;
+  border: 1px solid #e8eaf1;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(35, 40, 68, 0.045);
 }
 
-.stat-card:hover {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
-  transform: translateY(-2px);
-}
-
-.stat-card--loading {
-  opacity: 0.7;
-}
-
-/* 变体样式 */
-.stat-card--primary {
-  background: linear-gradient(135deg, #007aff 0%, #5ac8fa 100%);
-  color: white;
-  border: none;
-}
-
-.stat-card--success {
-  background: linear-gradient(135deg, #34c759 0%, #30d158 100%);
-  color: white;
-  border: none;
-}
-
-.stat-card--warning {
-  background: linear-gradient(135deg, #ff9f0a 0%, #ffcc02 100%);
-  color: white;
-  border: none;
-}
-
-.stat-card--danger {
-  background: linear-gradient(135deg, #ff3b30 0%, #ff6b6b 100%);
-  color: white;
-  border: none;
-}
-
-.stat-card--info {
-  background: linear-gradient(135deg, #af52de 0%, #da70d6 100%);
-  color: white;
-  border: none;
-}
-
-.stat-card__icon {
+.stat-card::before {
   position: absolute;
-  top: 16px;
-  right: 16px;
-  opacity: 0.3;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 3px;
+  background: #7d74a8;
+  content: "";
 }
 
-.stat-icon {
-  font-size: 24px;
+.stat-card--primary::before {
+  background: #6558d9;
+}
+.stat-card--success::before {
+  background: #2b9b70;
+}
+.stat-card--warning::before {
+  background: #d39136;
+}
+.stat-card--danger::before {
+  background: #dd5965;
+}
+.stat-card--info::before {
+  background: #568bc6;
 }
 
-.stat-icon--primary,
-.stat-icon--success,
-.stat-icon--warning,
-.stat-icon--danger,
-.stat-icon--info {
-  color: rgba(255, 255, 255, 0.8);
+.stat-card__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
-
-.stat-card__content {
-  position: relative;
-  z-index: 1;
-}
-
 .stat-card__title {
-  font-size: 14px;
-  color: #666;
-  margin-bottom: 8px;
-  font-weight: 500;
+  color: #747b8f;
+  font-size: 12px;
+  font-weight: 600;
 }
-
-.stat-card--primary .stat-card__title,
-.stat-card--success .stat-card__title,
-.stat-card--warning .stat-card__title,
-.stat-card--danger .stat-card__title,
-.stat-card--info .stat-card__title {
-  color: rgba(255, 255, 255, 0.9);
+.stat-card__icon {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  background: #f1efff;
+  color: #6558d9;
+}
+.stat-card--success .stat-card__icon {
+  background: #eaf8f2;
+  color: #278e68;
+}
+.stat-card--warning .stat-card__icon {
+  background: #fff5e6;
+  color: #c17b27;
+}
+.stat-card--danger .stat-card__icon {
+  background: #fff0f1;
+  color: #d6525e;
+}
+.stat-card--info .stat-card__icon {
+  background: #edf5ff;
+  color: #4f82be;
+}
+.stat-card__icon :deep(svg) {
+  width: 16px;
 }
 
 .stat-card__value {
   display: flex;
   align-items: baseline;
-  margin-bottom: 4px;
+  gap: 4px;
+  margin-top: 11px;
 }
-
-.value-number {
-  font-size: 28px;
-  font-weight: 700;
-  color: #1d1d1f;
+.stat-card__value strong {
+  overflow: hidden;
+  color: #2d3248;
+  font-size: 27px;
   line-height: 1;
+  text-overflow: ellipsis;
 }
-
-.stat-card--primary .value-number,
-.stat-card--success .value-number,
-.stat-card--warning .value-number,
-.stat-card--danger .value-number,
-.stat-card--info .value-number {
-  color: white;
-}
-
-.value-unit {
-  font-size: 14px;
-  color: #666;
-  margin-left: 4px;
-  font-weight: 400;
-}
-
-.stat-card--primary .value-unit,
-.stat-card--success .value-unit,
-.stat-card--warning .value-unit,
-.stat-card--danger .value-unit,
-.stat-card--info .value-unit {
-  color: rgba(255, 255, 255, 0.8);
-}
-
-.stat-card__subtitle {
+.stat-card__value span {
+  color: #878ea2;
   font-size: 12px;
-  color: #999;
-  margin-bottom: 8px;
 }
-
-.stat-card--primary .stat-card__subtitle,
-.stat-card--success .stat-card__subtitle,
-.stat-card--warning .stat-card__subtitle,
-.stat-card--danger .stat-card__subtitle,
-.stat-card--info .stat-card__subtitle {
-  color: rgba(255, 255, 255, 0.7);
+.stat-card__subtitle {
+  margin: 7px 0 0;
+  color: #9ca2b3;
+  font-size: 10px;
 }
 
 .stat-card__trend {
@@ -293,143 +215,67 @@ const trendText = computed(() => {
   align-items: center;
   gap: 4px;
   margin-top: 8px;
+  color: #8d93a4;
+  font-size: 10px;
 }
-
-.trend-icon {
-  font-size: 14px;
+.stat-card__trend.is-up {
+  color: #278e68;
 }
-
-.trend-icon--up {
-  color: #34c759;
-}
-
-.trend-icon--down {
-  color: #ff3b30;
-}
-
-.trend-icon--stable {
-  color: #8e8e93;
-}
-
-.trend-text {
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.trend-text--up {
-  color: #34c759;
-}
-
-.trend-text--down {
-  color: #ff3b30;
-}
-
-.trend-text--stable {
-  color: #8e8e93;
+.stat-card__trend.is-down {
+  color: #d6525e;
 }
 
 .stat-card__progress {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 12px;
+  gap: 7px;
+  margin-top: 10px;
 }
-
-.progress-bar {
+.stat-card__progress > span {
+  height: 5px;
   flex: 1;
-  height: 6px;
-  background: #f0f0f0;
-  border-radius: 3px;
   overflow: hidden;
+  border-radius: 5px;
+  background: #eceef3;
 }
-
-.stat-card--primary .progress-bar,
-.stat-card--success .progress-bar,
-.stat-card--warning .progress-bar,
-.stat-card--danger .progress-bar,
-.stat-card--info .progress-bar {
-  background: rgba(255, 255, 255, 0.3);
-}
-
-.progress-fill {
+.stat-card__progress i {
+  display: block;
   height: 100%;
-  background: #007aff;
-  border-radius: 3px;
-  transition: width 0.3s ease;
+  border-radius: 5px;
+  background: linear-gradient(90deg, #d3a04b, #ebc56f);
 }
-
-.stat-card--success .progress-fill {
-  background: rgba(255, 255, 255, 0.9);
-}
-
-.stat-card--warning .progress-fill {
-  background: rgba(255, 255, 255, 0.9);
-}
-
-.stat-card--danger .progress-fill {
-  background: rgba(255, 255, 255, 0.9);
-}
-
-.stat-card--info .progress-fill {
-  background: rgba(255, 255, 255, 0.9);
-}
-
-.progress-text {
-  font-size: 12px;
-  color: #666;
-  font-weight: 500;
-  min-width: 35px;
+.stat-card__progress small {
+  min-width: 30px;
+  color: #8c92a3;
+  font-size: 9px;
   text-align: right;
-}
-
-.stat-card--primary .progress-text,
-.stat-card--success .progress-text,
-.stat-card--warning .progress-text,
-.stat-card--danger .progress-text,
-.stat-card--info .progress-text {
-  color: rgba(255, 255, 255, 0.9);
 }
 
 .stat-card__loading {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(255, 255, 255, 0.8);
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.84);
+  color: #6558d9;
   backdrop-filter: blur(2px);
 }
-
 .is-loading {
-  font-size: 20px;
-  color: #007aff;
-  animation: rotate 2s linear infinite;
+  animation: rotate 1.5s linear infinite;
 }
 
 @keyframes rotate {
-  from {
-    transform: rotate(0deg);
-  }
   to {
     transform: rotate(360deg);
   }
 }
 
-/* 响应式设计 */
-@media (max-width: 768px) {
+@media (max-width: 520px) {
   .stat-card {
-    padding: 16px;
+    padding: 14px;
   }
-
-  .value-number {
-    font-size: 24px;
-  }
-
-  .stat-card__title {
-    font-size: 13px;
+  .stat-card__value strong {
+    font-size: 23px;
   }
 }
 </style>

@@ -1,319 +1,283 @@
 <template>
-  <div class="student-dashboard">
-    <!-- 页面头部 -->
-    <div class="dashboard-header">
-      <div class="header-content">
-        <h1 class="dashboard-title">🎓 {{ userName }}的学习中心</h1>
-        <div class="header-actions">
+  <div class="student-page student-dashboard">
+    <div class="student-page__inner dashboard-inner">
+      <section class="student-hero dashboard-hero">
+        <div class="dashboard-hero__copy">
+          <p class="student-eyebrow">LEARNING CENTER</p>
+          <h1 class="student-page-title">{{ greeting }}，{{ userName }}</h1>
+          <p class="student-page-description">
+            {{
+              priorityMessage
+            }}。先完成临近截止的任务，再查看最近评价和学习表现。
+          </p>
+        </div>
+        <div class="dashboard-hero__actions">
+          <el-button :icon="School" @click="goToClasses">我的班级</el-button>
           <el-button
+            class="student-primary-button"
             type="primary"
             :icon="Refresh"
-            @click="refreshData"
             :loading="isRefreshing"
-            size="default"
+            @click="refreshData"
           >
             刷新数据
           </el-button>
-          <el-button :icon="School" @click="goToClasses" size="default">
-            我的班级
-          </el-button>
         </div>
-      </div>
-    </div>
+      </section>
 
-    <!-- 统计卡片 -->
-    <div class="stats-grid">
-      <StatCard
-        title="已完成"
-        :value="studentStats?.completedSubmissions || 0"
-        unit="份"
-        subtitle="已提交"
-        icon="document"
-        variant="primary"
-        :loading="loading"
-      />
-      <StatCard
-        title="平均分"
-        :value="studentStats?.averageScore || 0"
-        unit="分"
-        subtitle="AI+教师"
-        icon="trend"
-        variant="success"
-        :loading="loading"
-      />
-      <StatCard
-        title="加入班级"
-        :value="studentStats?.joinedClasses || 0"
-        unit="个"
-        subtitle="活跃班级"
-        icon="school"
-        variant="info"
-        :loading="loading"
-      />
-      <StatCard
-        title="按时率"
-        :value="studentStats?.onTimeRate || 0"
-        unit="%"
-        subtitle="优秀表现"
-        icon="user"
-        variant="warning"
-        :loading="loading"
-        :progress="studentStats?.onTimeRate"
-        :show-progress="true"
-      />
-      <StatCard
-        title="待办"
-        :value="studentStats?.pendingAssignments || 0"
-        unit="个"
-        subtitle="待完成"
-        icon="list"
-        variant="danger"
-        :loading="loading"
-      />
-    </div>
-
-    <!-- 图表区域 -->
-    <div class="charts-grid">
-      <!-- 提交状态统计 -->
-      <div class="chart-card">
-        <div class="chart-header">
-          <h3 class="chart-title">📅 提交状态统计</h3>
-        </div>
-        <DonutChart
-          :data="submissionStatusData"
-          :height="280"
+      <section class="stats-grid" aria-label="学习数据概览">
+        <StatCard
+          title="待完成"
+          :value="studentStats?.pendingAssignments || 0"
+          unit="个"
+          subtitle="优先处理"
+          icon="list"
+          variant="danger"
           :loading="loading"
-          :show-percentage="true"
         />
-      </div>
-
-      <!-- 个人表现分析 -->
-      <div class="chart-card">
-        <div class="chart-header">
-          <h3 class="chart-title">🎯 个人表现分析</h3>
-        </div>
-        <BarChart
-          :data="performanceData"
-          :height="280"
+        <StatCard
+          title="已提交"
+          :value="studentStats?.completedSubmissions || 0"
+          unit="份"
+          subtitle="本学期累计"
+          icon="document"
+          variant="primary"
           :loading="loading"
-          unit="次"
-          :show-value="true"
         />
-      </div>
-    </div>
+        <StatCard
+          title="平均分"
+          :value="studentStats?.averageScore || 0"
+          unit="分"
+          subtitle="AI 与教师评价"
+          icon="trend"
+          variant="success"
+          :loading="loading"
+        />
+        <StatCard
+          title="按时率"
+          :value="studentStats?.onTimeRate || 0"
+          unit="%"
+          subtitle="按期提交表现"
+          icon="user"
+          variant="warning"
+          :loading="loading"
+          :progress="studentStats?.onTimeRate"
+          show-progress
+        />
+        <StatCard
+          title="加入班级"
+          :value="studentStats?.joinedClasses || 0"
+          unit="个"
+          subtitle="当前班级"
+          icon="school"
+          variant="info"
+          :loading="loading"
+        />
+      </section>
 
-    <!-- 数据表格区域 -->
-    <div class="tables-grid-two">
-      <!-- 待完成作业 -->
-      <div class="table-card">
-        <div class="table-header">
-          <h3 class="table-title">📝 待完成作业</h3>
-          <div class="table-header-right">
-            <el-tag
-              v-if="studentStats?.pendingAssignments"
-              type="warning"
-              size="small"
-            >
-              {{ studentStats.pendingAssignments }} 个待办
-            </el-tag>
-            <el-button type="primary" size="small" @click="viewAllAssignments">
-              查看更多
+      <section class="dashboard-priority-grid">
+        <article
+          data-testid="priority-todos"
+          class="priority-card priority-card--todos student-card"
+        >
+          <header class="priority-card__header">
+            <div>
+              <p class="student-eyebrow">UP NEXT</p>
+              <h2 class="student-section-title">待完成作业</h2>
+              <p class="student-section-description">
+                按截止时间优先处理近期任务
+              </p>
+            </div>
+            <el-button text type="primary" @click="viewAllAssignments">
+              查看全部
+              <el-icon><ArrowRight /></el-icon>
             </el-button>
+          </header>
+
+          <div v-if="pendingAssignments.length" class="todo-list">
+            <button
+              v-for="assignment in pendingAssignments"
+              :key="assignment.assignmentId"
+              type="button"
+              class="todo-item"
+              :class="{ 'todo-item--urgent': isUrgent(assignment.endDate) }"
+              @click="
+                goToAssignment(assignment.assignmentId, assignment.classId)
+              "
+            >
+              <span class="todo-item__date">
+                <strong>{{ formatDeadlineDay(assignment.endDate) }}</strong>
+                <small>{{ formatDeadlineMonth(assignment.endDate) }}</small>
+              </span>
+              <span class="todo-item__main">
+                <span class="todo-item__title-row">
+                  <strong>{{ assignment.title }}</strong>
+                  <span
+                    v-if="isUrgent(assignment.endDate)"
+                    class="urgent-badge"
+                  >
+                    即将截止
+                  </span>
+                </span>
+                <span
+                  >{{ assignment.className }} ·
+                  {{ deadlineHint(assignment.endDate) }}</span
+                >
+              </span>
+              <span class="todo-item__action">
+                {{ assignment.status === "draft" ? "继续编辑" : "开始作业" }}
+                <el-icon><ArrowRight /></el-icon>
+              </span>
+            </button>
+          </div>
+          <div v-else class="dashboard-empty">
+            <el-empty description="当前没有待办作业" :image-size="78" />
+          </div>
+        </article>
+
+        <article class="priority-card priority-card--recent student-card">
+          <header class="priority-card__header">
+            <div>
+              <p class="student-eyebrow">RECENT</p>
+              <h2 class="student-section-title">最近提交</h2>
+              <p class="student-section-description">快速回顾成绩与批改状态</p>
+            </div>
+            <el-button text type="primary" @click="viewAllSubmissions">
+              查看全部
+            </el-button>
+          </header>
+
+          <div v-if="recentSubmissions.length" class="recent-list">
+            <div
+              v-for="submission in recentSubmissions"
+              :key="
+                submission.id ||
+                `${submission.assignmentTitle}-${submission.submittedAt}`
+              "
+              class="recent-item"
+            >
+              <span class="recent-item__score">
+                <strong>{{
+                  submission.teacherScore ?? submission.aiScore ?? "--"
+                }}</strong>
+                <small>/100</small>
+              </span>
+              <span class="recent-item__main">
+                <strong>{{ submission.assignmentTitle }}</strong>
+                <small>{{ formatDateTime(submission.submittedAt) }}</small>
+              </span>
+              <span
+                class="student-status"
+                :class="`student-status--${getStatusType(submission.status)}`"
+              >
+                {{ getStatusText(submission.status) }}
+              </span>
+            </div>
+          </div>
+          <div v-else class="dashboard-empty">
+            <el-empty description="暂无提交记录" :image-size="78" />
+          </div>
+        </article>
+      </section>
+
+      <section data-testid="dashboard-charts" class="dashboard-charts">
+        <div class="dashboard-section-heading">
+          <div>
+            <p class="student-eyebrow">INSIGHTS</p>
+            <h2 class="student-section-title">学习表现</h2>
+            <p class="student-section-description">
+              查看提交结构和成绩分布趋势
+            </p>
           </div>
         </div>
-        <el-table
-          :data="(studentStats?.pendingAssignmentsList || []).slice(0, 5)"
-          style="width: 100%"
-          :loading="loading"
-          empty-text="暂无待办作业"
-          table-layout="fixed"
-        >
-          <el-table-column
-            prop="title"
-            label="作业名"
-            min-width="120"
-            show-overflow-tooltip
-          >
-            <template #default="{ row }">
-              <div class="assignment-title">
-                <span>{{ row.title }}</span>
-                <el-tag
-                  :type="row.status === 'draft' ? 'info' : 'warning'"
-                  size="small"
-                >
-                  {{ row.status === "draft" ? "草稿" : "未开始" }}
-                </el-tag>
-              </div>
-            </template>
-          </el-table-column>
-          <el-table-column
-            prop="className"
-            label="班级"
-            width="70"
-            align="center"
-            show-overflow-tooltip
-          />
-          <el-table-column
-            prop="endDate"
-            label="截止时间"
-            width="100"
-            align="center"
-            show-overflow-tooltip
-          >
-            <template #default="{ row }">
-              <div
-                class="deadline"
-                :class="{ 'deadline--urgent': isUrgent(row.endDate) }"
-              >
-                <el-icon><Clock /></el-icon>
-                {{ formatDateTime(row.endDate) }}
-              </div>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="70" align="center" fixed="right">
-            <template #default="{ row }">
-              <el-button
-                type="primary"
-                size="small"
-                @click="goToAssignment(row.assignmentId, row.classId)"
-              >
-                {{ row.status === "draft" ? "编辑" : "开始" }}
-              </el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-      </div>
-
-      <!-- 最近提交记录 -->
-      <div class="table-card">
-        <div class="table-header">
-          <h3 class="table-title">📚 最近提交记录</h3>
-          <el-button type="primary" size="small" @click="viewAllSubmissions">
-            查看更多
-          </el-button>
+        <div class="charts-grid">
+          <article class="chart-card student-card">
+            <h3>提交状态</h3>
+            <DonutChart
+              :data="submissionStatusData"
+              :height="260"
+              :loading="loading"
+              :show-percentage="true"
+            />
+          </article>
+          <article class="chart-card student-card">
+            <h3>成绩分布</h3>
+            <BarChart
+              :data="performanceData"
+              :height="260"
+              :loading="loading"
+              unit="次"
+              :show-value="true"
+            />
+          </article>
         </div>
-        <el-table
-          :data="(studentStats?.recentSubmissions || []).slice(0, 5)"
-          style="width: 100%"
-          :loading="loading"
-          empty-text="暂无提交记录"
-          table-layout="fixed"
-        >
-          <el-table-column
-            prop="assignmentTitle"
-            label="作业名"
-            min-width="120"
-            show-overflow-tooltip
-          />
-          <el-table-column label="得分" width="70" align="center">
-            <template #default="{ row }">
-              <div class="score-display">
-                <span v-if="row.teacherScore" class="score score--teacher">
-                  {{ row.teacherScore }}
-                </span>
-                <span v-else-if="row.aiScore" class="score score--ai">
-                  {{ row.aiScore }}
-                </span>
-                <span v-else class="score score--pending">--</span>
-                <span class="score-divider">/</span>
-                <span class="score-total">100</span>
-              </div>
-            </template>
-          </el-table-column>
-          <el-table-column
-            prop="submittedAt"
-            label="提交时间"
-            width="90"
-            align="center"
-            show-overflow-tooltip
-          >
-            <template #default="{ row }">
-              {{ formatDateTime(row.submittedAt) }}
-            </template>
-          </el-table-column>
-          <el-table-column prop="status" label="状态" width="70" align="center">
-            <template #default="{ row }">
-              <el-tag :type="getStatusType(row.status)" size="small">
-                {{ getStatusText(row.status) }}
-              </el-tag>
-            </template>
-          </el-table-column>
-        </el-table>
-      </div>
+      </section>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from "vue";
-import { useStore } from "vuex";
+import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
+import { useStore } from "vuex";
 import { ElMessage } from "element-plus";
-import { Refresh, School, Clock } from "@element-plus/icons-vue";
-import StatCard from "./components/StatCard.vue";
-import DonutChart from "./components/charts/DonutChart.vue";
-import BarChart from "./components/charts/BarChart.vue";
+import { ArrowRight, Refresh, School } from "@element-plus/icons-vue";
 import { formatDateTime } from "@/utils/date";
+import BarChart from "./components/charts/BarChart.vue";
+import DonutChart from "./components/charts/DonutChart.vue";
+import StatCard from "./components/StatCard.vue";
 
 const store = useStore();
 const router = useRouter();
-
-// 响应式数据
 const isRefreshing = ref(false);
 
-// 计算属性
 const loading = computed(() => store.getters["dashboard/isLoading"]("student"));
 const studentStats = computed(() => store.getters["dashboard/studentStats"]);
-const userName = computed(() => store.getters["user/userName"] || "学生");
-
-// 监听学生统计数据变化，用于调试
-watch(
-  studentStats,
-  (newStats) => {
-    if (newStats?.pendingAssignmentsList) {
-      console.log(
-        "Student pending assignments:",
-        newStats.pendingAssignmentsList
-      );
-      newStats.pendingAssignmentsList.forEach((assignment, index) => {
-        console.log(`Assignment ${index}:`, assignment);
-      });
-    }
-  },
-  { immediate: true }
+const userName = computed(() => store.getters["user/userName"] || "同学");
+const pendingAssignments = computed(() =>
+  (studentStats.value?.pendingAssignmentsList || []).slice(0, 5)
+);
+const recentSubmissions = computed(() =>
+  (studentStats.value?.recentSubmissions || []).slice(0, 5)
 );
 
-// 提交状态数据转换
-const submissionStatusData = computed(() => {
-  if (!studentStats.value?.submissionStatusStats) return [];
+const greeting = computed(() => {
+  const hour = new Date().getHours();
+  if (hour < 6) return "夜深了";
+  if (hour < 12) return "早上好";
+  if (hour < 18) return "下午好";
+  return "晚上好";
+});
 
+const priorityMessage = computed(() => {
+  const count = studentStats.value?.pendingAssignments || 0;
+  return count > 0 ? `今天还有 ${count} 项作业待完成` : "今天的待办已经完成";
+});
+
+const submissionStatusData = computed(() => {
   const statusMap: Record<string, { name: string; color: string }> = {
     draft: { name: "草稿", color: "#8E8E93" },
-    submitted: { name: "已提交", color: "#007AFF" },
-    ai_reviewed: { name: "AI批改", color: "#FF9F0A" },
-    teacher_reviewed: { name: "教师批改", color: "#34C759" },
+    submitted: { name: "已提交", color: "#6558D9" },
+    ai_reviewed: { name: "AI 批改", color: "#D18B2D" },
+    teacher_reviewed: { name: "教师批改", color: "#2D9A70" },
   };
-
-  return studentStats.value.submissionStatusStats.map((item) => ({
+  return (studentStats.value?.submissionStatusStats || []).map((item: any) => ({
     name: statusMap[item.status]?.name || item.status,
     value: item.count,
     color: statusMap[item.status]?.color,
   }));
 });
 
-// 个人表现数据转换
 const performanceData = computed(() => {
-  if (!studentStats.value?.performanceAnalysis) return [];
-
-  const analysis = studentStats.value.performanceAnalysis;
+  const analysis = studentStats.value?.performanceAnalysis;
+  if (!analysis) return [];
   return [
-    { name: "优秀(90+)", value: analysis.excellentCount, color: "#34C759" },
-    { name: "良好(80+)", value: analysis.goodCount, color: "#007AFF" },
-    { name: "及格(60+)", value: analysis.passCount, color: "#FF9F0A" },
+    { name: "优秀（90+）", value: analysis.excellentCount, color: "#2D9A70" },
+    { name: "良好（80+）", value: analysis.goodCount, color: "#6558D9" },
+    { name: "及格（60+）", value: analysis.passCount, color: "#D18B2D" },
   ];
 });
 
-// 方法
 const refreshData = async () => {
   isRefreshing.value = true;
   try {
@@ -326,57 +290,47 @@ const refreshData = async () => {
   }
 };
 
-const goToClasses = () => {
-  router.push("/student/classes");
-};
-
-const viewAllAssignments = () => {
-  router.push("/student/classes");
-};
-
-const viewAllSubmissions = () => {
-  router.push("/student/classes");
-};
-
-const goToAssignment = (assignmentId: string, classId: string) => {
-  console.log("goToAssignment called with:", { assignmentId, classId });
-  console.log("Type of classId:", typeof classId);
+const goToClasses = () => router.push("/student/classes");
+const viewAllAssignments = () => router.push("/student/assignments");
+const viewAllSubmissions = viewAllAssignments;
+const goToAssignment = (assignmentId: string, classId: string) =>
   router.push(
     `/student/submissions?assignmentId=${assignmentId}&classId=${classId}`
   );
-};
 
+const hoursUntil = (endDate: string) =>
+  (new Date(endDate).getTime() - Date.now()) / (1000 * 60 * 60);
 const isUrgent = (endDate: string) => {
-  const deadline = new Date(endDate);
-  const now = new Date();
-  const hoursLeft = (deadline.getTime() - now.getTime()) / (1000 * 60 * 60);
-  return hoursLeft > 0 && hoursLeft < 24;
+  const hours = hoursUntil(endDate);
+  return hours > 0 && hours < 24;
 };
+const deadlineHint = (endDate: string) => {
+  const hours = hoursUntil(endDate);
+  if (hours <= 0) return "已截止";
+  if (hours < 24) return `剩余 ${Math.max(1, Math.ceil(hours))} 小时`;
+  return `${Math.ceil(hours / 24)} 天后截止`;
+};
+const formatDeadlineDay = (date: string) =>
+  String(new Date(date).getDate()).padStart(2, "0");
+const formatDeadlineMonth = (date: string) =>
+  `${new Date(date).getMonth() + 1} 月`;
 
 const getStatusType = (status: string) => {
-  const typeMap: Record<
-    string,
-    "success" | "warning" | "info" | "primary" | "danger"
-  > = {
-    draft: "info",
-    submitted: "warning",
-    ai_reviewed: "primary",
-    teacher_reviewed: "success",
-  };
-  return typeMap[status] || "info";
+  if (status === "teacher_reviewed") return "success";
+  if (status === "ai_reviewed") return "primary";
+  if (status === "submitted") return "warning";
+  return "info";
 };
-
 const getStatusText = (status: string) => {
-  const textMap: Record<string, string> = {
+  const labels: Record<string, string> = {
     draft: "草稿",
-    submitted: "已提交",
-    ai_reviewed: "AI批改",
-    teacher_reviewed: "教师批改",
+    submitted: "待批改",
+    ai_reviewed: "AI 已评",
+    teacher_reviewed: "教师已评",
   };
-  return textMap[status] || status;
+  return labels[status] || status;
 };
 
-// 生命周期
 onMounted(async () => {
   try {
     await store.dispatch("dashboard/fetchStudentDashboard");
@@ -387,298 +341,270 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+@import "../student/student-theme.css";
+
 .student-dashboard {
-  padding: 24px;
-  background: #f8f9fa;
-  overflow-x: hidden; /* 防止页面级别的水平滚动 */
+  min-height: 100%;
 }
-
-.dashboard-header {
-  margin-bottom: 24px;
-}
-
-.header-content {
+.dashboard-hero {
   display: flex;
+  align-items: flex-end;
   justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 16px;
+  gap: 24px;
 }
-
-.dashboard-title {
-  font-size: 24px;
-  font-weight: 600;
-  color: #1d1d1f;
-  margin: 0;
+.dashboard-hero__copy,
+.dashboard-hero__actions {
+  position: relative;
+  z-index: 1;
 }
-
-.header-actions {
+.dashboard-hero__actions {
   display: flex;
-  gap: 12px;
+  gap: 10px;
 }
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 16px;
-  margin-bottom: 24px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 13px;
+  margin: 18px 0;
 }
 
+.dashboard-priority-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
+  gap: 16px;
+  align-items: start;
+}
+.priority-card {
+  overflow: hidden;
+  padding: 22px;
+}
+.priority-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 16px;
+}
+.priority-card__header .el-button :deep(.el-icon) {
+  margin-left: 4px;
+}
+
+.todo-list,
+.recent-list {
+  display: grid;
+  gap: 8px;
+}
+.todo-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 13px;
+  padding: 11px;
+  border: 1px solid #eceef4;
+  border-radius: 12px;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+  transition: 0.2s ease;
+}
+.todo-item:hover {
+  transform: translateY(-1px);
+  border-color: #cec8f2;
+  box-shadow: 0 8px 20px rgba(53, 47, 99, 0.07);
+}
+.todo-item--urgent {
+  border-color: #f1c7ca;
+  background: linear-gradient(90deg, #fff7f7, #fff);
+}
+.todo-item__date {
+  display: flex;
+  width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  border-radius: 10px;
+  background: #f0eeff;
+  color: #5c4fcc;
+}
+.todo-item--urgent .todo-item__date {
+  background: #ffecee;
+  color: #d44f5b;
+}
+.todo-item__date strong {
+  font-size: 18px;
+  line-height: 1;
+}
+.todo-item__date small {
+  margin-top: 4px;
+  font-size: 9px;
+}
+.todo-item__main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+}
+.todo-item__title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.todo-item__title-row strong {
+  overflow: hidden;
+  color: #30354a;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.todo-item__main > span:last-child {
+  color: #9298aa;
+  font-size: 11px;
+}
+.urgent-badge {
+  flex: 0 0 auto;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: #ffe9eb;
+  color: #cd4b57;
+  font-size: 9px;
+  font-weight: 700;
+}
+.todo-item__action {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  color: #6154cf;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.recent-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 0;
+  border-bottom: 1px solid #eff0f4;
+}
+.recent-item:last-child {
+  border-bottom: 0;
+}
+.recent-item__score {
+  display: flex;
+  width: 54px;
+  flex: 0 0 54px;
+  align-items: baseline;
+  color: #5d50cd;
+}
+.recent-item__score strong {
+  font-size: 20px;
+}
+.recent-item__score small {
+  margin-left: 2px;
+  color: #a2a7b6;
+  font-size: 9px;
+}
+.recent-item__main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 5px;
+}
+.recent-item__main strong {
+  overflow: hidden;
+  color: #373c51;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recent-item__main small {
+  color: #9ba0b0;
+  font-size: 10px;
+}
+.student-status--info {
+  background: #f0f1f5;
+  color: #787f91;
+}
+
+.dashboard-empty {
+  display: grid;
+  min-height: 210px;
+  place-items: center;
+}
+
+.dashboard-charts {
+  margin-top: 22px;
+}
+.dashboard-section-heading {
+  margin-bottom: 14px;
+}
 .charts-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
-  margin-bottom: 24px;
 }
-
 .chart-card {
-  background: #ffffff;
-  border-radius: 12px;
-  padding: 20px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-  border: 1px solid #f0f0f0;
-  overflow: hidden; /* 防止内容溢出 */
-  min-width: 0; /* 允许flex子元素收缩 */
-}
-
-.chart-header {
-  margin-bottom: 16px;
-}
-
-.chart-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: #1d1d1f;
-  margin: 0;
-}
-
-.tables-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 16px;
-}
-
-.tables-grid-two {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-}
-
-.table-card {
-  background: #ffffff;
-  border-radius: 12px;
-  padding: 20px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-  border: 1px solid #f0f0f0;
-  overflow: hidden; /* 防止内容溢出 */
-  min-width: 0; /* 允许flex子元素收缩 */
-}
-
-.table-card :deep(.el-table) {
+  min-width: 0;
   overflow: hidden;
+  padding: 20px;
 }
-
-.table-card :deep(.el-table__body-wrapper) {
-  overflow-x: auto;
-}
-
-.table-card :deep(.el-table__header-wrapper) {
-  overflow-x: hidden;
-}
-
-.table-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-}
-
-.table-header-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.table-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: #1d1d1f;
-  margin: 0;
-}
-
-.assignment-title {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-}
-
-.deadline {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+.chart-card h3 {
+  margin: 0 0 12px;
+  color: #34394f;
   font-size: 14px;
-  color: #666;
 }
 
-.deadline--urgent {
-  color: #ff3b30;
-  font-weight: 500;
-}
-
-.score-display {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.score {
-  font-weight: 600;
-}
-
-.score--teacher {
-  color: #34c759;
-}
-
-.score--ai {
-  color: #007aff;
-}
-
-.score--pending {
-  color: #8e8e93;
-}
-
-.score-divider,
-.score-total {
-  color: #8e8e93;
-  font-size: 12px;
-}
-
-/* 响应式设计 */
-
-/* 中等屏幕 - 平板横屏 */
-@media (max-width: 1200px) {
+@media (max-width: 1100px) {
   .stats-grid {
-    grid-template-columns: repeat(3, 1fr);
-    gap: 16px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
-
-  .charts-grid {
+  .dashboard-priority-grid {
     grid-template-columns: 1fr;
-    gap: 16px;
   }
 }
 
-/* 平板和小屏幕笔记本 */
-@media (max-width: 1024px) {
-  .tables-grid,
-  .tables-grid-two {
-    grid-template-columns: 1fr;
-    gap: 16px;
-  }
-
-  .charts-grid {
-    grid-template-columns: 1fr;
-    gap: 16px;
-  }
-}
-
-/* 手机和小平板 */
-@media (max-width: 768px) {
-  .student-dashboard {
-    padding: 16px;
-  }
-
-  .dashboard-title {
-    font-size: 20px;
-  }
-
-  .header-content {
-    flex-direction: column;
+@media (max-width: 760px) {
+  .dashboard-hero {
     align-items: flex-start;
-  }
-
-  .stats-grid {
-    grid-template-columns: repeat(2, 1fr);
-    gap: 12px;
-  }
-
-  .charts-grid {
-    grid-template-columns: 1fr;
-    gap: 12px;
-  }
-
-  .chart-card,
-  .table-card {
-    padding: 16px;
-  }
-
-  /* 表格在中等屏幕上的优化 */
-  .table-card :deep(.el-table__cell) {
-    padding: 10px 6px;
-  }
-
-  .table-card :deep(.el-table) {
-    font-size: 13px;
-  }
-}
-
-/* 小屏手机 */
-@media (max-width: 480px) {
-  .student-dashboard {
-    padding: 12px;
-  }
-
-  .dashboard-title {
-    font-size: 18px;
-  }
-
-  .header-actions {
     flex-direction: column;
-    width: 100%;
-    gap: 8px;
   }
-
-  .header-actions .el-button {
+  .dashboard-hero__actions {
     width: 100%;
   }
-
+  .dashboard-hero__actions .el-button {
+    flex: 1;
+  }
   .stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .charts-grid {
     grid-template-columns: 1fr;
-    gap: 8px;
   }
+}
 
-  .chart-card,
-  .table-card {
-    padding: 12px;
+@media (max-width: 520px) {
+  .stats-grid {
+    gap: 9px;
   }
-
-  /* 表格在小屏幕上的优化 */
-  .table-card :deep(.el-table__cell) {
-    padding: 8px 4px;
+  .priority-card {
+    padding: 16px;
   }
-
-  .table-card :deep(.el-table) {
-    font-size: 12px;
+  .todo-item__action {
+    display: none;
   }
-
-  .table-card :deep(.el-button) {
-    padding: 4px 8px;
-    font-size: 11px;
-  }
-
-  /* 作业标题在小屏幕上的优化 */
-  .assignment-title {
-    flex-direction: column;
+  .todo-item__title-row {
     align-items: flex-start;
+    flex-direction: column;
     gap: 4px;
   }
-
-  /* 截止时间在小屏幕上的优化 */
-  .deadline {
+  .priority-card__header {
+    align-items: flex-start;
     flex-direction: column;
-    font-size: 12px;
-    gap: 2px;
   }
 }
 </style>
