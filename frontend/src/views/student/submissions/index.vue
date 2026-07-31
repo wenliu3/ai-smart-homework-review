@@ -64,10 +64,13 @@
                 <span class="tab-label"><b>1</b><span>作业详情</span></span>
               </template>
             </el-tab-pane>
-            <el-tab-pane name="submission">
+            <el-tab-pane
+              v-if="workspaceState.showSubmissionStep"
+              name="submission"
+            >
               <template #label>
                 <span class="tab-label">
-                  <b>2</b><span>提交作业</span>
+                  <b>2</b><span>{{ workspaceState.submissionStepLabel }}</span>
                   <el-badge
                     v-if="submissionData.submission?.status === 'draft'"
                     is-dot
@@ -75,10 +78,11 @@
                 </span>
               </template>
             </el-tab-pane>
-            <el-tab-pane name="results">
+            <el-tab-pane v-if="workspaceState.showResultsStep" name="results">
               <template #label>
                 <span class="tab-label">
-                  <b>3</b><span>评价结果</span>
+                  <b>{{ workspaceState.resultsStepNumber }}</b>
+                  <span>评价结果</span>
                   <el-badge
                     v-if="
                       submissionData.aiReview || submissionData.teacherReview
@@ -103,6 +107,7 @@
           </section>
 
           <section
+            v-if="workspaceState.showSubmissionStep"
             v-show="activeTab === 'submission'"
             class="tab-pane submission-pane"
           >
@@ -148,8 +153,16 @@
               <div class="submission-section-heading">
                 <div>
                   <p class="student-eyebrow">YOUR WORK</p>
-                  <h2>完成并提交作业</h2>
-                  <p>正文和附件至少填写一项，正式提交前仍可保存草稿。</p>
+                  <h2>
+                    {{ isResubmitting ? "修改并重新提交" : "完成并提交作业" }}
+                  </h2>
+                  <p>
+                    {{
+                      isResubmitting
+                        ? "已载入上一次提交内容，确认后将启动新一轮评价。"
+                        : "正文和附件至少填写一项，正式提交前仍可保存草稿。"
+                    }}
+                  </p>
                 </div>
                 <span v-if="saving || lastSaveTime" class="save-status">
                   <el-icon v-if="saving" class="animate-spin"
@@ -160,7 +173,7 @@
               </div>
 
               <SubmissionForm
-                v-if="showSubmissionForm"
+                v-if="showEditableSubmission"
                 ref="submissionFormRef"
                 :submission="submissionData.submission"
                 :assignment="submissionData.assignment"
@@ -168,18 +181,27 @@
                 @success="handleSuccess"
               />
 
-              <SubmittedContent
-                v-if="showSubmittedContent"
-                :submission="submissionData.submission"
-              />
             </div>
 
             <footer
-              v-if="canSubmit && !isOverdue && !isTerminated"
+              v-if="
+                showEditableSubmission &&
+                canSubmit &&
+                !isOverdue &&
+                !isTerminated
+              "
               class="tab-actions-bar"
             >
               <p>提交后将自动开始 AI 评价，请确认内容与附件无误。</p>
               <div class="actions-right">
+                <el-button
+                  v-if="isResubmitting"
+                  data-testid="cancel-resubmit-button"
+                  plain
+                  @click="cancelResubmission"
+                >
+                  取消重交
+                </el-button>
                 <el-button
                   v-if="submissionData.submission?.status === 'draft'"
                   type="danger"
@@ -210,17 +232,26 @@
           </section>
 
           <section
+            v-if="workspaceState.showResultsStep"
             v-show="activeTab === 'results'"
             class="tab-pane results-pane"
           >
-            <ReviewResults
-              :ai-review="submissionData.aiReview"
-              :teacher-review="submissionData.teacherReview"
-              :submission-status="submissionData.submission?.status"
-              :assignment="submissionData.assignment"
-              :is-polling="isPolling"
-              :polling-count="pollingCount"
-            />
+            <div class="results-pane__content">
+              <SubmittedContent
+                v-if="hasFormalSubmission"
+                :submission="submissionData.submission"
+                :can-resubmit="canResubmit"
+                @resubmit="beginResubmission"
+              />
+              <ReviewResults
+                :ai-review="submissionData.aiReview"
+                :teacher-review="submissionData.teacherReview"
+                :submission-status="submissionData.submission?.status"
+                :assignment="submissionData.assignment"
+                :is-polling="isPolling"
+                :polling-count="pollingCount"
+              />
+            </div>
           </section>
         </div>
       </div>
@@ -238,6 +269,10 @@ import SubmissionForm from "./components/SubmissionForm.vue"; // 作业提交表
 import SubmittedContent from "./components/SubmittedContent.vue"; // 已提交的作业内容
 import ReviewResults from "./components/ReviewResults.vue"; // 批改结果
 import { useSubmissionManagement, useSubmissionUtils } from "./composables";
+import {
+  getSubmissionWorkspaceState,
+  type SubmissionTab,
+} from "./utils/submissionLifecycle";
 import { SubmissionsApi } from "../../../api/submissions";
 import { useRoute } from "vue-router";
 
@@ -273,10 +308,12 @@ const classId = computed(() => {
 
 // 表单引用和Tab状态
 const submissionFormRef = ref();
-const activeTab = ref("assignment");
+const activeTab = ref<SubmissionTab>("assignment");
 const lastSaveTime = ref("");
 const showAiProcessingFullscreen = ref(false);
 const aiTimeoutTimer = ref<NodeJS.Timeout | null>(null);
+const isResubmitting = ref(false);
+const hasInitializedTab = ref(false);
 
 // 使用组合式函数
 const {
@@ -296,8 +333,8 @@ const {
   canSaveDraft,
   canSubmit,
   submissionLimitInfo,
-  showSubmissionForm,
-  showSubmittedContent,
+  hasFormalSubmission,
+  canResubmit,
   isOverdue,
   statusTagType,
   statusText,
@@ -318,10 +355,16 @@ const isTerminated = computed(() => {
   return (submissionData.value?.assignment as any)?.status === "terminated";
 });
 
-const hasFormalSubmission = computed(() => {
-  const status = submissionData.value?.submission?.status;
-  return Boolean(status && status !== "draft");
-});
+const workspaceState = computed(() =>
+  getSubmissionWorkspaceState(
+    submissionData.value?.submission?.status,
+    isResubmitting.value
+  )
+);
+
+const showEditableSubmission = computed(
+  () => !hasFormalSubmission.value || isResubmitting.value
+);
 
 // 批改状态标签类型
 const reviewStatusTagType = computed(() => {
@@ -403,8 +446,19 @@ const handleTabChange = (tabName: string) => {
 };
 
 // 智能Tab切换
-const switchToTab = (tabName: string) => {
+const switchToTab = (tabName: SubmissionTab) => {
   activeTab.value = tabName;
+};
+
+const beginResubmission = () => {
+  if (!canResubmit.value) return;
+  isResubmitting.value = true;
+  activeTab.value = "submission";
+};
+
+const cancelResubmission = () => {
+  isResubmitting.value = false;
+  activeTab.value = "results";
 };
 
 // 处理子组件的成功事件
@@ -524,9 +578,6 @@ const handleSubmitWithAiLoading = async (
 
     // 调用纯提交逻辑（不包含确认对话框）
     await handleSubmitDirect(attachments, content);
-
-    // 提交成功后不立即关闭Loading，等待AI评价完成
-    // Loading会在轮询检测到AI评价完成后自动关闭
   } catch (error: any) {
     // 取消或出错时隐藏Loading并清除超时计时器
     showAiProcessingFullscreen.value = false;
@@ -577,6 +628,12 @@ const handleSubmitDirect = async (attachments: any[], content: string = "") => {
     // 重新加载数据
     await loadData();
 
+    isResubmitting.value = false;
+    showAiProcessingFullscreen.value = false;
+    clearAiTimeout();
+    activeTab.value = "results";
+    hasInitializedTab.value = true;
+
     // 启动AI评价轮询
     checkAndStartPolling();
   } finally {
@@ -624,34 +681,23 @@ const handleDeleteClick = () => {
 const initializeTab = () => {
   if (!submissionData.value) return;
 
-  // 如果正在显示AI处理Loading，不要切换Tab
+  if (isResubmitting.value) return;
   if (showAiProcessingFullscreen.value) return;
 
-  // 如果当前Tab是用户主动选择的（比如正在查看评价结果），不要自动切换
-  if (activeTab.value === "results" && submissionData.value.aiReview) return;
+  if (!hasInitializedTab.value) {
+    activeTab.value = workspaceState.value.defaultTab;
+    hasInitializedTab.value = true;
+    return;
+  }
 
-  const submission = submissionData.value.submission;
-  const hasAiReview = submissionData.value.aiReview;
-  const hasTeacherReview = submissionData.value.teacherReview;
+  const currentTabIsVisible =
+    activeTab.value === "assignment" ||
+    (activeTab.value === "submission" &&
+      workspaceState.value.showSubmissionStep) ||
+    (activeTab.value === "results" && workspaceState.value.showResultsStep);
 
-  // 只在首次加载时智能选择Tab，避免轮询更新时的误切换
-  const isInitialLoad = !submission || activeTab.value === "assignment";
-
-  if (isInitialLoad) {
-    // 根据状态智能选择初始Tab
-    if (hasTeacherReview || hasAiReview) {
-      // 如果有评价结果，优先显示评价结果
-      activeTab.value = "results";
-    } else if (submission && submission.status !== "draft") {
-      // 如果已提交但还没有评价，显示提交Tab
-      activeTab.value = "submission";
-    } else if (submission && submission.status === "draft") {
-      // 如果是草稿状态，显示提交Tab便于继续编辑
-      activeTab.value = "submission";
-    } else {
-      // 首次访问，显示作业详情
-      activeTab.value = "assignment";
-    }
+  if (!currentTabIsVisible) {
+    activeTab.value = workspaceState.value.defaultTab;
   }
 };
 
@@ -665,6 +711,12 @@ watch(
   },
   { immediate: true }
 );
+
+watch(canResubmit, (allowed) => {
+  if (isResubmitting.value && !allowed) {
+    cancelResubmission();
+  }
+});
 
 // 监听轮询状态，当AI评价完成时关闭Loading
 watch([isPolling, submissionData], ([polling, data]) => {
@@ -1345,7 +1397,13 @@ onUnmounted(() => {
 }
 
 .results-pane {
-  height: 620px;
+  height: auto;
+  min-height: 620px;
+}
+
+.results-pane__content {
+  display: grid;
+  gap: 20px;
 }
 
 @media (max-width: 768px) {
