@@ -32,7 +32,7 @@ describe("submissionLifecycle", () => {
     expect(getSubmissionWorkspaceState("submitted", false)).toEqual({
       hasFormalSubmission: true,
       showSubmissionStep: false,
-      submissionStepLabel: "提交作业",
+      submissionStepLabel: "重新提交",
       showResultsStep: true,
       resultsStepNumber: 2,
       defaultTab: "results",

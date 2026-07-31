@@ -7,9 +7,9 @@ export type SubmissionTab = "assignment" | "submission" | "results";
 export interface SubmissionWorkspaceState {
   hasFormalSubmission: boolean;
   showSubmissionStep: boolean;
-  submissionStepLabel: string;
+  submissionStepLabel: "提交作业" | "继续提交" | "重新提交";
   showResultsStep: boolean;
-  resultsStepNumber: number | null;
+  resultsStepNumber: 2 | 3 | null;
   defaultTab: SubmissionTab;
 }
 
@@ -43,7 +43,7 @@ export function getSubmissionWorkspaceState(
   return {
     hasFormalSubmission: true,
     showSubmissionStep: isResubmitting,
-    submissionStepLabel: isResubmitting ? "重新提交" : "提交作业",
+    submissionStepLabel: "重新提交",
     showResultsStep: true,
     resultsStepNumber: isResubmitting ? 3 : 2,
     defaultTab: "results",
