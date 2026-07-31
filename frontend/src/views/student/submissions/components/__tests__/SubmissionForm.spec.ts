@@ -1,5 +1,5 @@
 import { mount } from "@vue/test-utils";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import SubmissionForm from "../SubmissionForm.vue";
 
@@ -74,7 +74,59 @@ const mountAttachmentEnabledForm = () =>
     },
   });
 
+const mountResubmissionForm = () =>
+  mount(SubmissionForm, {
+    props: {
+      assignment: {
+        id: "21",
+        title: "附件作业",
+        dueDate: "2026-08-05T18:00:00",
+        status: "published",
+        allowAttachments: true,
+      },
+      submission: {
+        id: "8",
+        assignmentId: "21",
+        studentId: "3",
+        content: "<p>已提交正文</p>",
+        attachments: [
+          {
+            fileName: "正式提交附件.pdf",
+            fileUrl: "/uploads/submitted.pdf",
+            fileSize: 128,
+            fileType: "application/pdf",
+          },
+        ],
+        wordCount: 6,
+        status: "submitted" as const,
+        submittedAt: "2026-08-01T12:00:00",
+        updatedAt: "2026-08-01T12:00:00",
+        createdAt: "2026-08-01T12:00:00",
+        isDraft: false,
+        submissionCount: 1,
+      },
+      isOverdue: false,
+    },
+    global: {
+      stubs: {
+        WangEditor: { template: '<textarea data-testid="editor" />' },
+        "el-alert": { template: "<section><slot /></section>" },
+        "el-button": { template: "<button><slot /></button>" },
+        "el-icon": { template: "<i><slot /></i>" },
+        "el-progress": true,
+      },
+    },
+  });
+
 describe("SubmissionForm", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("教师禁止附件时隐藏上传入口并从提交参数中剔除历史附件", () => {
     const wrapper = mountForm();
 
@@ -91,5 +143,27 @@ describe("SubmissionForm", () => {
 
     expect(wrapper.find(".upload-card").exists()).toBe(true);
     expect(wrapper.text()).toContain("上传附件");
+  });
+
+  it("取消重新提交并卸载表单时不删除正式提交的历史附件", () => {
+    const wrapper = mountResubmissionForm();
+
+    wrapper.unmount();
+
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("移除历史附件后取消重新提交时不删除正式提交文件", async () => {
+    const wrapper = mountResubmissionForm();
+    const submittedAttachments = wrapper.props("submission")!.attachments;
+
+    await wrapper.get(".file-remove").trigger("click");
+    wrapper.unmount();
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(submittedAttachments).toHaveLength(1);
+    expect(submittedAttachments[0].fileUrl).toBe(
+      "/uploads/submitted.pdf"
+    );
   });
 });

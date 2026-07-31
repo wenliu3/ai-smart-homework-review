@@ -140,6 +140,33 @@ describe("useSubmissionManagement lifecycle state", () => {
     expect(management.canResubmit.value).toBe(false);
   });
 
+  it("keeps resubmission guidance consistent with deadline and termination", () => {
+    const management = mountManagement();
+
+    management.submissionData.value = makeDetail("submitted");
+    expect(management.submissionLimitInfo.value).toMatchObject({
+      title: "重新提交提醒",
+    });
+
+    management.submissionData.value = makeDetail("submitted", {
+      dueDate: "2000-01-01T00:00:00",
+    });
+    expect(management.submissionLimitInfo.value).toEqual({
+      type: "info",
+      title: "作业已截止，无法重新提交",
+      message: "",
+    });
+
+    management.submissionData.value = makeDetail("ai_reviewed", {
+      status: "terminated",
+    });
+    expect(management.submissionLimitInfo.value).toEqual({
+      type: "info",
+      title: "作业已终止，无法重新提交",
+      message: "",
+    });
+  });
+
   it("keeps new submissions and drafts editable without review results", () => {
     const management = mountManagement();
 

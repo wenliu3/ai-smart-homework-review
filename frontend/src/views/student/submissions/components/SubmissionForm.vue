@@ -176,6 +176,7 @@ const form = reactive({
 // ========== 附件上传（原生 input + XHR，完全可控） ==========
 const fileInputRef = ref<HTMLInputElement>();
 const uploadedResults = ref<any[]>([]);
+const persistedAttachmentUrls = new Set<string>();
 const uploading = ref(false);
 const uploadProgress = ref(0);
 const filesConsumed = ref(false);
@@ -332,7 +333,7 @@ const uploadFileXHR = (
 
 const removeUploadedFile = (index: number) => {
   const file = uploadedResults.value[index];
-  if (file?.fileUrl) {
+  if (file?.fileUrl && !persistedAttachmentUrls.has(file.fileUrl)) {
     const filename = file.fileUrl.replace("/uploads/", "");
     const token = localStorage.getItem("token");
     fetch(`/api/upload/delete/${filename}`, {
@@ -346,7 +347,7 @@ const removeUploadedFile = (index: number) => {
 
 const cleanupUploadedFiles = () => {
   for (const file of uploadedResults.value) {
-    if (file?.fileUrl) {
+    if (file?.fileUrl && !persistedAttachmentUrls.has(file.fileUrl)) {
       const filename = file.fileUrl.replace("/uploads/", "");
       const token = localStorage.getItem("token");
       fetch(`/api/upload/delete/${filename}`, {
@@ -407,8 +408,14 @@ watch(
     if (!newSubmission) return;
     if (!oldSubmission || newSubmission.id !== oldSubmission.id) {
       form.content = newSubmission.content || "";
+      persistedAttachmentUrls.clear();
+      for (const attachment of newSubmission.attachments || []) {
+        if (attachment?.fileUrl) {
+          persistedAttachmentUrls.add(attachment.fileUrl);
+        }
+      }
       uploadedResults.value = canUploadAttachments.value
-        ? newSubmission.attachments || []
+        ? [...(newSubmission.attachments || [])]
         : [];
     }
   },

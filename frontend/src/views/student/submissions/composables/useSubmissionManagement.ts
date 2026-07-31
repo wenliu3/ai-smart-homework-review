@@ -70,32 +70,6 @@ export function useSubmissionManagement() {
     return submission.status !== "teacher_reviewed";
   });
 
-  // 获取提交限制提示信息
-  const submissionLimitInfo = computed(() => {
-    const submission = submissionData.value?.submission;
-    if (!submission) return null;
-    
-    // 老师已批改
-    if (submission.status === "teacher_reviewed") {
-      return {
-        type: "info" as const,
-        title: "作业已被老师批改，无法重新提交",
-        message: ""
-      };
-    }
-    
-    // 已提交过，显示提醒
-    if (submission.status !== "draft") {
-      return {
-        type: "info" as const,
-        title: "重新提交提醒",
-        message: `您已提交${submission.submissionCount || 1}次，可继续修改后重新提交，直到老师评分。`
-      };
-    }
-    
-    return null;
-  });
-
   const isOverdue = computed(() => {
     if (!submissionData.value?.assignment.dueDate) return false;
     return new Date() > new Date(submissionData.value.assignment.dueDate);
@@ -113,6 +87,47 @@ export function useSubmissionManagement() {
       !isOverdue.value &&
       assignment?.status !== "terminated"
     );
+  });
+
+  // 获取提交限制提示信息，并与重新提交权限保持一致
+  const submissionLimitInfo = computed(() => {
+    const submission = submissionData.value?.submission;
+    const assignment = submissionData.value?.assignment;
+    if (!submission || submission.status === "draft") return null;
+
+    if (submission.status === "teacher_reviewed") {
+      return {
+        type: "info" as const,
+        title: "作业已被老师批改，无法重新提交",
+        message: "",
+      };
+    }
+
+    if (assignment?.status === "terminated") {
+      return {
+        type: "info" as const,
+        title: "作业已终止，无法重新提交",
+        message: "",
+      };
+    }
+
+    if (isOverdue.value) {
+      return {
+        type: "info" as const,
+        title: "作业已截止，无法重新提交",
+        message: "",
+      };
+    }
+
+    if (canResubmit.value) {
+      return {
+        type: "info" as const,
+        title: "重新提交提醒",
+        message: `您已提交${submission.submissionCount || 1}次，可继续修改后重新提交，直到老师评分。`,
+      };
+    }
+
+    return null;
   });
 
   const showSubmissionForm = computed(() => !hasFormalSubmission.value);
