@@ -185,6 +185,21 @@
 
     <!-- 提示信息 - 只在不显示标签页时显示 -->
     <template v-if="!showReviewTabs">
+      <el-card
+        v-if="!submissionStatus"
+        data-testid="no-submission-review"
+        class="review-empty-card"
+      >
+        <div class="review-empty-state">
+          <span class="review-empty-state__icon">
+            <el-icon><Document /></el-icon>
+          </span>
+          <p class="student-eyebrow">REVIEW RESULT</p>
+          <h3>评价结果将在提交后显示</h3>
+          <p>完成并提交作业后，可在这里查看 AI 评价、教师反馈和最终得分。</p>
+        </div>
+      </el-card>
+
       <!-- 教师尚未打分提示 -->
       <el-card v-if="showTeacherPendingTip" class="shadow-sm border-orange-200">
         <div class="flex items-center gap-3 text-orange-600">
@@ -408,6 +423,62 @@ defineOptions({
   height: 100%;
   padding: 0;
   overflow: hidden;
+}
+
+.review-empty-card {
+  height: 100%;
+  border-color: #e8eaf2;
+  border-radius: 15px;
+  box-shadow: 0 8px 26px rgba(36, 40, 68, 0.05);
+}
+
+.review-empty-card :deep(.el-card__body) {
+  display: grid;
+  min-height: 420px;
+  place-items: center;
+}
+
+.review-empty-state {
+  max-width: 440px;
+  padding: 36px 24px;
+  text-align: center;
+}
+
+.review-empty-state__icon {
+  display: inline-flex;
+  width: 58px;
+  height: 58px;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+  border-radius: 16px;
+  background: #efedff;
+  color: #6558d9;
+}
+
+.review-empty-state__icon :deep(svg) {
+  width: 26px;
+}
+
+.review-empty-state .student-eyebrow {
+  margin: 0 0 5px;
+  color: #6b5ed6;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.review-empty-state h3 {
+  margin: 0;
+  color: #2d3248;
+  font-size: 19px;
+}
+
+.review-empty-state > p:last-child {
+  margin: 9px 0 0;
+  color: #8e95a8;
+  font-size: 13px;
+  line-height: 1.7;
 }
 
 .review-overview {
