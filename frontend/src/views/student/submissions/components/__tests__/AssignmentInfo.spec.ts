@@ -31,7 +31,7 @@ describe("AssignmentInfo", () => {
         assignment,
         submission: null,
         statusTagType: "warning",
-        statusText: "待提交",
+        statusText: "未知状态",
         isOverdue: false,
       },
       global: {

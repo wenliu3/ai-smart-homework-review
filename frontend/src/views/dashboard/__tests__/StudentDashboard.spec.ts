@@ -32,7 +32,7 @@ vi.mock("vuex", () => ({
           passCount: 1,
         },
       },
-      "user/userName": "测试学生",
+      "user/getUserInfo": { name: "测试学生" },
     },
     dispatch,
   }),
@@ -61,6 +61,7 @@ describe("StudentDashboard", () => {
     await flushPromises();
 
     const html = wrapper.html();
+    expect(wrapper.text()).toContain("测试学生");
     expect(wrapper.find('[data-testid="priority-todos"]').exists()).toBe(true);
     expect(wrapper.find(".todo-item--urgent").exists()).toBe(true);
     expect(html.indexOf('data-testid="priority-todos"')).toBeLessThan(

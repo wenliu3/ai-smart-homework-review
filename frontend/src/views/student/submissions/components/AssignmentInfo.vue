@@ -14,7 +14,7 @@
         class="assignment-status"
         :class="`assignment-status--${statusTone}`"
       >
-        {{ isOverdue ? "已截止" : statusText }}
+        {{ displayStatusText }}
       </span>
     </header>
 
@@ -103,6 +103,12 @@ const statusTone = computed(() => {
   if (props.statusTagType === "danger") return "danger";
   if (props.statusTagType === "warning") return "warning";
   return "primary";
+});
+
+const displayStatusText = computed(() => {
+  if (props.isOverdue) return "已截止";
+  if (!props.submission) return "待提交";
+  return props.statusText;
 });
 
 defineOptions({ name: "AssignmentInfo" });

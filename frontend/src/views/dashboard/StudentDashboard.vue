@@ -233,7 +233,9 @@ const isRefreshing = ref(false);
 
 const loading = computed(() => store.getters["dashboard/isLoading"]("student"));
 const studentStats = computed(() => store.getters["dashboard/studentStats"]);
-const userName = computed(() => store.getters["user/userName"] || "同学");
+const userName = computed(
+  () => store.getters["user/getUserInfo"]?.name || "同学"
+);
 const pendingAssignments = computed(() =>
   (studentStats.value?.pendingAssignmentsList || []).slice(0, 5)
 );
