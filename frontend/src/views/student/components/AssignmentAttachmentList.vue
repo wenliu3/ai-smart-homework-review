@@ -101,7 +101,12 @@ const getFileLabel = (attachment: Attachment) => {
 const formatFileSize = (size: number) => {
   if (!Number.isFinite(size) || size <= 0) return "大小未知";
   if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
+  if (size < 1024 * 1024) {
+    const kilobytes = size / 1024;
+    return `${
+      Number.isInteger(kilobytes) ? kilobytes : kilobytes.toFixed(1)
+    } KB`;
+  }
   const megabytes = size / (1024 * 1024);
   return `${Number.isInteger(megabytes) ? megabytes : megabytes.toFixed(1)} MB`;
 };

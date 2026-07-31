@@ -1,96 +1,138 @@
 <template>
-  <el-card class="shadow-sm">
-    <template #header>
-      <div class="flex items-center justify-between">
-        <h2 class="text-lg font-semibold text-gray-900">我的提交</h2>
-        <div class="text-sm text-gray-500">
-          提交时间：{{ formatDate(submission?.submittedAt) }}
-        </div>
+  <article class="submitted-content">
+    <header class="submitted-content__header">
+      <div>
+        <p class="submitted-content__eyebrow">SUBMITTED WORK</p>
+        <h2>我的提交</h2>
       </div>
-    </template>
+      <span>{{ formatDate(submission?.submittedAt) }}</span>
+    </header>
 
-    <div class="space-y-4">
-      <!-- 作业文本内容 -->
-      <div v-if="submission?.content" class="content-section">
-        <h4 class="font-medium text-gray-900 mb-2">作业内容：</h4>
-        <div
-          class="prose prose-sm max-w-none text-gray-700 submission-content"
-          v-html="submission.content"
-        ></div>
+    <section v-if="submission?.content" class="submitted-content__body">
+      <div class="submitted-content__section-heading">
+        <h3>作业正文</h3>
+        <span>{{ submission.wordCount || 0 }} 字</span>
       </div>
+      <div class="submission-content" v-html="submission.content"></div>
+    </section>
 
-      <!-- 附件列表 -->
-      <div v-if="submission?.attachments?.length">
-        <h4 class="font-medium text-gray-900 mb-2">附件：</h4>
-        <div class="flex flex-wrap gap-2">
-          <el-tag
-            v-for="file in submission.attachments"
-            :key="file.fileName"
-            type="info"
-            effect="plain"
-            class="cursor-pointer"
-            @click="downloadFile(file)"
-          >
-            <el-icon><Paperclip /></el-icon>
-            {{ file.fileName }}
-            <span class="text-xs ml-1"
-              >({{ formatFileSize(file.fileSize) }})</span
-            >
-          </el-tag>
-        </div>
-      </div>
+    <AssignmentAttachmentList
+      :attachments="submission?.attachments || []"
+      title="我的附件"
+      @download="downloadFile"
+    />
 
-      <!-- 无内容提示 -->
-      <div
-        v-if="!submission?.content && !submission?.attachments?.length"
-        class="text-center text-gray-400 py-8"
-      >
-        暂无提交内容
-      </div>
+    <div
+      v-if="!submission?.content && !submission?.attachments?.length"
+      class="submitted-content__empty"
+    >
+      暂无提交内容
     </div>
-  </el-card>
+  </article>
 </template>
 
 <script setup lang="ts">
-import { Paperclip } from "@element-plus/icons-vue";
 import type { Submission } from "../../../../api/submissions";
+import AssignmentAttachmentList from "../../components/AssignmentAttachmentList.vue";
 import { useSubmissionUtils } from "../composables";
 
-interface Props {
-  submission?: Submission | null;
-}
+defineProps<{ submission?: Submission | null }>();
 
-defineProps<Props>();
+const { formatDate, downloadFile } = useSubmissionUtils();
 
-const { formatDate, formatFileSize, downloadFile } = useSubmissionUtils();
-
-defineOptions({
-  name: "SubmittedContent",
-});
+defineOptions({ name: "SubmittedContent" });
 </script>
 
 <style scoped>
-.content-section {
-  padding: 1rem;
-  background: #f9fafb;
-  border-radius: 8px;
-  border: 1px solid #f0f0f0;
+.submitted-content {
+  display: grid;
+  gap: 18px;
+  padding: 22px;
+  border: 1px solid #e8eaf2;
+  border-radius: 15px;
+  background: #fff;
+}
+
+.submitted-content__header,
+.submitted-content__section-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.submitted-content__header {
+  padding-bottom: 16px;
+  border-bottom: 1px solid #eef0f5;
+}
+
+.submitted-content__eyebrow {
+  margin: 0 0 4px;
+  color: #6a5dd6;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+}
+
+.submitted-content__header h2,
+.submitted-content__section-heading h3 {
+  margin: 0;
+  color: #292e43;
+}
+
+.submitted-content__header h2 {
+  font-size: 20px;
+}
+.submitted-content__section-heading h3 {
+  font-size: 14px;
+}
+
+.submitted-content__header > span,
+.submitted-content__section-heading > span {
+  color: #969caf;
+  font-size: 12px;
+}
+
+.submitted-content__body {
+  padding: 18px;
+  border-radius: 12px;
+  background: #fafbfe;
+}
+
+.submitted-content__section-heading {
+  margin-bottom: 12px;
 }
 
 .submission-content {
-  line-height: 1.8;
+  color: #50576e;
+  font-size: 14px;
+  line-height: 1.85;
 }
 
 .submission-content :deep(img) {
   max-width: 100%;
-  border-radius: 6px;
+  border-radius: 8px;
+}
+.submission-content :deep(p:first-child) {
+  margin-top: 0;
+}
+.submission-content :deep(p:last-child) {
+  margin-bottom: 0;
 }
 
-.submission-content :deep(p) {
-  margin: 0.5rem 0;
+.submitted-content__empty {
+  padding: 52px 20px;
+  color: #9ba1b3;
+  text-align: center;
 }
 
-.prose {
-  max-width: none;
+@media (max-width: 560px) {
+  .submitted-content {
+    padding: 16px;
+  }
+  .submitted-content__header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 </style>

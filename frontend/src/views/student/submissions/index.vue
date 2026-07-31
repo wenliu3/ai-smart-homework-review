@@ -1,108 +1,91 @@
 <template>
-  <div class="submission-container">
-    <!-- 页面头部 -->
-    <div class="header-section">
-      <div class="header-content">
-        <!-- 返回按钮和标题 -->
-        <div class="flex items-center gap-3">
-          <el-button
-            link
-            @click="goBack"
-            :icon="ArrowLeft"
-            class="!p-2 !text-gray-600 hover:!text-blue-600 hover:!bg-blue-50 !rounded-lg"
-          >
-            <span class="hidden sm:inline ml-1">返回</span>
-          </el-button>
+  <div class="student-page submission-container">
+    <header class="submission-hero">
+      <div class="submission-hero__inner">
+        <el-button class="back-button" text :icon="ArrowLeft" @click="goBack">
+          返回作业列表
+        </el-button>
 
-          <h1 class="text-lg sm:text-xl font-semibold text-gray-900 truncate">
-            {{ submissionData?.assignment?.title || "作业提交" }}
-          </h1>
+        <div class="submission-hero__content">
+          <div class="submission-hero__copy">
+            <p class="student-eyebrow">ASSIGNMENT WORKSPACE</p>
+            <h1>{{ submissionData?.assignment?.title || "作业提交" }}</h1>
+            <p>查看要求、完成提交并跟进 AI 与教师评价。</p>
+          </div>
+          <div class="submission-hero__statuses">
+            <span
+              v-if="submissionData?.submission"
+              class="student-status"
+              :class="`student-status--${statusTagType}`"
+            >
+              {{ statusText }}
+            </span>
+            <span
+              class="student-status"
+              :class="`student-status--${reviewStatusTagType}`"
+            >
+              {{ reviewStatusText }}
+            </span>
+          </div>
         </div>
 
-        <!-- 状态标签 -->
-        <div class="flex items-center gap-2">
-          <el-tag
-            v-if="submissionData?.submission"
-            :type="statusTagType"
-            size="small"
-          >
-            {{ statusText }}
-          </el-tag>
-          <el-tag :type="reviewStatusTagType" size="small">
-            {{ reviewStatusText }}
-          </el-tag>
-        </div>
-      </div>
-
-      <!-- 提交限制提示 -->
-      <div
-        v-if="submissionLimitInfo"
-        class="mt-3"
-        style="max-width: 1200px; margin: 0 auto"
-      >
         <el-alert
+          v-if="submissionLimitInfo"
           :title="submissionLimitInfo.title"
           :type="submissionLimitInfo.type"
           :closable="false"
           show-icon
-          class="!mb-0"
+          class="submission-limit-alert"
         >
           <template v-if="submissionLimitInfo.message" #default>
             {{ submissionLimitInfo.message }}
           </template>
         </el-alert>
       </div>
-    </div>
+    </header>
 
-    <!-- Tab导航和内容区域 -->
-    <div class="tab-container" v-loading="loading">
-      <div v-if="submissionData" class="h-full flex flex-col">
-        <!-- Tab导航栏 -->
-        <div class="tab-navigation">
+    <main class="submission-shell" v-loading="loading">
+      <div v-if="submissionData" class="submission-workspace student-card">
+        <nav class="tab-navigation" aria-label="作业处理步骤">
           <el-tabs
             v-model="activeTab"
             class="submission-tabs"
             @tab-change="handleTabChange"
           >
-            <el-tab-pane label="作业详情" name="assignment" />
-
+            <el-tab-pane name="assignment">
+              <template #label>
+                <span class="tab-label"><b>1</b><span>作业详情</span></span>
+              </template>
+            </el-tab-pane>
             <el-tab-pane name="submission">
               <template #label>
                 <span class="tab-label">
-                  <span class="tab-text">提交作业</span>
+                  <b>2</b><span>提交作业</span>
                   <el-badge
-                    v-if="
-                      submissionData?.submission &&
-                      submissionData.submission.status === 'draft'
-                    "
+                    v-if="submissionData.submission?.status === 'draft'"
                     is-dot
-                    class="ml-1"
                   />
                 </span>
               </template>
             </el-tab-pane>
-
             <el-tab-pane name="results">
               <template #label>
                 <span class="tab-label">
-                  <span class="tab-text">评价结果</span>
+                  <b>3</b><span>评价结果</span>
                   <el-badge
                     v-if="
-                      submissionData?.aiReview || submissionData?.teacherReview
+                      submissionData.aiReview || submissionData.teacherReview
                     "
                     is-dot
-                    class="ml-1"
                   />
                 </span>
               </template>
             </el-tab-pane>
           </el-tabs>
-        </div>
+        </nav>
 
-        <!-- Tab内容区域 -->
         <div class="tab-content">
-          <!-- 作业详情Tab -->
-          <div v-show="activeTab === 'assignment'" class="tab-pane tab-pane-padded">
+          <section v-show="activeTab === 'assignment'" class="tab-pane">
             <AssignmentInfo
               :assignment="submissionData.assignment"
               :submission="submissionData.submission"
@@ -110,112 +93,65 @@
               :status-text="statusText"
               :is-overdue="isOverdue"
             />
-          </div>
+          </section>
 
-          <!-- 我的提交Tab -->
-          <div v-show="activeTab === 'submission'" class="tab-pane">
-            <!-- 操作按钮区域 -->
-            <div
-              v-if="canSubmit && !isOverdue && !isTerminated"
-              class="tab-actions-bar"
-            >
-              <div class="actions-left">
-                <h3 class="section-title">提交作业</h3>
-              </div>
-
-              <div class="actions-right">
-                <el-button
-                  v-if="canSaveDraft"
-                  @click="handleSaveDraftClick"
-                  :loading="saving"
-                  size="small"
-                  plain
-                >
-                  {{ saving ? "保存中..." : "保存草稿" }}
-                </el-button>
-
-                <el-button
-                  v-if="submissionData?.submission?.status === 'draft'"
-                  type="danger"
-                  plain
-                  :loading="deleting"
-                  @click="handleDeleteClick"
-                  size="small"
-                >
-                  删除草稿
-                </el-button>
-
-                <el-button
-                  type="primary"
-                  @click="handleSubmitClick"
-                  :loading="submitting"
-                  class="submit-btn"
-                >
-                  {{ getSubmitButtonText() }}
-                </el-button>
-              </div>
-            </div>
-
-            <!-- AI处理中的全屏Loading -->
+          <section
+            v-show="activeTab === 'submission'"
+            class="tab-pane submission-pane"
+          >
             <div
               v-show="showAiProcessingFullscreen"
               class="ai-processing-overlay"
             >
               <div class="ai-processing-content">
-                <div class="processing-animation">
-                  <div class="ai-loading-main">
-                    <img
-                      src="@/assets/image/ai_loading.gif"
-                      alt="AI正在批改"
-                      class="ai-loading-gif-large"
-                    />
-                  </div>
+                <div class="ai-loading-main">
+                  <img
+                    src="@/assets/image/ai_loading.gif"
+                    alt="AI 正在批改"
+                    class="ai-loading-gif-large"
+                  />
                 </div>
-                <h3 class="processing-title">🤖 AI智能批改中</h3>
+                <p class="student-eyebrow">AI REVIEW</p>
+                <h3 class="processing-title">AI 智能批改中</h3>
                 <p class="processing-description">
-                  深度分析您的作业内容，智能评分中...
+                  正在分析作业内容并生成评分与改进建议。
                 </p>
-                <div class="processing-status">
-                  <div class="status-info">
-                    <p class="status-text">
-                      {{
-                        isPolling
-                          ? `AI分析中 (第${pollingCount}次检查)`
-                          : "预计需要 30-60 秒完成智能评价"
-                      }}
-                    </p>
-                  </div>
-                </div>
-                <div class="processing-actions">
-                  <el-button
-                    @click="switchToTab('results')"
-                    type="primary"
-                    plain
-                    class="view-progress-btn"
-                  >
-                    查看评价进度
-                  </el-button>
-                </div>
+                <p class="status-text">
+                  {{
+                    isPolling
+                      ? `正在查询进度（第 ${pollingCount} 次）`
+                      : "通常约 1 分钟完成，请稍候"
+                  }}
+                </p>
+                <el-button
+                  class="view-progress-btn"
+                  type="primary"
+                  plain
+                  @click="switchToTab('results')"
+                >
+                  查看评价进度
+                </el-button>
               </div>
             </div>
 
-            <!-- 表单内容 -->
-            <div v-show="!showAiProcessingFullscreen" class="form-content-wrapper">
-              <!-- 自动保存状态 -->
-              <div
-                v-if="activeTab === 'submission' && (saving || lastSaveTime)"
-                class="auto-save-status-inline"
-              >
-                <div class="flex items-center gap-2 text-sm text-gray-500">
+            <div
+              v-show="!showAiProcessingFullscreen"
+              class="form-content-wrapper"
+            >
+              <div class="submission-section-heading">
+                <div>
+                  <p class="student-eyebrow">YOUR WORK</p>
+                  <h2>完成并提交作业</h2>
+                  <p>正文和附件至少填写一项，正式提交前仍可保存草稿。</p>
+                </div>
+                <span v-if="saving || lastSaveTime" class="save-status">
                   <el-icon v-if="saving" class="animate-spin"
                     ><Loading
                   /></el-icon>
-                  <span v-if="saving">保存中...</span>
-                  <span v-else-if="lastSaveTime">{{ lastSaveTime }}</span>
-                </div>
+                  {{ saving ? "正在保存" : lastSaveTime }}
+                </span>
               </div>
 
-              <!-- 作业提交表单 -->
               <SubmissionForm
                 v-if="showSubmissionForm"
                 ref="submissionFormRef"
@@ -225,16 +161,51 @@
                 @success="handleSuccess"
               />
 
-              <!-- 已提交的作业内容 -->
               <SubmittedContent
                 v-if="showSubmittedContent"
                 :submission="submissionData.submission"
               />
             </div>
-          </div>
 
-          <!-- 评价结果Tab -->
-          <div v-show="activeTab === 'results'" class="tab-pane tab-pane-padded">
+            <footer
+              v-if="canSubmit && !isOverdue && !isTerminated"
+              class="tab-actions-bar"
+            >
+              <p>提交后将自动开始 AI 评价，请确认内容与附件无误。</p>
+              <div class="actions-right">
+                <el-button
+                  v-if="submissionData.submission?.status === 'draft'"
+                  type="danger"
+                  plain
+                  :loading="deleting"
+                  @click="handleDeleteClick"
+                >
+                  删除草稿
+                </el-button>
+                <el-button
+                  v-if="canSaveDraft"
+                  plain
+                  :loading="saving"
+                  @click="handleSaveDraftClick"
+                >
+                  {{ saving ? "保存中..." : "保存草稿" }}
+                </el-button>
+                <el-button
+                  class="student-primary-button submit-btn"
+                  type="primary"
+                  :loading="submitting"
+                  @click="handleSubmitClick"
+                >
+                  {{ getSubmitButtonText() }}
+                </el-button>
+              </div>
+            </footer>
+          </section>
+
+          <section
+            v-show="activeTab === 'results'"
+            class="tab-pane results-pane"
+          >
             <ReviewResults
               :ai-review="submissionData.aiReview"
               :teacher-review="submissionData.teacherReview"
@@ -243,10 +214,10 @@
               :is-polling="isPolling"
               :polling-count="pollingCount"
             />
-          </div>
+          </section>
         </div>
       </div>
-    </div>
+    </main>
   </div>
 </template>
 
@@ -477,25 +448,32 @@ const handleSubmitClick = async () => {
   if (!submissionFormRef.value) return;
 
   try {
-    console.log('开始表单验证...');
+    console.log("开始表单验证...");
     const isValid = await submissionFormRef.value.validate();
-    console.log('表单验证结果:', isValid);
+    console.log("表单验证结果:", isValid);
     if (!isValid) {
-      ElMessage.warning('请完善作业内容后再提交');
+      ElMessage.warning("请完善作业内容后再提交");
       return;
     }
 
     // 获取已上传的附件和内容
     const fn = submissionFormRef.value?.getUploadedAttachments;
-    const attachments = (typeof fn === 'function' ? fn() : []) || [];
+    const attachments = (typeof fn === "function" ? fn() : []) || [];
     if (!Array.isArray(attachments)) {
-      console.error('getUploadedAttachments 返回非数组值:', attachments);
+      console.error("getUploadedAttachments 返回非数组值:", attachments);
     }
-    const content = submissionFormRef.value?.getContent?.() || '';
-    console.log('提交时附件数:', Array.isArray(attachments) ? attachments.length : '非数组', typeof attachments);
+    const content = submissionFormRef.value?.getContent?.() || "";
+    console.log(
+      "提交时附件数:",
+      Array.isArray(attachments) ? attachments.length : "非数组",
+      typeof attachments
+    );
 
     // 调用提交处理（确保 attachments 是数组）
-    await handleSubmitWithAiLoading(Array.isArray(attachments) ? attachments : [], content);
+    await handleSubmitWithAiLoading(
+      Array.isArray(attachments) ? attachments : [],
+      content
+    );
   } catch (error: any) {
     console.error("提交失败:", error);
     ElMessage.error(error?.message || "提交失败，请重试");
@@ -611,8 +589,9 @@ const handleSaveDraftClick = async () => {
       return;
     }
 
-    const attachments = await submissionFormRef.value.getUploadedAttachments?.() || [];
-    const content = submissionFormRef.value?.getContent?.() || '';
+    const attachments =
+      (await submissionFormRef.value.getUploadedAttachments?.()) || [];
+    const content = submissionFormRef.value?.getContent?.() || "";
     await handleSaveDraft(attachments, content);
     // 标记文件已被消费，防止组件卸载时清理
     submissionFormRef.value?.markFilesConsumed?.();
@@ -714,6 +693,8 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+@import "../student-theme.css";
+
 /* 主容器 */
 .submission-container {
   height: 100%;
@@ -1089,5 +1070,330 @@ onUnmounted(() => {
 
 .tab-pane::-webkit-scrollbar-thumb:hover {
   background: #a8a8a8;
+}
+
+/* 学生端改版覆盖层 */
+.submission-container {
+  min-height: 100%;
+  height: auto;
+  overflow: visible;
+  background: #f5f6fa;
+}
+
+.submission-hero {
+  border-bottom: 1px solid #e8e8f0;
+  background: #fff;
+}
+
+.submission-hero__inner {
+  width: min(1180px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 18px 0 22px;
+}
+
+.back-button {
+  margin: 0 0 12px -8px;
+  color: #737a90;
+}
+
+.submission-hero__content {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.submission-hero__copy h1 {
+  margin: 0;
+  color: #23273b;
+  font-size: clamp(22px, 2.4vw, 30px);
+  line-height: 1.25;
+}
+
+.submission-hero__copy > p:last-child {
+  margin: 8px 0 0;
+  color: #858ca0;
+  font-size: 14px;
+}
+
+.submission-hero__statuses {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.student-status--info {
+  background: #f0f1f5;
+  color: #747b8f;
+}
+
+.submission-limit-alert {
+  margin-top: 16px;
+  border-radius: 10px;
+}
+
+.submission-shell {
+  width: min(1180px, calc(100% - 40px));
+  min-height: 360px;
+  margin: 0 auto;
+  padding: 22px 0 40px;
+}
+
+.submission-workspace {
+  overflow: hidden;
+}
+
+.tab-navigation {
+  padding: 0 24px;
+  border-bottom: 1px solid #e9eaf1;
+  background: #fff;
+}
+
+.submission-tabs {
+  --el-color-primary: #6558d9;
+  --el-tabs-header-height: 58px;
+}
+
+.submission-tabs :deep(.el-tabs__header) {
+  margin: 0;
+}
+
+.submission-tabs :deep(.el-tabs__nav-wrap::after) {
+  display: none;
+}
+
+.submission-tabs :deep(.el-tabs__item) {
+  padding: 0 28px;
+  color: #858b9d;
+  font-size: 14px;
+}
+
+.submission-tabs :deep(.el-tabs__item.is-active) {
+  color: #5548c7;
+  font-weight: 700;
+}
+
+.submission-tabs :deep(.el-tabs__active-bar) {
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: #6558d9;
+}
+
+.tab-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tab-label b {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #f0f1f5;
+  color: #8c92a4;
+  font-size: 11px;
+}
+
+.submission-tabs :deep(.el-tabs__item.is-active) .tab-label b {
+  background: #ebe8ff;
+  color: #5c4fcf;
+}
+
+.tab-content {
+  overflow: visible;
+  background: #f8f9fc;
+}
+
+.tab-pane {
+  position: relative;
+  height: auto;
+  min-height: 420px;
+  overflow: visible;
+  padding: 24px;
+  animation: none;
+}
+
+.submission-pane {
+  padding: 0;
+}
+
+.form-content-wrapper {
+  padding: 24px;
+}
+
+.submission-section-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 18px;
+}
+
+.submission-section-heading h2 {
+  margin: 0;
+  color: #252a40;
+  font-size: 20px;
+}
+
+.submission-section-heading > div > p:last-child {
+  margin: 7px 0 0;
+  color: #8e95a8;
+  font-size: 13px;
+}
+
+.save-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #8b91a3;
+  font-size: 12px;
+}
+
+.tab-actions-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin: 0;
+  padding: 14px 24px;
+  border-top: 1px solid #e7e9f0;
+  border-bottom: 0;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 -10px 30px rgba(35, 39, 66, 0.06);
+  backdrop-filter: blur(10px);
+}
+
+.tab-actions-bar p {
+  margin: 0;
+  color: #8b91a4;
+  font-size: 12px;
+}
+
+.actions-right {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 9px;
+}
+
+.submit-btn {
+  min-width: 112px;
+  border: 0;
+  background: linear-gradient(135deg, #685bdc, #5648c4);
+}
+
+.ai-processing-overlay {
+  position: relative;
+  min-height: 520px;
+  background: rgba(248, 249, 252, 0.96);
+}
+
+.ai-processing-content {
+  max-width: 420px;
+  padding: 48px 28px;
+}
+
+.ai-loading-main {
+  width: 150px;
+  height: 150px;
+  margin: 0 auto 24px;
+  padding: 10px;
+}
+
+.ai-loading-gif-large {
+  width: 130px;
+  height: 130px;
+}
+
+.processing-title {
+  margin: 0 0 8px;
+  color: #292e45;
+  font-size: 22px;
+}
+
+.status-text {
+  margin: 16px 0 20px;
+  color: #9aa0b2;
+  font-size: 12px;
+}
+
+.view-progress-btn {
+  border-color: #c9c3f6;
+  border-radius: 9px;
+  color: #5d50cf;
+  box-shadow: none;
+}
+
+.results-pane {
+  height: 620px;
+}
+
+@media (max-width: 768px) {
+  .submission-hero__inner,
+  .submission-shell {
+    width: min(100% - 24px, 1180px);
+  }
+
+  .submission-hero__content,
+  .submission-section-heading,
+  .tab-actions-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .submission-hero__statuses {
+    justify-content: flex-start;
+  }
+
+  .tab-navigation {
+    padding: 0 10px;
+    overflow-x: auto;
+  }
+
+  .submission-tabs :deep(.el-tabs__item) {
+    padding: 0 14px;
+  }
+
+  .tab-pane,
+  .form-content-wrapper {
+    padding: 16px;
+  }
+
+  .submission-pane {
+    padding: 0;
+  }
+
+  .tab-actions-bar {
+    padding: 14px 16px;
+  }
+
+  .actions-right {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .actions-right .submit-btn:last-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 480px) {
+  .tab-label b {
+    display: none;
+  }
+  .submission-tabs :deep(.el-tabs__item) {
+    padding: 0 11px;
+  }
+  .results-pane {
+    height: auto;
+    min-height: 560px;
+  }
 }
 </style>
