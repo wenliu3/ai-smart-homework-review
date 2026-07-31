@@ -55,10 +55,11 @@
           :class="{ active: selectedClassId === classItem._id }"
           @click="handleSelectClass(classItem)"
         >
-          <span class="class-cover" :style="getClassCoverStyle(classItem.name)">
-            <span>{{ getClassInitials(classItem.name) }}</span>
-            <small>{{ classItem.code || "CLASS" }}</small>
-          </span>
+          <span
+            class="class-card__accent"
+            :style="getClassCoverStyle(classItem.name)"
+            aria-hidden="true"
+          ></span>
           <span class="class-card__content">
             <span class="class-card__title-row">
               <strong :title="classItem.name">{{ classItem.name }}</strong>
@@ -143,8 +144,6 @@ const getClassCoverStyle = (name = "") => {
   const [start, end] = coverPalettes[hash % coverPalettes.length];
   return { background: `linear-gradient(135deg, ${start}, ${end})` };
 };
-
-const getClassInitials = (name = "") => name.trim().slice(0, 2) || "课程";
 
 const loadClasses = async (type = "initData", search?: string) => {
   if (type === "initData") {
@@ -299,26 +298,10 @@ onMounted(() => loadClasses());
     0 10px 26px rgba(64, 57, 117, 0.09);
 }
 
-.class-cover {
-  display: flex;
-  height: 72px;
-  align-items: flex-end;
-  justify-content: space-between;
-  padding: 13px 15px;
-  color: #fff;
+.class-card__accent {
+  display: block;
+  height: 7px;
   background: linear-gradient(135deg, #6558d9, #8d7be8);
-}
-
-.class-cover span {
-  font-size: 18px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.12);
-}
-.class-cover small {
-  opacity: 0.78;
-  font-size: 9px;
-  letter-spacing: 0.1em;
 }
 
 .class-card__content {

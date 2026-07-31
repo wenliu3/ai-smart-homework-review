@@ -66,8 +66,21 @@ vi.mock("../composables", async () => {
 });
 
 import SubmissionWorkspace from "../index.vue";
+import submissionWorkspaceSource from "../index.vue?raw";
 
 describe("SubmissionWorkspace", () => {
+  it("keeps the submission workspace as the vertical scroll container", () => {
+    const containerRules = [
+      ...submissionWorkspaceSource.matchAll(/\.submission-container\s*\{([^}]*)\}/g),
+    ];
+    const finalRule = containerRules[containerRules.length - 1]?.[1] || "";
+
+    expect(finalRule).toMatch(/height:\s*100%/);
+    expect(finalRule).toMatch(/min-height:\s*0/);
+    expect(finalRule).toMatch(/overflow-y:\s*auto/);
+    expect(finalRule).toMatch(/overflow-x:\s*hidden/);
+  });
+
   it("没有提交记录时页头显示待提交而不是待批改", () => {
     const wrapper = shallowMount(SubmissionWorkspace, {
       global: {

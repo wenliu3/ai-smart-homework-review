@@ -1086,9 +1086,10 @@ onUnmounted(() => {
 
 /* 学生端改版覆盖层 */
 .submission-container {
-  min-height: 100%;
-  height: auto;
-  overflow: visible;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
   background: #f5f6fa;
 }
 
