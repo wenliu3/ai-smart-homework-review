@@ -20,7 +20,7 @@ vi.mock("vuex", () => ({
             classId: "3",
             title: "语料库分析",
             className: "自然语言处理",
-            status: "todo",
+            status: "not_started",
             endDate: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
           },
         ],
@@ -46,7 +46,11 @@ describe("StudentDashboard", () => {
     const wrapper = mount(StudentDashboard, {
       global: {
         stubs: {
-          StatCard: { template: "<article class='stat-card-stub' />" },
+          StatCard: {
+            props: ["title", "subtitle"],
+            template:
+              "<article class='stat-card-stub'>{{ title }} {{ subtitle }}</article>",
+          },
           DonutChart: true,
           BarChart: true,
           "el-button": { template: "<button><slot /></button>" },
@@ -62,6 +66,9 @@ describe("StudentDashboard", () => {
 
     const html = wrapper.html();
     expect(wrapper.text()).toContain("测试学生");
+    expect(wrapper.text()).toContain("当前还有 1 项作业待完成");
+    expect(wrapper.text()).toContain("已评价");
+    expect(wrapper.text()).toContain("累计");
     expect(wrapper.find('[data-testid="priority-todos"]').exists()).toBe(true);
     expect(wrapper.find(".todo-item--urgent").exists()).toBe(true);
     expect(html.indexOf('data-testid="priority-todos"')).toBeLessThan(

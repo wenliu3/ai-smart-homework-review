@@ -42,9 +42,13 @@
             <el-icon :size="18"><EditPen /></el-icon>
             作业正文
           </span>
-          <span class="card-hint"
-            >可直接编写内容，也支持拖拽文件到编辑器上传</span
-          >
+          <span class="card-hint">
+            {{
+              canUploadAttachments
+                ? "可直接编写内容，也支持拖拽文件到编辑器上传"
+                : "本作业仅支持正文提交"
+            }}
+          </span>
         </div>
         <div
           class="editor-wrapper"
@@ -67,7 +71,7 @@
       </div>
 
       <!-- 附件上传区域 -->
-      <div class="upload-card">
+      <div v-if="canUploadAttachments" class="upload-card">
         <div class="card-header">
           <span class="card-title">
             <el-icon :size="18"><Paperclip /></el-icon>
@@ -159,6 +163,10 @@ const isTerminated = computed(() => {
   return props.assignment?.status === "terminated";
 });
 
+const canUploadAttachments = computed(
+  () => props.assignment?.allowAttachments !== false
+);
+
 // 表单数据
 const form = reactive({
   content: "",
@@ -195,6 +203,10 @@ const triggerFileSelect = () => {
 
 // 统一的上传逻辑（按钮和拖拽共用）
 const uploadFiles = async (files: File[]) => {
+  if (!canUploadAttachments.value) {
+    ElMessage.warning("教师未允许本作业上传附件");
+    return;
+  }
   if (files.length === 0) return;
 
   // 校验
@@ -250,6 +262,11 @@ const hasFiles = (e: DragEvent): boolean => {
 const handleDragOver = (e: DragEvent) => {
   if (!hasFiles(e)) return;
   e.preventDefault();
+  if (!canUploadAttachments.value) {
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "none";
+    isDragging.value = false;
+    return;
+  }
   e.dataTransfer!.dropEffect = "copy";
   isDragging.value = true;
 };
@@ -269,6 +286,11 @@ const handleDrop = async (e: DragEvent) => {
   e.preventDefault();
   e.stopPropagation();
   isDragging.value = false;
+
+  if (!canUploadAttachments.value) {
+    ElMessage.warning("教师未允许本作业上传附件");
+    return;
+  }
 
   const files = Array.from(e.dataTransfer?.files || []);
   await uploadFiles(files);
@@ -343,6 +365,7 @@ onUnmounted(() => {
 });
 
 const getUploadedAttachments = (): any[] => {
+  if (!canUploadAttachments.value) return [];
   return uploadedResults.value || [];
 };
 
@@ -354,7 +377,8 @@ const getContent = (): string => {
 const validate = async () => {
   const hasContent =
     form.content && form.content.trim() && form.content !== "<p><br></p>";
-  const hasAttachments = uploadedResults.value.length > 0;
+  const hasAttachments =
+    canUploadAttachments.value && uploadedResults.value.length > 0;
   if (!hasContent && !hasAttachments) {
     ElMessage.warning("请编写作业内容或上传作业文件");
     return false;
@@ -383,7 +407,9 @@ watch(
     if (!newSubmission) return;
     if (!oldSubmission || newSubmission.id !== oldSubmission.id) {
       form.content = newSubmission.content || "";
-      uploadedResults.value = newSubmission.attachments || [];
+      uploadedResults.value = canUploadAttachments.value
+        ? newSubmission.attachments || []
+        : [];
     }
   },
   { immediate: true }

@@ -20,10 +20,14 @@ describe("学生作业详情", () => {
       description: "<p>完成实验报告</p>",
       teacherName: "边国维",
       endDate: "2026-08-05T18:00:00",
-      status: "in_progress",
+      status: "published",
       isExpired: false,
-      hasDraft: false,
-      hasSubmitted: false,
+      submission: {
+        id: "8",
+        status: "draft",
+        content: "<p>草稿</p>",
+        attachments: [],
+      },
       attachments: [
         {
           fileName: "实验2-语料库分析.docx",
@@ -54,5 +58,7 @@ describe("学生作业详情", () => {
 
     expect(wrapper.findComponent(AssignmentAttachmentList).exists()).toBe(true);
     expect(wrapper.text()).toContain("实验2-语料库分析.docx");
+    expect(wrapper.text()).toContain("草稿");
+    expect(wrapper.text()).toContain("继续编辑草稿");
   });
 });

@@ -36,10 +36,10 @@
           :loading="loading"
         />
         <StatCard
-          title="已提交"
+          title="已评价"
           :value="studentStats?.completedSubmissions || 0"
           unit="份"
-          subtitle="本学期累计"
+          subtitle="累计"
           icon="document"
           variant="primary"
           :loading="loading"
@@ -253,7 +253,7 @@ const greeting = computed(() => {
 
 const priorityMessage = computed(() => {
   const count = studentStats.value?.pendingAssignments || 0;
-  return count > 0 ? `今天还有 ${count} 项作业待完成` : "今天的待办已经完成";
+  return count > 0 ? `当前还有 ${count} 项作业待完成` : "当前没有待完成作业";
 });
 
 const submissionStatusData = computed(() => {

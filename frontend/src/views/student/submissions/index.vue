@@ -21,6 +21,13 @@
               {{ statusText }}
             </span>
             <span
+              v-else
+              class="student-status student-status--info"
+            >
+              待提交
+            </span>
+            <span
+              v-if="hasFormalSubmission"
               class="student-status"
               :class="`student-status--${reviewStatusTagType}`"
             >
@@ -309,6 +316,11 @@ const { formatDate } = useSubmissionUtils();
 // 计算属性
 const isTerminated = computed(() => {
   return (submissionData.value?.assignment as any)?.status === "terminated";
+});
+
+const hasFormalSubmission = computed(() => {
+  const status = submissionData.value?.submission?.status;
+  return Boolean(status && status !== "draft");
 });
 
 // 批改状态标签类型

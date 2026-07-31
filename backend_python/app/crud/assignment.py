@@ -25,6 +25,33 @@ def _class_ids(assignment: Assignment) -> list[int]:
     return [int(c["id"]) for c in (assignment.classes or []) if c.get("id")]
 
 
+def get_student_visible_assignment(
+    db: Session,
+    assignment_id: int,
+    student_id: int,
+) -> Assignment:
+    """读取学生可见的作业，并在返回内容前校验有效班级成员关系。"""
+    assignment = db.query(Assignment).filter(
+        Assignment.alive(),
+        Assignment.id == assignment_id,
+        Assignment.status.in_(["published", "terminated"]),
+    ).first()
+    if not assignment:
+        raise NotFoundException(10015, "作业不存在")
+
+    assigned_class_ids = _class_ids(assignment)
+    membership = None
+    if assigned_class_ids:
+        membership = db.query(ClassStudent).filter(
+            ClassStudent.class_id.in_(assigned_class_ids),
+            ClassStudent.student_id == student_id,
+            ClassStudent.status == "active",
+        ).first()
+    if membership is None:
+        raise BadRequestException(10007, "当前学生不属于该作业班级")
+    return assignment
+
+
 # ========== 教师端 ==========
 
 def get_teacher_assignments(db: Session, teacher_id: int, params: dict) -> dict:
@@ -329,9 +356,7 @@ def get_student_statistics(db: Session, student_id: int, class_id: str | None) -
 
 def get_student_detail(db: Session, assignment_id: int, student_id: int) -> dict:
     """学生查看作业详情 — 含自己的提交记录"""
-    a = db.query(Assignment).filter(Assignment.alive(), Assignment.id == assignment_id).first()
-    if not a:
-        raise NotFoundException(10015, "作业不存在")
+    a = get_student_visible_assignment(db, assignment_id, student_id)
     submission = db.query(Submission).filter(Submission.assignment_id == assignment_id, Submission.student_id == student_id).first()
     d = a.to_dict()
     d["submission"] = submission.to_dict() if submission else None

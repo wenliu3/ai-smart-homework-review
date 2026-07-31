@@ -12,11 +12,21 @@
         </div>
         <div class="review-overview__copy">
           <p>REVIEW SUMMARY</p>
-          <h2>{{ displayScore === null ? "评价进行中" : "本次作业评价" }}</h2>
+          <h2>
+            {{
+              displayScore === null
+                ? waitingForTeacherOnly
+                  ? "等待教师批改"
+                  : "评价进行中"
+                : "本次作业评价"
+            }}
+          </h2>
           <span>
             {{
               displayScore === null
-                ? "评价完成后将在这里显示得分与改进建议"
+                ? waitingForTeacherOnly
+                  ? "本作业未启用 AI 评价，教师批改后将在这里显示反馈"
+                  : "评价完成后将在这里显示得分与改进建议"
                 : `${displaySource}已给出评价，可切换标签查看详细反馈`
             }}
           </span>
@@ -25,13 +35,18 @@
 
       <el-tabs v-model="activeTab" tab-position="left" class="review-tabs">
         <!-- AI批改结果标签页 -->
-        <el-tab-pane name="ai" class="tab-content" :disabled="!aiReview">
+        <el-tab-pane
+          v-if="aiSupported || aiReview"
+          name="ai"
+          class="tab-content"
+          :disabled="!aiReview"
+        >
           <template #label>
             <div class="tab-label">
               <el-icon><Monitor /></el-icon>
               <span>AI批改</span>
               <el-tag
-                v-if="aiReview && aiReview.score"
+                v-if="aiReview && typeof aiReview.score === 'number'"
                 type="primary"
                 size="small"
                 class="ml-2"
@@ -128,14 +143,14 @@
         <el-tab-pane
           name="teacher"
           class="tab-content"
-          :disabled="!teacherReview"
+          :disabled="!teacherReview && !waitingForTeacherOnly"
         >
           <template #label>
             <div class="tab-label">
               <el-icon><User /></el-icon>
               <span>教师批改</span>
               <el-tag
-                v-if="teacherReview && teacherReview.score"
+                v-if="teacherReview && typeof teacherReview.score === 'number'"
                 type="success"
                 size="small"
                 class="ml-2"
@@ -186,7 +201,7 @@
     <!-- 提示信息 - 只在不显示标签页时显示 -->
     <template v-if="!showReviewTabs">
       <el-card
-        v-if="!submissionStatus"
+        v-if="isPreSubmission"
         data-testid="no-submission-review"
         class="review-empty-card"
       >
@@ -270,27 +285,42 @@ const displaySource = computed(() =>
   typeof props.teacherReview?.score === "number" ? "教师" : "AI"
 );
 
+const isPreSubmission = computed(
+  () =>
+    !props.submissionStatus ||
+    props.submissionStatus === "draft" ||
+    props.submissionStatus === "not_submitted"
+);
+
+const aiSupported = computed(() =>
+  props.assignment ? checkAiSupport(props.assignment).supported : true
+);
+
+const waitingForTeacherOnly = computed(
+  () =>
+    !isPreSubmission.value &&
+    !aiSupported.value &&
+    !props.aiReview &&
+    !props.teacherReview
+);
+
 // 当前激活的标签页 - 默认显示AI评价
 const activeTab = ref("ai");
 
 // 是否显示批改结果标签页
 const showReviewTabs = computed(() => {
   // 如果作业已提交，就显示标签页（即使还没有批改结果）
-  return (
-    props.submissionStatus &&
-    props.submissionStatus !== "draft" &&
-    props.submissionStatus !== "not_submitted"
-  );
+  return !isPreSubmission.value;
 });
 
 // 监听评价数据变化，自动切换到合适的标签页
 watch(
-  () => [props.aiReview, props.teacherReview],
-  ([aiReview, teacherReview]) => {
+  () => [props.aiReview, props.teacherReview, aiSupported.value],
+  ([aiReview, teacherReview, supportsAi]) => {
     // 默认优先显示AI评价，如果没有AI评价则显示教师评价
     if (aiReview) {
       activeTab.value = "ai";
-    } else if (teacherReview) {
+    } else if (teacherReview || !supportsAi) {
       activeTab.value = "teacher";
     } else {
       // 如果都没有，默认显示AI标签页
@@ -336,7 +366,7 @@ const showNoReviewTip = computed(() => {
   return (
     !props.aiReview &&
     !props.teacherReview &&
-    props.submissionStatus &&
+    !isPreSubmission.value &&
     !showAiProcessingTip.value &&
     !showTeacherPendingTip.value &&
     !showOverdueTip.value

@@ -14,6 +14,7 @@ from ..core.utils import now
 from ..plagiarism.extractors import extract_file_text
 from ..plagiarism import get_word_tokens
 from ..config import settings
+from .assignment import get_student_visible_assignment
 
 logger = logging.getLogger(__name__)
 
@@ -165,6 +166,8 @@ def submit(db: Session, student_id: int, data: dict) -> dict:
         raise BadRequestException(10011, "作业已截止，无法提交")
 
     attachments = data.get("attachments", []) or []
+    if attachments and not bool(assignment.allow_attachments):
+        raise BadRequestException(10011, "该作业不允许上传附件")
     content = data.get("content", "")
     # 重新从文件提取文本，计算字数并更新 textContent
     upload_dir = str(settings.upload_path)
@@ -213,9 +216,7 @@ def submit(db: Session, student_id: int, data: dict) -> dict:
 
 def get_my_submission(db: Session, assignment_id: int, student_id: int) -> dict:
     """学生查看自己的提交详情 — 含作业信息、提交内容、AI批改结果、教师批改结果"""
-    assignment = db.query(Assignment).filter(Assignment.alive(), Assignment.id == assignment_id).first()
-    if not assignment:
-        raise NotFoundException(10015, "作业不存在")
+    assignment = get_student_visible_assignment(db, assignment_id, student_id)
     submission = db.query(Submission).filter(
         Submission.assignment_id == assignment_id, Submission.student_id == student_id
     ).first()

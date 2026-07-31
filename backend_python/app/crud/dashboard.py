@@ -187,10 +187,14 @@ def get_teacher_quick_actions() -> dict:
 
 def get_student_stats(db: Session, student_id: int) -> dict:
     """学生看板统计 — 已完成提交数/平均分/加入班级数/按时提交率/待办/成绩分布"""
-    all_subs = db.query(Submission).filter(
+    student_subs = db.query(Submission).filter(
         Submission.student_id == student_id,
-        Submission.status.in_(["submitted", "ai_reviewed", "teacher_reviewed"]),
     ).order_by(Submission.submitted_at.desc()).all()
+    all_subs = [
+        submission
+        for submission in student_subs
+        if submission.status in ("submitted", "ai_reviewed", "teacher_reviewed")
+    ]
     reviewed_subs = [s for s in all_subs if s.status in ("ai_reviewed", "teacher_reviewed")]
     joined_classes = db.query(ClassStudent).filter(ClassStudent.student_id == student_id, ClassStudent.status == "active").count()
 
@@ -198,14 +202,40 @@ def get_student_stats(db: Session, student_id: int) -> dict:
     class_ids = [sc.class_id for sc in student_classes]
     str_class_ids = [str(c) for c in class_ids]
     published = db.query(Assignment).filter(Assignment.alive(), Assignment.status == "published").all()
-    published = [a for a in published if any(c.get("id") in str_class_ids for c in (a.classes or []))]
+    published = [
+        a for a in published
+        if any(str(c.get("id")) in str_class_ids for c in (a.classes or []))
+    ]
 
     n = now()
     pending_count = 0
+    pending_assignments = []
+    submission_by_assignment = {
+        submission.assignment_id: submission for submission in student_subs
+    }
     for a in published:
-        sub = next((s for s in all_subs if s.assignment_id == a.id), None)
-        if not sub and a.end_date and a.end_date > n:
-            pending_count += 1
+        sub = submission_by_assignment.get(a.id)
+        if a.end_date and a.end_date > n and (
+            sub is None or sub.status == "draft"
+        ):
+            assigned_class = next(
+                (
+                    class_info
+                    for class_info in (a.classes or [])
+                    if str(class_info.get("id")) in str_class_ids
+                ),
+                {},
+            )
+            pending_assignments.append({
+                "assignmentId": str(a.id),
+                "title": a.title,
+                "classId": str(assigned_class.get("id", "")),
+                "className": assigned_class.get("name", ""),
+                "endDate": a.end_date.isoformat(),
+                "status": "draft" if sub is not None else "not_started",
+            })
+    pending_assignments.sort(key=lambda item: item["endDate"])
+    pending_count = len(pending_assignments)
 
     on_time = 0
     for s in all_subs:
@@ -252,7 +282,8 @@ def get_student_stats(db: Session, student_id: int) -> dict:
             "excellentCount": excellent, "goodCount": good, "passCount": passed,
             "failCount": failed, "totalCount": scored, "perfectScoreCount": perfect, "classRanking": "",
         },
-        "pendingAssignmentsList": [], "recentSubmissions": recent,
+        "pendingAssignmentsList": pending_assignments,
+        "recentSubmissions": recent,
     }
 
 

@@ -66,7 +66,7 @@
                     </span>
                   </dd>
                 </div>
-                <div v-if="assignment.hasSubmitted">
+                <div v-if="hasSubmitted">
                   <dt>评价状态</dt>
                   <dd>
                     <span
@@ -95,13 +95,13 @@
 
               <div class="detail-actions">
                 <el-button
-                  v-if="assignment.hasSubmitted || assignment.hasDraft"
+                  v-if="hasSubmitted || hasDraft"
                   class="student-primary-button"
                   type="primary"
                   @click="viewSubmission"
                 >
                   {{
-                    assignment.hasSubmitted ? "查看提交与评价" : "继续编辑草稿"
+                    hasSubmitted ? "查看提交与评价" : "继续编辑草稿"
                   }}
                 </el-button>
                 <el-button
@@ -127,18 +127,29 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage } from "element-plus";
 import { ArrowLeft } from "@element-plus/icons-vue";
 import { getStudentAssignment } from "../../../api/assignments";
+import type { StudentAssignment } from "../../../api/assignments";
 import type { Attachment } from "../../../api/submissions";
 import AssignmentAttachmentList from "../components/AssignmentAttachmentList.vue";
 
 const route = useRoute();
 const router = useRouter();
 const loading = ref(false);
-const assignment = ref<any>(null);
+const assignment = ref<StudentAssignment | null>(null);
+
+const submissionStatus = computed(
+  () => assignment.value?.submission?.status || "not_submitted"
+);
+const hasDraft = computed(() => submissionStatus.value === "draft");
+const hasSubmitted = computed(
+  () =>
+    submissionStatus.value !== "draft" &&
+    submissionStatus.value !== "not_submitted"
+);
 
 const loadAssignment = async () => {
   loading.value = true;
@@ -160,33 +171,31 @@ const formatDate = (date?: string) =>
 
 const getSubmissionStatusType = () => {
   if (!assignment.value) return "primary";
-  if (assignment.value.hasDraft && !assignment.value.hasSubmitted)
-    return "warning";
-  if (assignment.value.hasSubmitted) return "success";
+  if (hasDraft.value) return "warning";
+  if (hasSubmitted.value) return "success";
   if (assignment.value.isExpired) return "danger";
   return "primary";
 };
 
 const getSubmissionStatusText = () => {
   if (!assignment.value) return "待提交";
-  if (assignment.value.hasDraft && !assignment.value.hasSubmitted)
-    return "草稿";
-  if (assignment.value.hasSubmitted) return "已提交";
+  if (hasDraft.value) return "草稿";
+  if (hasSubmitted.value) return "已提交";
   if (assignment.value.isExpired) return "未提交";
   return "待提交";
 };
 
 const getReviewStatusType = () => {
-  if (assignment.value?.submissionStatus === "teacher_reviewed")
+  if (submissionStatus.value === "teacher_reviewed")
     return "success";
-  if (assignment.value?.submissionStatus === "ai_reviewed") return "primary";
+  if (submissionStatus.value === "ai_reviewed") return "primary";
   return "warning";
 };
 
 const getReviewStatusText = () => {
-  if (assignment.value?.submissionStatus === "teacher_reviewed")
+  if (submissionStatus.value === "teacher_reviewed")
     return "已批改";
-  if (assignment.value?.submissionStatus === "ai_reviewed") return "AI 已评";
+  if (submissionStatus.value === "ai_reviewed") return "AI 已评";
   return "待批改";
 };
 

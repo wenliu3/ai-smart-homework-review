@@ -76,6 +76,19 @@ export interface StudentSubmissionSummary {
   wordCount?: number;
 }
 
+export interface StudentAssignmentSubmission {
+  id: string;
+  status: "draft" | "submitted" | "ai_reviewed" | "teacher_reviewed";
+  content?: string;
+  attachments?: Assignment["attachments"];
+  submittedAt?: string | null;
+}
+
+export interface StudentAssignment extends Assignment {
+  submission: StudentAssignmentSubmission | null;
+  isExpired: boolean;
+}
+
 // 作业详情页面响应（包含提交列表）
 export interface AssignmentWithSubmissions {
   assignment: AssignmentDetail;
@@ -275,7 +288,7 @@ export function getMyAssignmentStatistics(classId?: string): Promise<any> {
 export function getStudentAssignment(
   assignmentId: string,
   classId?: string
-): Promise<any> {
+): Promise<StudentAssignment> {
   return request({
     url: `/student/assignments/${assignmentId}`,
     method: "get",
