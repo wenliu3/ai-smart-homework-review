@@ -3,9 +3,21 @@
     <header class="submitted-content__header">
       <div>
         <p class="submitted-content__eyebrow">SUBMITTED WORK</p>
-        <h2>我的提交</h2>
+        <h2>本次提交</h2>
       </div>
-      <span>{{ formatDate(submission?.submittedAt) }}</span>
+      <div class="submitted-content__meta">
+        <span>第 {{ submission?.submissionCount || 1 }} 次提交</span>
+        <span>{{ formatDate(submission?.submittedAt) }}</span>
+        <el-button
+          v-if="canResubmit"
+          data-testid="resubmit-button"
+          type="primary"
+          plain
+          @click="emit('resubmit')"
+        >
+          重新提交
+        </el-button>
+      </div>
     </header>
 
     <section v-if="submission?.content" class="submitted-content__body">
@@ -36,7 +48,18 @@ import type { Submission } from "../../../../api/submissions";
 import AssignmentAttachmentList from "../../components/AssignmentAttachmentList.vue";
 import { useSubmissionUtils } from "../composables";
 
-defineProps<{ submission?: Submission | null }>();
+withDefaults(
+  defineProps<{
+    submission?: Submission | null;
+    canResubmit?: boolean;
+  }>(),
+  {
+    submission: null,
+    canResubmit: false,
+  }
+);
+
+const emit = defineEmits<{ (event: "resubmit"): void }>();
 
 const { formatDate, downloadFile } = useSubmissionUtils();
 
@@ -93,6 +116,15 @@ defineOptions({ name: "SubmittedContent" });
   font-size: 12px;
 }
 
+.submitted-content__meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  color: #969caf;
+  font-size: 12px;
+}
+
 .submitted-content__body {
   padding: 18px;
   border-radius: 12px;
@@ -133,6 +165,11 @@ defineOptions({ name: "SubmittedContent" });
   .submitted-content__header {
     align-items: flex-start;
     flex-direction: column;
+  }
+  .submitted-content__meta {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    justify-content: flex-start;
   }
 }
 </style>
