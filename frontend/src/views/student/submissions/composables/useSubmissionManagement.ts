@@ -9,6 +9,7 @@ import SubmissionsApi, {
 import { useAiReviewPolling } from "./useAiReviewPolling";
 import { checkAiSupport } from "@/config/ai-config";
 import { getRun } from "@/api/assistant";
+import { isFormalSubmissionStatus } from "../utils/submissionLifecycle";
 
 export function useSubmissionManagement() {
   const route = useRoute();
@@ -95,21 +96,27 @@ export function useSubmissionManagement() {
     return null;
   });
 
-  // 是否显示提交表单（未被老师批改时显示）
-  const showSubmissionForm = computed(() => {
-    const status = submissionData.value?.submission?.status;
-    return status !== "teacher_reviewed";
-  });
-
-  // 是否显示已提交内容（已提交且被老师批改时显示）
-  const showSubmittedContent = computed(() => {
-    const status = submissionData.value?.submission?.status;
-    return status === "teacher_reviewed";
-  });
   const isOverdue = computed(() => {
     if (!submissionData.value?.assignment.dueDate) return false;
     return new Date() > new Date(submissionData.value.assignment.dueDate);
   });
+
+  const hasFormalSubmission = computed(() =>
+    isFormalSubmissionStatus(submissionData.value?.submission?.status)
+  );
+
+  const canResubmit = computed(() => {
+    const status = submissionData.value?.submission?.status;
+    const assignment = submissionData.value?.assignment;
+    return (
+      (status === "submitted" || status === "ai_reviewed") &&
+      !isOverdue.value &&
+      assignment?.status !== "terminated"
+    );
+  });
+
+  const showSubmissionForm = computed(() => !hasFormalSubmission.value);
+  const showSubmittedContent = computed(() => hasFormalSubmission.value);
 
   // 获取状态标签类型
   const statusTagType = computed(() => {
@@ -425,6 +432,8 @@ export function useSubmissionManagement() {
     canSaveDraft,
     canSubmit,
     submissionLimitInfo,
+    hasFormalSubmission,
+    canResubmit,
     showSubmissionForm,
     showSubmittedContent,
     isOverdue,
