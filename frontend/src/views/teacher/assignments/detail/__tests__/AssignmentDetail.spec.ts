@@ -93,5 +93,10 @@ describe("AssignmentDetail", () => {
     );
     expect(previewDialog.props("modelValue")).toBe(true);
     expect(previewDialog.props("assignmentDetail")?.id).toBe("21");
+
+    previewDialog.vm.$emit("update:modelValue", false);
+    await wrapper.vm.$nextTick();
+
+    expect(previewDialog.props("modelValue")).toBe(false);
   });
 });
