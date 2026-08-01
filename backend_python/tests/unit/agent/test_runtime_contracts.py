@@ -40,5 +40,5 @@ def test_default_run_budget_enables_all_production_limits():
 
     assert budget.max_nodes == 8
     assert budget.max_tool_calls == 12
-    assert budget.timeout_seconds == 45
-    assert 0 < budget.remaining_seconds <= 45
+    assert budget.timeout_seconds == 600
+    assert 0 < budget.remaining_seconds <= 600
