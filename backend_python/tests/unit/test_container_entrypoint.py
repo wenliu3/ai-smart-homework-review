@@ -165,3 +165,10 @@ def test_frontend_nginx_resolves_service_names_only_with_docker_dns() -> None:
 
     assert "resolver 127.0.0.11 valid=30s ipv6=off;" in nginx_config
     assert "8.8.8.8" not in nginx_config
+
+
+def test_frontend_nginx_allows_backend_upload_limit_with_multipart_overhead() -> None:
+    nginx_config = _read("frontend/nginx.conf")
+
+    # 业务层按单文件 20 MiB 校验；Nginx 只拦截异常大的请求，避免抢先返回 413。
+    assert "client_max_body_size 100m;" in nginx_config

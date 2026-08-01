@@ -78,7 +78,7 @@
             我的附件
           </span>
           <span class="card-hint"
-            >可选，支持 PDF / Word / 图片 / 文本，单个不超过 10 MB</span
+            >可选，支持 PDF / Word / 图片 / 文本，单个不超过 20 MB</span
           >
         </div>
         <div class="upload-body">
@@ -184,7 +184,7 @@ const filesConsumed = ref(false);
 // 拖拽状态
 const isDragging = ref(false);
 
-const MAX_SIZE = 10 * 1024 * 1024;
+const MAX_SIZE = 20 * 1024 * 1024;
 const ALLOWED_EXT = [
   "jpg",
   "jpeg",
@@ -218,7 +218,10 @@ const uploadFiles = async (files: File[]) => {
       return;
     }
     if (f.size > MAX_SIZE) {
-      ElMessage.warning(`文件「${f.name}」超过10MB限制`);
+      const actualSize = (f.size / 1024 / 1024).toFixed(2);
+      ElMessage.warning(
+        `文件「${f.name}」大小为 ${actualSize} MB，单个附件不能超过 20 MB`
+      );
       return;
     }
   }
@@ -323,7 +326,17 @@ const uploadFileXHR = (
             : { fileName: file.name, error: "返回数据为空" }
         );
       } else {
-        reject(new Error(`HTTP ${xhr.status}`));
+        let message = "";
+        try {
+          const data = JSON.parse(xhr.responseText || "{}");
+          message = data.message || data.detail || "";
+        } catch {
+          // Nginx 等代理可能返回 HTML，下面按状态码转换为可读提示。
+        }
+        if (!message && xhr.status === 413) {
+          message = "文件大小超过 20 MB，无法上传";
+        }
+        reject(new Error(message || `上传失败（HTTP ${xhr.status}）`));
       }
     };
     xhr.onerror = () => reject(new Error("网络错误"));

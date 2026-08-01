@@ -1,5 +1,6 @@
 import { mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ElMessage } from "element-plus";
 
 import SubmissionForm from "../SubmissionForm.vue";
 
@@ -164,6 +165,55 @@ describe("SubmissionForm", () => {
     expect(submittedAttachments).toHaveLength(1);
     expect(submittedAttachments[0].fileUrl).toBe(
       "/uploads/submitted.pdf"
+    );
+  });
+
+  it("显示 20 MB 附件上限，并在上传前提示超限文件的实际大小", async () => {
+    const warning = vi.spyOn(ElMessage, "warning").mockImplementation(() => undefined as never);
+    const wrapper = mountAttachmentEnabledForm();
+    const oversizedFile = new File(["content"], "oversized.pdf", {
+      type: "application/pdf",
+    });
+    Object.defineProperty(oversizedFile, "size", { value: 21 * 1024 * 1024 });
+    const input = wrapper.get('input[type="file"]');
+    Object.defineProperty(input.element, "files", { value: [oversizedFile] });
+
+    await input.trigger("change");
+
+    expect(wrapper.text()).toContain("单个不超过 20 MB");
+    expect(warning).toHaveBeenCalledWith(
+      "文件「oversized.pdf」大小为 21.00 MB，单个附件不能超过 20 MB"
+    );
+  });
+
+  it("将代理返回的 413 转换为可读的 20 MB 超限提示", async () => {
+    const error = vi.spyOn(ElMessage, "error").mockImplementation(() => undefined as never);
+    class UploadRejectedXHR {
+      status = 413;
+      responseText = "<html>Request Entity Too Large</html>";
+      upload: { onprogress: ((event: ProgressEvent) => void) | null } = {
+        onprogress: null,
+      };
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      open() {}
+      setRequestHeader() {}
+      send() {
+        this.onload?.();
+      }
+    }
+    vi.stubGlobal("XMLHttpRequest", UploadRejectedXHR);
+    const wrapper = mountAttachmentEnabledForm();
+    const file = new File(["content"], "report.pdf", {
+      type: "application/pdf",
+    });
+    const input = wrapper.get('input[type="file"]');
+    Object.defineProperty(input.element, "files", { value: [file] });
+
+    await input.trigger("change");
+
+    expect(error).toHaveBeenCalledWith(
+      "「report.pdf」上传失败: 文件大小超过 20 MB，无法上传"
     );
   });
 });
