@@ -8,6 +8,7 @@
       @terminate="handleTerminate"
       @edit="handleEdit"
       @export="handleExport"
+      @preview="handlePreview"
     />
 
     <!-- 统计卡片 -->
@@ -57,6 +58,11 @@
         />
       </template>
     </assignment-detail-tabs>
+
+    <assignment-content-preview-dialog
+      v-model="previewVisible"
+      :assignment-detail="assignmentDetail"
+    />
   </div>
 </template>
 
@@ -71,6 +77,7 @@ import AssignmentStatsCards from "./components/AssignmentStatsCards.vue";
 import AssignmentDetailTabs from "./components/AssignmentDetailTabs.vue";
 import StudentSearchForm from "./components/StudentSearchForm.vue";
 import AssignmentDetailTable from "./components/AssignmentDetailTable.vue";
+import AssignmentContentPreviewDialog from "./components/AssignmentContentPreviewDialog.vue";
 
 // 导入API和类型
 import {
@@ -100,6 +107,7 @@ const openFirstPending = computed(
 const loading = ref(true);
 const assignmentDetail = ref<AssignmentDetail | null>(null);
 const submissionList = ref<any[]>([]);
+const previewVisible = ref(false);
 
 // 分页数据
 const pagination = reactive({
@@ -252,6 +260,10 @@ const handleEdit = () => {
     name: "TeacherAssignmentsEdit",
     query: { id: assignmentId.value },
   });
+};
+
+const handlePreview = () => {
+  previewVisible.value = true;
 };
 
 const handleExport = () => {
