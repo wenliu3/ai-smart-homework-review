@@ -84,7 +84,7 @@ def is_model_timeout(exc: BaseException) -> bool:
 
 def default_run_budget() -> RunBudget:
     """生产运行使用的固定安全预算。"""
-    return RunBudget(max_nodes=8, max_tool_calls=12, timeout_seconds=600)
+    return RunBudget(max_nodes=8, max_tool_calls=12, timeout_seconds=45)
 
 
 def grading_run_budget() -> RunBudget:
