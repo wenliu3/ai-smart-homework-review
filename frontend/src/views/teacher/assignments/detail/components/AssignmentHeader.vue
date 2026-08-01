@@ -1,5 +1,11 @@
 <template>
   <div class="assignment-header">
+    <div class="header-navigation">
+      <el-button link :icon="ArrowLeft" class="back-link" @click="goBack">
+        返回作业列表
+      </el-button>
+    </div>
+
     <div class="header-main">
       <div class="header-info">
         <div class="title-row">
@@ -49,8 +55,14 @@
       </div>
 
       <div class="header-actions">
-        <el-button @click="goBack" :icon="ArrowLeft" size="large">
-          返回列表
+        <el-button
+          data-testid="preview-assignment"
+          :icon="View"
+          size="large"
+          :disabled="!assignmentDetail"
+          @click="handlePreview"
+        >
+          {{ previewButtonText }}
         </el-button>
 
         <el-dropdown v-if="canOperate" trigger="click">
@@ -100,6 +112,7 @@ import {
   CircleClose,
   Edit,
   Download,
+  View,
 } from "@element-plus/icons-vue";
 import moment from "moment";
 import type { AssignmentDetail, AssignmentStatus } from "@/api/assignments";
@@ -110,6 +123,7 @@ interface Props {
 
 interface Emits {
   (e: "goBack"): void;
+  (e: "preview"): void;
   (e: "publish"): void;
   (e: "terminate"): void;
   (e: "edit"): void;
@@ -172,8 +186,15 @@ const canOperate = computed(() => {
   return props.assignmentDetail?.status !== "terminated";
 });
 
+const previewButtonText = computed(() =>
+  props.assignmentDetail?.status === "draft"
+    ? "预览作业内容"
+    : "查看作业内容"
+);
+
 // 事件处理
 const goBack = () => emit("goBack");
+const handlePreview = () => emit("preview");
 const handlePublish = () => emit("publish");
 const handleTerminate = () => emit("terminate");
 const handleEdit = () => emit("edit");
@@ -204,6 +225,22 @@ defineOptions({
   bottom: 0;
   background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grain" width="100" height="100" patternUnits="userSpaceOnUse"><circle cx="25" cy="25" r="1" fill="white" opacity="0.1"/><circle cx="75" cy="75" r="1" fill="white" opacity="0.1"/></pattern></defs><rect width="100" height="100" fill="url(%23grain)"/></svg>');
   opacity: 0.1;
+}
+
+.header-navigation {
+  position: relative;
+  z-index: 1;
+  margin-bottom: 12px;
+}
+
+.back-link {
+  color: rgba(255, 255, 255, 0.92);
+  font-weight: 600;
+}
+
+.back-link:hover {
+  color: white;
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .header-main {
