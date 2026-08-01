@@ -48,7 +48,7 @@
         <h3>作业要求</h3>
         <div
           v-if="sanitizedDescription"
-          class="assignment-description"
+          class="assignment-description editor-content-view"
           v-html="sanitizedDescription"
         ></div>
         <div v-else class="empty-state">暂无作业要求</div>
@@ -291,14 +291,14 @@ defineOptions({
   font-size: 13px;
 }
 
-.assignment-description {
+.assignment-description.editor-content-view {
   min-height: 48px;
-  padding: 16px;
+  margin: 0;
+  padding: 0;
+  overflow-x: visible;
   overflow-wrap: anywhere;
-  line-height: 1.75;
-  background: #f8fafc;
-  border: 1px solid #eef2f7;
-  border-radius: 8px;
+  border: 0;
+  border-radius: 0;
 }
 
 .assignment-description :deep(img) {
@@ -307,11 +307,8 @@ defineOptions({
 }
 
 .assignment-description :deep(pre) {
-  padding: 12px;
+  max-width: 100%;
   overflow-x: auto;
-  background: #111827;
-  color: #f9fafb;
-  border-radius: 6px;
 }
 
 .empty-state {
