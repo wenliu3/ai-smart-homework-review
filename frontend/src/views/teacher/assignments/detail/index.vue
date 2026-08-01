@@ -248,7 +248,10 @@ const handleTerminate = async () => {
 };
 
 const handleEdit = () => {
-  router.push(`/teacher/assignments/edit?id=${assignmentId.value}`);
+  router.push({
+    name: "TeacherAssignmentsEdit",
+    query: { id: assignmentId.value },
+  });
 };
 
 const handleExport = () => {
