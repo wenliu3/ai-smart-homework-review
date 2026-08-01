@@ -10,10 +10,13 @@ import AssignmentContentPreviewDialog from "../components/AssignmentContentPrevi
 const DialogStub = defineComponent({
   props: {
     modelValue: Boolean,
+    width: String,
+    showClose: Boolean,
   },
   emits: ["update:modelValue"],
   template: `
     <section v-if="modelValue" data-testid="preview-dialog">
+      <header><slot name="header" /></header>
       <slot />
       <footer><slot name="footer" /></footer>
     </section>
@@ -89,6 +92,29 @@ const richDescription = `
 `;
 
 describe("AssignmentContentPreviewDialog", () => {
+  it("按清爽文档布局展示标题、时间、章节和只读操作区", () => {
+    const wrapper = mountDialog(createAssignmentDetail());
+
+    const dialog = wrapper.getComponent(DialogStub);
+    expect(dialog.props("width")).toBe("min(880px, 92vw)");
+    expect(dialog.props("showClose")).toBe(false);
+    expect(wrapper.get(".preview-kicker").text()).toContain("作业内容");
+    expect(wrapper.get(".preview-dialog-title").text()).toContain(
+      "实验2：神雕侠侣语料库分析"
+    );
+    expect(wrapper.get(".preview-class-list").text()).toContain(
+      "自然语言处理 (NLP)"
+    );
+    expect(wrapper.findAll(".preview-time-item")).toHaveLength(2);
+    expect(
+      wrapper.findAll(".content-section-index").map((item) => item.text())
+    ).toEqual(["01", "02"]);
+    expect(wrapper.get(".read-only-hint").text()).toContain("原样显示");
+    expect(wrapper.get('[data-testid="close-preview"]').classes()).toContain(
+      "preview-close-button"
+    );
+  });
+
   it("按编辑器 HTML 原顺序呈现安全富文本，不做正文重排", () => {
     const wrapper = mountDialog(
       createAssignmentDetail({ description: richDescription })
