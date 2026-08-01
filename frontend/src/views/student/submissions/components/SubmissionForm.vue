@@ -40,9 +40,15 @@
         <div class="card-header">
           <span class="card-title">
             <el-icon :size="18"><EditPen /></el-icon>
-            作业内容
+            作业正文
           </span>
-          <span class="card-hint">可直接编写内容，也支持拖拽文件到编辑器上传</span>
+          <span class="card-hint">
+            {{
+              canUploadAttachments
+                ? "可直接编写内容，也支持拖拽文件到编辑器上传"
+                : "本作业仅支持正文提交"
+            }}
+          </span>
         </div>
         <div
           class="editor-wrapper"
@@ -65,32 +71,34 @@
       </div>
 
       <!-- 附件上传区域 -->
-      <div class="upload-card">
+      <div v-if="canUploadAttachments" class="upload-card">
         <div class="card-header">
           <span class="card-title">
             <el-icon :size="18"><Paperclip /></el-icon>
-            作业附件
+            我的附件
           </span>
-          <span class="card-hint">可选，支持 PDF/Word/图片/文本</span>
+          <span class="card-hint"
+            >可选，支持 PDF / Word / 图片 / 文本，单个不超过 10 MB</span
+          >
         </div>
         <div class="upload-body">
           <!-- 上传进度 -->
           <div v-if="uploading" class="upload-progress">
             <el-progress :percentage="uploadProgress" :stroke-width="8" />
-            <span class="text-xs text-blue-500">正在上传... {{ uploadProgress }}%</span>
+            <span class="text-xs text-blue-500"
+              >正在上传... {{ uploadProgress }}%</span
+            >
           </div>
 
           <!-- 已上传文件列表 -->
           <div v-if="uploadedResults.length > 0" class="file-list">
-            <div
-              v-for="(f, i) in uploadedResults"
-              :key="i"
-              class="file-item"
-            >
+            <div v-for="(f, i) in uploadedResults" :key="i" class="file-item">
               <el-icon class="file-icon" :size="18">
                 <Document />
               </el-icon>
-              <span class="file-name" :title="f.fileName">{{ f.fileName }}</span>
+              <span class="file-name" :title="f.fileName">{{
+                f.fileName
+              }}</span>
               <el-icon
                 class="file-remove"
                 :size="16"
@@ -106,10 +114,16 @@
             type="file"
             multiple
             accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx,.txt"
-            style="display:none"
+            style="display: none"
             @change="onFilesSelected"
           />
-          <el-button type="primary" plain size="small" @click="triggerFileSelect" :disabled="uploading">
+          <el-button
+            type="primary"
+            plain
+            size="small"
+            @click="triggerFileSelect"
+            :disabled="uploading"
+          >
             <el-icon class="mr-1"><Upload /></el-icon>
             上传附件
           </el-button>
@@ -149,6 +163,10 @@ const isTerminated = computed(() => {
   return props.assignment?.status === "terminated";
 });
 
+const canUploadAttachments = computed(
+  () => props.assignment?.allowAttachments !== false
+);
+
 // 表单数据
 const form = reactive({
   content: "",
@@ -158,6 +176,7 @@ const form = reactive({
 // ========== 附件上传（原生 input + XHR，完全可控） ==========
 const fileInputRef = ref<HTMLInputElement>();
 const uploadedResults = ref<any[]>([]);
+const persistedAttachmentUrls = new Set<string>();
 const uploading = ref(false);
 const uploadProgress = ref(0);
 const filesConsumed = ref(false);
@@ -166,7 +185,17 @@ const filesConsumed = ref(false);
 const isDragging = ref(false);
 
 const MAX_SIZE = 10 * 1024 * 1024;
-const ALLOWED_EXT = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'pdf', 'doc', 'docx', 'txt'];
+const ALLOWED_EXT = [
+  "jpg",
+  "jpeg",
+  "png",
+  "gif",
+  "webp",
+  "pdf",
+  "doc",
+  "docx",
+  "txt",
+];
 
 const triggerFileSelect = () => {
   if (uploading.value) return;
@@ -175,13 +204,23 @@ const triggerFileSelect = () => {
 
 // 统一的上传逻辑（按钮和拖拽共用）
 const uploadFiles = async (files: File[]) => {
+  if (!canUploadAttachments.value) {
+    ElMessage.warning("教师未允许本作业上传附件");
+    return;
+  }
   if (files.length === 0) return;
 
   // 校验
   for (const f of files) {
-    const ext = f.name.split('.').pop()?.toLowerCase() || '';
-    if (!ALLOWED_EXT.includes(ext)) { ElMessage.warning(`不支持的文件类型: ${f.name}`); return; }
-    if (f.size > MAX_SIZE) { ElMessage.warning(`文件「${f.name}」超过10MB限制`); return; }
+    const ext = f.name.split(".").pop()?.toLowerCase() || "";
+    if (!ALLOWED_EXT.includes(ext)) {
+      ElMessage.warning(`不支持的文件类型: ${f.name}`);
+      return;
+    }
+    if (f.size > MAX_SIZE) {
+      ElMessage.warning(`文件「${f.name}」超过10MB限制`);
+      return;
+    }
   }
 
   uploading.value = true;
@@ -211,20 +250,25 @@ const onFilesSelected = async (e: Event) => {
   const input = e.target as HTMLInputElement;
   const files = Array.from(input.files || []);
   await uploadFiles(files);
-  input.value = '';
+  input.value = "";
 };
 
 // ========== 拖拽上传 ==========
 const hasFiles = (e: DragEvent): boolean => {
   return Array.from(e.dataTransfer?.items || []).some(
-    item => item.kind === 'file'
+    (item) => item.kind === "file"
   );
 };
 
 const handleDragOver = (e: DragEvent) => {
   if (!hasFiles(e)) return;
   e.preventDefault();
-  e.dataTransfer!.dropEffect = 'copy';
+  if (!canUploadAttachments.value) {
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "none";
+    isDragging.value = false;
+    return;
+  }
+  e.dataTransfer!.dropEffect = "copy";
   isDragging.value = true;
 };
 
@@ -244,57 +288,70 @@ const handleDrop = async (e: DragEvent) => {
   e.stopPropagation();
   isDragging.value = false;
 
+  if (!canUploadAttachments.value) {
+    ElMessage.warning("教师未允许本作业上传附件");
+    return;
+  }
+
   const files = Array.from(e.dataTransfer?.files || []);
   await uploadFiles(files);
 };
 
 // XHR 上传
-const uploadFileXHR = (file: File, onProgress: (pct: number) => void): Promise<any> => {
+const uploadFileXHR = (
+  file: File,
+  onProgress: (pct: number) => void
+): Promise<any> => {
   return new Promise((resolve, reject) => {
     const formData = new FormData();
-    formData.append('files', file);
+    formData.append("files", file);
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', '/api/upload/files');
-    const token = localStorage.getItem('token');
-    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    xhr.open("POST", "/api/upload/files");
+    const token = localStorage.getItem("token");
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
     xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+      if (e.lengthComputable)
+        onProgress(Math.round((e.loaded / e.total) * 100));
     };
     xhr.onload = () => {
       if (xhr.status === 200 || xhr.status === 201) {
         const data = JSON.parse(xhr.responseText);
         const files = data.data?.files || data.files || [];
-        resolve(files.length > 0 ? files[0] : { fileName: file.name, error: '返回数据为空' });
+        resolve(
+          files.length > 0
+            ? files[0]
+            : { fileName: file.name, error: "返回数据为空" }
+        );
       } else {
         reject(new Error(`HTTP ${xhr.status}`));
       }
     };
-    xhr.onerror = () => reject(new Error('网络错误'));
+    xhr.onerror = () => reject(new Error("网络错误"));
     xhr.send(formData);
   });
 };
 
 const removeUploadedFile = (index: number) => {
   const file = uploadedResults.value[index];
-  if (file?.fileUrl) {
-    const filename = file.fileUrl.replace('/uploads/', '');
-    const token = localStorage.getItem('token');
+  if (file?.fileUrl && !persistedAttachmentUrls.has(file.fileUrl)) {
+    const filename = file.fileUrl.replace("/uploads/", "");
+    const token = localStorage.getItem("token");
     fetch(`/api/upload/delete/${filename}`, {
-      method: 'DELETE',
+      method: "DELETE",
       headers: { Authorization: `Bearer ${token}` },
     }).catch(() => {});
   }
   uploadedResults.value.splice(index, 1);
-  ElMessage.success('已移除文件');
+  ElMessage.success("已移除文件");
 };
 
 const cleanupUploadedFiles = () => {
   for (const file of uploadedResults.value) {
-    if (file?.fileUrl) {
-      const filename = file.fileUrl.replace('/uploads/', '');
-      const token = localStorage.getItem('token');
+    if (file?.fileUrl && !persistedAttachmentUrls.has(file.fileUrl)) {
+      const filename = file.fileUrl.replace("/uploads/", "");
+      const token = localStorage.getItem("token");
       fetch(`/api/upload/delete/${filename}`, {
-        method: 'DELETE',
+        method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       }).catch(() => {});
     }
@@ -309,6 +366,7 @@ onUnmounted(() => {
 });
 
 const getUploadedAttachments = (): any[] => {
+  if (!canUploadAttachments.value) return [];
   return uploadedResults.value || [];
 };
 
@@ -318,8 +376,10 @@ const getContent = (): string => {
 
 // 校验方法：至少有内容或附件
 const validate = async () => {
-  const hasContent = form.content && form.content.trim() && form.content !== "<p><br></p>";
-  const hasAttachments = uploadedResults.value.length > 0;
+  const hasContent =
+    form.content && form.content.trim() && form.content !== "<p><br></p>";
+  const hasAttachments =
+    canUploadAttachments.value && uploadedResults.value.length > 0;
   if (!hasContent && !hasAttachments) {
     ElMessage.warning("请编写作业内容或上传作业文件");
     return false;
@@ -334,7 +394,9 @@ defineExpose({
   getUploadedAttachments,
   getContent,
   fileList: uploadedResults,
-  markFilesConsumed: () => { filesConsumed.value = true; },
+  markFilesConsumed: () => {
+    filesConsumed.value = true;
+  },
 });
 
 // 监听 submission 变化，填充数据
@@ -346,7 +408,15 @@ watch(
     if (!newSubmission) return;
     if (!oldSubmission || newSubmission.id !== oldSubmission.id) {
       form.content = newSubmission.content || "";
-      uploadedResults.value = newSubmission.attachments || [];
+      persistedAttachmentUrls.clear();
+      for (const attachment of newSubmission.attachments || []) {
+        if (attachment?.fileUrl) {
+          persistedAttachmentUrls.add(attachment.fileUrl);
+        }
+      }
+      uploadedResults.value = canUploadAttachments.value
+        ? [...(newSubmission.attachments || [])]
+        : [];
     }
   },
   { immediate: true }
@@ -498,5 +568,80 @@ defineOptions({
 
 .file-remove:hover {
   transform: scale(1.15);
+}
+
+.editor-card,
+.upload-card {
+  border-color: #e8eaf2;
+  border-radius: 14px;
+  box-shadow: 0 8px 26px rgba(36, 40, 68, 0.045);
+}
+
+.card-header {
+  padding: 15px 18px;
+  background: #fafaff;
+}
+
+.card-title {
+  color: #30354b;
+  font-size: 15px;
+}
+
+.card-title :deep(.el-icon) {
+  color: #6558d9;
+}
+
+.editor-wrapper :deep(.wang-editor) {
+  min-height: 360px;
+}
+
+.editor-wrapper.drag-active {
+  outline-color: #7467df;
+  background: #f2f0ff;
+}
+
+.drag-overlay {
+  background: rgba(242, 240, 255, 0.9);
+  color: #6254d1;
+}
+
+.upload-body {
+  margin: 16px 18px 18px;
+  padding: 18px;
+  border: 1px dashed #cbc7e9;
+  border-radius: 12px;
+  background: #fbfaff;
+}
+
+.file-item {
+  border-color: #dedaf7;
+  background: #f4f2ff;
+}
+
+.file-item:hover {
+  background: #eeebff;
+}
+
+.file-icon {
+  color: #6558d9;
+}
+
+.upload-body :deep(.el-button--primary.is-plain) {
+  border-color: #c8c2f4;
+  background: #f1efff;
+  color: #5c4fcf;
+}
+
+@media (max-width: 620px) {
+  .card-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .upload-body {
+    margin: 12px;
+    padding: 14px;
+  }
 }
 </style>

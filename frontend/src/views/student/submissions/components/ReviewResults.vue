@@ -2,22 +2,51 @@
   <div style="height: 100%">
     <!-- 批改结果标签页 -->
     <el-card v-if="showReviewTabs" class="shadow-sm review-card">
-      <!-- <template #header>
-        <h2 class="text-lg font-semibold text-gray-900 flex items-center gap-2">
-          <el-icon><Document /></el-icon>
-          批改结果
-        </h2>
-      </template> -->
+      <div class="review-overview">
+        <div
+          class="review-overview__score"
+          :class="{ 'is-pending': displayScore === null }"
+        >
+          <strong>{{ displayScore ?? "--" }}</strong>
+          <span>/ 100</span>
+        </div>
+        <div class="review-overview__copy">
+          <p>REVIEW SUMMARY</p>
+          <h2>
+            {{
+              displayScore === null
+                ? waitingForTeacherOnly
+                  ? "等待教师批改"
+                  : "评价进行中"
+                : "本次作业评价"
+            }}
+          </h2>
+          <span>
+            {{
+              displayScore === null
+                ? waitingForTeacherOnly
+                  ? "本作业未启用 AI 评价，教师批改后将在这里显示反馈"
+                  : "评价完成后将在这里显示得分与改进建议"
+                : `${displaySource}已给出评价，可切换标签查看详细反馈`
+            }}
+          </span>
+        </div>
+      </div>
 
       <el-tabs v-model="activeTab" tab-position="left" class="review-tabs">
         <!-- AI批改结果标签页 -->
-        <el-tab-pane name="ai" class="tab-content" :disabled="!aiReview">
+        <el-tab-pane
+          v-if="aiSupported || aiReview"
+          name="ai"
+          class="tab-content"
+          :disabled="!aiReview"
+        >
           <template #label>
             <div class="tab-label">
               <el-icon><Monitor /></el-icon>
               <span>AI批改</span>
               <el-tag
-                v-if="aiReview && aiReview.score"
+                v-if="aiReview && typeof aiReview.score === 'number'"
                 type="primary"
                 size="small"
                 class="ml-2"
@@ -93,7 +122,7 @@
                 />
               </div>
               <div class="empty-description">
-                <h4 class="text-gray-700 mb-2 text-lg">🤖 AI智能评价中</h4>
+                <h4 class="text-gray-700 mb-2 text-lg">AI 智能评价中</h4>
                 <p class="text-gray-500 mb-1">人工智能正在仔细分析您的作业</p>
                 <p class="text-gray-400 text-sm">
                   评价完成后会自动显示结果，请耐心等待
@@ -114,14 +143,14 @@
         <el-tab-pane
           name="teacher"
           class="tab-content"
-          :disabled="!teacherReview"
+          :disabled="!teacherReview && !waitingForTeacherOnly"
         >
           <template #label>
             <div class="tab-label">
               <el-icon><User /></el-icon>
               <span>教师批改</span>
               <el-tag
-                v-if="teacherReview && teacherReview.score"
+                v-if="teacherReview && typeof teacherReview.score === 'number'"
                 type="success"
                 size="small"
                 class="ml-2"
@@ -171,6 +200,21 @@
 
     <!-- 提示信息 - 只在不显示标签页时显示 -->
     <template v-if="!showReviewTabs">
+      <el-card
+        v-if="isPreSubmission"
+        data-testid="no-submission-review"
+        class="review-empty-card"
+      >
+        <div class="review-empty-state">
+          <span class="review-empty-state__icon">
+            <el-icon><Document /></el-icon>
+          </span>
+          <p class="student-eyebrow">REVIEW RESULT</p>
+          <h3>评价结果将在提交后显示</h3>
+          <p>完成并提交作业后，可在这里查看 AI 评价、教师反馈和最终得分。</p>
+        </div>
+      </el-card>
+
       <!-- 教师尚未打分提示 -->
       <el-card v-if="showTeacherPendingTip" class="shadow-sm border-orange-200">
         <div class="flex items-center gap-3 text-orange-600">
@@ -227,27 +271,56 @@ const props = defineProps<Props>();
 
 const { formatDate } = useSubmissionUtils();
 
+const displayScore = computed<number | null>(() => {
+  if (typeof props.teacherReview?.score === "number") {
+    return props.teacherReview.score;
+  }
+  if (typeof props.aiReview?.score === "number") {
+    return props.aiReview.score;
+  }
+  return null;
+});
+
+const displaySource = computed(() =>
+  typeof props.teacherReview?.score === "number" ? "教师" : "AI"
+);
+
+const isPreSubmission = computed(
+  () =>
+    !props.submissionStatus ||
+    props.submissionStatus === "draft" ||
+    props.submissionStatus === "not_submitted"
+);
+
+const aiSupported = computed(() =>
+  props.assignment ? checkAiSupport(props.assignment).supported : true
+);
+
+const waitingForTeacherOnly = computed(
+  () =>
+    !isPreSubmission.value &&
+    !aiSupported.value &&
+    !props.aiReview &&
+    !props.teacherReview
+);
+
 // 当前激活的标签页 - 默认显示AI评价
 const activeTab = ref("ai");
 
 // 是否显示批改结果标签页
 const showReviewTabs = computed(() => {
   // 如果作业已提交，就显示标签页（即使还没有批改结果）
-  return (
-    props.submissionStatus &&
-    props.submissionStatus !== "draft" &&
-    props.submissionStatus !== "not_submitted"
-  );
+  return !isPreSubmission.value;
 });
 
 // 监听评价数据变化，自动切换到合适的标签页
 watch(
-  () => [props.aiReview, props.teacherReview],
-  ([aiReview, teacherReview]) => {
+  () => [props.aiReview, props.teacherReview, aiSupported.value],
+  ([aiReview, teacherReview, supportsAi]) => {
     // 默认优先显示AI评价，如果没有AI评价则显示教师评价
     if (aiReview) {
       activeTab.value = "ai";
-    } else if (teacherReview) {
+    } else if (teacherReview || !supportsAi) {
       activeTab.value = "teacher";
     } else {
       // 如果都没有，默认显示AI标签页
@@ -293,7 +366,7 @@ const showNoReviewTip = computed(() => {
   return (
     !props.aiReview &&
     !props.teacherReview &&
-    props.submissionStatus &&
+    !isPreSubmission.value &&
     !showAiProcessingTip.value &&
     !showTeacherPendingTip.value &&
     !showOverdueTip.value
@@ -304,31 +377,60 @@ const showNoReviewTip = computed(() => {
 const formatReviewContent = (content: string) => {
   if (!content) return "";
 
-  return content
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\n/g, "<br>")
-    // 总分高亮：总分：XX分 → 红色大字
-    .replace(/(总分[：:]\s*\d+\s*分)/g, '<span style="color:#e53e3e;font-size:1.3em;font-weight:bold">$1</span>')
-    // 分数/XX → 加粗
-    .replace(/(\d+)\s*\/\s*(\d+)(\s*分)/g, '<strong style="color:#e53e3e">$1/$2$3</strong>')
-    // 加粗
-    .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
-    // 蓝色高亮
-    .replace(/~~(.*?)~~/g, '<span style="color:#2563eb;font-weight:600">$1</span>')
-    // 绿色优点
-    .replace(/✅\s*优点/g, '<span style="color:#16a34a;font-weight:bold;font-size:1.1em">✅ 优点</span>')
-    .replace(/✅\s*(.+?)(?=<br>|<div>|$)/g, '<div style="color:#16a34a;padding-left:8px">✅ $1</div>')
-    // 橙色建议
-    .replace(/📝\s*改进建议/g, '<span style="color:#ea580c;font-weight:bold;font-size:1.1em">📝 改进建议</span>')
-    .replace(/📝\s*(.+?)(?=<br>|<div>|$)/g, '<div style="color:#ea580c;padding-left:8px">📝 $1</div>')
-    // 评分维度加粗
-    .replace(/(\d+[.、]\s*(?:内容|结构|语言|语法|词汇|表达|论证|逻辑|计算|规范|创意|准确|完整|组织|步骤).*?)(?=<br>|<div>|$)/g, '<strong style="color:#1e40af">$1</strong>')
-    // 斜体
-    .replace(/\*(.*?)\*/g, "<em>$1</em>")
-    // 统计信息
-    .replace(/📊\s*(.+?)(?=<br>|<div>|$)/g, '<div style="background:#f0f9ff;padding:4px 8px;border-radius:4px;margin:4px 0">📊 $1</div>');
+  return (
+    content
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\n/g, "<br>")
+      // 总分高亮：总分：XX分 → 红色大字
+      .replace(
+        /(总分[：:]\s*\d+\s*分)/g,
+        '<span style="color:#e53e3e;font-size:1.3em;font-weight:bold">$1</span>'
+      )
+      // 分数/XX → 加粗
+      .replace(
+        /(\d+)\s*\/\s*(\d+)(\s*分)/g,
+        '<strong style="color:#e53e3e">$1/$2$3</strong>'
+      )
+      // 加粗
+      .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+      // 蓝色高亮
+      .replace(
+        /~~(.*?)~~/g,
+        '<span style="color:#2563eb;font-weight:600">$1</span>'
+      )
+      // 绿色优点
+      .replace(
+        /✅\s*优点/g,
+        '<span style="color:#16a34a;font-weight:bold;font-size:1.1em">✅ 优点</span>'
+      )
+      .replace(
+        /✅\s*(.+?)(?=<br>|<div>|$)/g,
+        '<div style="color:#16a34a;padding-left:8px">✅ $1</div>'
+      )
+      // 橙色建议
+      .replace(
+        /📝\s*改进建议/g,
+        '<span style="color:#ea580c;font-weight:bold;font-size:1.1em">📝 改进建议</span>'
+      )
+      .replace(
+        /📝\s*(.+?)(?=<br>|<div>|$)/g,
+        '<div style="color:#ea580c;padding-left:8px">📝 $1</div>'
+      )
+      // 评分维度加粗
+      .replace(
+        /(\d+[.、]\s*(?:内容|结构|语言|语法|词汇|表达|论证|逻辑|计算|规范|创意|准确|完整|组织|步骤).*?)(?=<br>|<div>|$)/g,
+        '<strong style="color:#1e40af">$1</strong>'
+      )
+      // 斜体
+      .replace(/\*(.*?)\*/g, "<em>$1</em>")
+      // 统计信息
+      .replace(
+        /📊\s*(.+?)(?=<br>|<div>|$)/g,
+        '<div style="background:#f0f9ff;padding:4px 8px;border-radius:4px;margin:4px 0">📊 $1</div>'
+      )
+  );
 };
 
 defineOptions({
@@ -353,9 +455,126 @@ defineOptions({
   overflow: hidden;
 }
 
+.review-empty-card {
+  height: 100%;
+  border-color: #e8eaf2;
+  border-radius: 15px;
+  box-shadow: 0 8px 26px rgba(36, 40, 68, 0.05);
+}
+
+.review-empty-card :deep(.el-card__body) {
+  display: grid;
+  min-height: 420px;
+  place-items: center;
+}
+
+.review-empty-state {
+  max-width: 440px;
+  padding: 36px 24px;
+  text-align: center;
+}
+
+.review-empty-state__icon {
+  display: inline-flex;
+  width: 58px;
+  height: 58px;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+  border-radius: 16px;
+  background: #efedff;
+  color: #6558d9;
+}
+
+.review-empty-state__icon :deep(svg) {
+  width: 26px;
+}
+
+.review-empty-state .student-eyebrow {
+  margin: 0 0 5px;
+  color: #6b5ed6;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.review-empty-state h3 {
+  margin: 0;
+  color: #2d3248;
+  font-size: 19px;
+}
+
+.review-empty-state > p:last-child {
+  margin: 9px 0 0;
+  color: #8e95a8;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.review-overview {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 18px;
+  padding: 20px 24px;
+  border-bottom: 1px solid #e9eaf1;
+  background: linear-gradient(120deg, #f3f1ff, #f8f7ff 60%, #edf7ff);
+}
+
+.review-overview__score {
+  display: flex;
+  width: 102px;
+  height: 76px;
+  flex: 0 0 102px;
+  align-items: baseline;
+  justify-content: center;
+  padding-top: 12px;
+  border: 1px solid rgba(101, 88, 217, 0.16);
+  border-radius: 14px;
+  background: #fff;
+  color: #5d50ce;
+  box-shadow: 0 9px 24px rgba(80, 68, 161, 0.09);
+}
+
+.review-overview__score strong {
+  font-size: 34px;
+  line-height: 1;
+}
+
+.review-overview__score span {
+  margin-left: 4px;
+  color: #9a9fb0;
+  font-size: 11px;
+}
+
+.review-overview__score.is-pending {
+  color: #9da3b4;
+}
+
+.review-overview__copy p {
+  margin: 0 0 4px;
+  color: #7063d8;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.review-overview__copy h2 {
+  margin: 0;
+  color: #282d43;
+  font-size: 19px;
+}
+
+.review-overview__copy span {
+  display: block;
+  margin-top: 6px;
+  color: #8c93a7;
+  font-size: 12px;
+}
+
 /* 标签页样式 - 实现左侧固定，右侧滚动 */
 .review-tabs {
-  height: 100%;
+  height: calc(100% - 117px);
   display: flex;
 }
 
@@ -401,9 +620,9 @@ defineOptions({
 }
 
 .review-tabs :deep(.el-tabs__item.is-active) {
-  background: #3b82f6;
+  background: linear-gradient(135deg, #695ddd, #594bc8);
   color: white;
-  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+  box-shadow: 0 5px 14px rgba(90, 75, 199, 0.23);
 }
 
 .review-tabs :deep(.el-tabs__item:hover:not(.is-active):not(.is-disabled)) {
@@ -477,7 +696,7 @@ defineOptions({
   padding: 12px 16px;
   background: #f8fafc;
   border-radius: 6px;
-  border-left: 3px solid #3b82f6;
+  border-left: 3px solid #6558d9;
   margin-bottom: 16px;
 }
 
@@ -596,6 +815,21 @@ defineOptions({
 }
 
 @media (max-width: 480px) {
+  .review-overview {
+    align-items: flex-start;
+    padding: 16px;
+  }
+
+  .review-overview__score {
+    width: 82px;
+    height: 68px;
+    flex-basis: 82px;
+  }
+
+  .review-overview__score strong {
+    font-size: 28px;
+  }
+
   .review-tabs {
     flex-direction: column;
     height: auto;
