@@ -58,10 +58,17 @@ def _assert_remaining_budget(budget, reason: str) -> None:
 def _grading_prompt(state: dict, *, reviewer: bool) -> str:
     rubric = state["rubric"]
     role = "独立复核" if reviewer else "首次批改"
+    dimension_count = len(rubric.criteria)
     return (
-        f"执行{role}。必须逐项使用评分量表，不得从自然语言解析或生成可信总分。\n"
+        f"执行{role}。以下评分量表共有 {dimension_count} 个评分维度，"
+        f"必须且只能按这 {dimension_count} 个维度逐项评分：\n"
         "评分量表：\n"
         f"{json.dumps(rubric.model_dump(), ensure_ascii=False)}\n"
+        "评分规则：\n"
+        "1. 输出必须恰好包含量表中列出的每一个维度，且每个维度的 criterion_id 严格使用量表里的 id。\n"
+        "2. 禁止自创、拆分、合并或新增任何维度（例如不得按作业的小题、任务或章节自拆成多个维度）。\n"
+        "3. 每个维度给出 score、max_score、feedback（含得分依据与扣分原因）和 evidence_refs。\n"
+        "4. 不得从自然语言解析或生成可信总分；总分由后端汇总。\n"
         + build_grading_context(
             state["normalized_content"],
             assignment_description=state.get("assignment_description", ""),
