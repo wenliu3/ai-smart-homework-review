@@ -1,3 +1,4 @@
+"""可选独立结构化模型配置契约与绑定更新 Schema。"""
 import pytest
 from pydantic import ValidationError
 
@@ -40,6 +41,9 @@ def test_grading_structurer_profile_and_pair_contract():
 
 
 def test_structurer_binding_requires_model_when_enabled():
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="模型"):
         GradingStructurerBindingUpdate(enabled=True)
+    with pytest.raises(ValidationError, match="模型"):
+        GradingStructurerBindingUpdate(enabled=True, modelCode="   ")
+    assert GradingStructurerBindingUpdate(enabled=True, modelCode="gpt-4o").modelCode == "gpt-4o"
     assert GradingStructurerBindingUpdate(enabled=False).modelCode is None
