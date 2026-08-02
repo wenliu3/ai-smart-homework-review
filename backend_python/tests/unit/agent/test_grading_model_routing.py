@@ -281,3 +281,56 @@ def test_get_grading_agent_caches_by_code_reviewer_structured(db, ai_model_facto
     c = registry.get_grading_agent(db, model_code="deepseek", reviewer=False, structured=True)
     assert c is not a1 and c is not b
     assert len(built) == 3
+
+
+# ========== 缓存命名空间隔离 ==========
+
+def test_profile_and_by_code_caches_are_isolated(db, ai_model_factory, monkeypatch):
+    """普通档位缓存与按 code 显式缓存互相隔离，不被对方淘汰误删重建。"""
+    ai_model_factory(code="deepseek", is_default=True)
+    _add_real_preset_names(db)
+    captured = []
+    _patch_init(monkeypatch, captured)
+    gw = ModelGateway()
+
+    normal = gw.get_chat_model(db, ModelProfile.VISION_GRADER, prompt_version="v1")
+    explicit = gw.get_chat_model_by_code(
+        db, model_code="deepseek", profile=ModelProfile.VISION_GRADER, prompt_version="v1",
+    )
+    # 两者是独立客户端（显式哨兵条目，非普通档位条目）
+    assert explicit is not normal
+
+    # 显式条目未误删普通条目：再走普通档位路径应命中缓存返回同一对象
+    normal_again = gw.get_chat_model(db, ModelProfile.VISION_GRADER, prompt_version="v1")
+    assert normal_again is normal
+
+    # 反向同样成立：普通档位淘汰不触碰显式条目
+    explicit_again = gw.get_chat_model_by_code(
+        db, model_code="deepseek", profile=ModelProfile.VISION_GRADER, prompt_version="v1",
+    )
+    assert explicit_again is explicit
+
+    # 全程只有 2 次真实构建（普通 1 次 + 显式 1 次）
+    assert len(captured) == 2
+
+
+def test_grading_direct_cache_isolated_from_get_specialist(db, ai_model_factory, monkeypatch):
+    """get_specialist("grading") 的淘汰不得误删 get_grading_agent 的 "grading_direct" 条目。"""
+    ai_model_factory(code="deepseek", is_default=True)
+    _add_real_preset_names(db)
+    _patch_init(monkeypatch, [])
+    built = []
+    gw = ModelGateway()
+    registry = AgentRegistry(model_gateway=gw, agent_factory=_record_factory(built))
+
+    direct = registry.get_grading_agent(db, model_code="deepseek", reviewer=False, structured=True)
+    assert len(built) == 1
+
+    # legacy 节点仍通过 get_specialist("grading") 获取批改 Agent
+    registry.get_specialist("grading", db)
+    assert len(built) == 2
+
+    # get_specialist 淘汰 k[0]=="grading" 条目，不得误删 "grading_direct" 缓存
+    direct_again = registry.get_grading_agent(db, model_code="deepseek", reviewer=False, structured=True)
+    assert direct_again is direct
+    assert len(built) == 2  # 未被淘汰重建

@@ -520,14 +520,15 @@ class AgentRegistry:
         - structured 决定是否传 GradingDraft 作为 response_format。
         - 模型经网关 get_chat_model_by_code 严格按 code 路由，绝不回退默认模型。
 
-        缓存键含 model_code/reviewer/structured 与配置缓存键，独立于
-        get_specialist 的键；淘汰逻辑只作用于本方法产生的条目（k[1] 为 model_code）。
+        缓存键首元素用 "grading_direct" 哨兵，与 get_specialist 的 (agent_name, ...)
+        键隔离——get_specialist("grading") 的淘汰只判 k[0]==agent_name，不会误删本方法
+        条目；本方法淘汰也只作用于 k[0]=="grading_direct" 且同 model_code 的条目。
         """
         prompt = get_prompt("grading_review_specialist" if reviewer else "grading_specialist")
         profile = ModelProfile.REVIEWER if reviewer else ModelProfile.VISION_GRADER
         config = get_config_by_code(db, model_code, profile)
         model_cache_key = (profile.value, config.id, config.updated_at, prompt.version)
-        cache_key = ("grading", model_code, reviewer, structured, model_cache_key, prompt.version)
+        cache_key = ("grading_direct", model_code, reviewer, structured, model_cache_key, prompt.version)
 
         with self._lock:
             cached = self._cache.get(cache_key)
@@ -547,9 +548,9 @@ class AgentRegistry:
                 response_format=GradingDraft if structured else None,
                 middleware=[tool_budget_middleware],
             )
-            # 淘汰同 model_code 下过期的按 code 批改 Agent 条目；
+            # 淘汰同 model_code 下过期的按 code 批改 Agent 条目（"grading_direct" 命名空间），
             # 与 get_specialist 的 (agent_name, ...) 键不冲突（k[1] 是字符串 code）。
-            stale = [k for k in self._cache if k[0] == "grading" and k[1] == model_code and k != cache_key]
+            stale = [k for k in self._cache if k[0] == "grading_direct" and k[1] == model_code and k != cache_key]
             for k in stale:
                 del self._cache[k]
             self._cache[cache_key] = agent

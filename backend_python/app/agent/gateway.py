@@ -116,6 +116,22 @@ class ModelGateway:
         config = self.get_config_for_profile(db, profile)
         return (profile.value, config.id, config.updated_at, prompt_version)
 
+    def _build_llm(
+        self, config: AiModel, profile: ModelProfile, *, timeout: int | None = None,
+    ) -> BaseChatModel:
+        """按配置创建 ChatModel 客户端（不联网）。timeout 覆盖档位默认超时。"""
+        params = dict(PROFILE_SETTINGS[profile])
+        if timeout is not None:
+            params["timeout"] = timeout
+        return init_chat_model(
+            model=f"openai:{config.model_name}",
+            api_key=config.api_key,
+            base_url=config.base_url,
+            # 瞬时错误（连接错误/429）同模型重试一次（规划 4.2）
+            max_retries=1,
+            **params,
+        )
+
     def get_chat_model(self, db: Session, profile: ModelProfile, prompt_version: str = "v1") -> BaseChatModel:
         config = self.get_config_for_profile(db, profile)
         key = (profile.value, config.id, config.updated_at, prompt_version)
@@ -123,14 +139,7 @@ class ModelGateway:
             cached = self._cache.get(key)
             if cached is not None:
                 return cached
-            llm = init_chat_model(
-                model=f"openai:{config.model_name}",
-                api_key=config.api_key,
-                base_url=config.base_url,
-                # 瞬时错误（连接错误/429）同模型重试一次（规划 4.2）
-                max_retries=1,
-                **PROFILE_SETTINGS[profile],
-            )
+            llm = self._build_llm(config, profile)
             # 淘汰同 profile 下配置过期的条目；不同 profile 允许共存。
             # 只清理本方法产生的普通条目（键不含 "explicit" 哨兵），
             # 不误删 get_chat_model_by_code 的按 code 显式条目。
@@ -150,6 +159,7 @@ class ModelGateway:
     ) -> BaseChatModel:
         """按 AI 规则模型 code 显式路由创建并缓存 ChatModel。
 
+        本方法专用于批改链路，对 VISION_GRADER/REVIEWER 应用 GRADING_LLM_TIMEOUT。
         与 get_chat_model 不同：这里严格按 code 取激活配置，不参与默认模型链，
         配置不存在/未激活/无 Key 时抛 10016 而**不回退默认模型**。
         缓存键在既有四元组后追加 "explicit" 哨兵，与 get_chat_model 的普通条目
@@ -161,20 +171,17 @@ class ModelGateway:
             cached = self._cache.get(key)
             if cached is not None:
                 return cached
-            params = dict(PROFILE_SETTINGS[profile])
-            if profile in (ModelProfile.VISION_GRADER, ModelProfile.REVIEWER):
-                # 批改主/复核按 code 路由时不再用 120/40 秒长超时，统一收口
-                params["timeout"] = GRADING_LLM_TIMEOUT
-            llm = init_chat_model(
-                model=f"openai:{config.model_name}",
-                api_key=config.api_key,
-                base_url=config.base_url,
-                # 瞬时错误（连接错误/429）同模型重试一次（规划 4.2）
-                max_retries=1,
-                **params,
+            llm = self._build_llm(
+                config,
+                profile,
+                timeout=(
+                    GRADING_LLM_TIMEOUT
+                    if profile in (ModelProfile.VISION_GRADER, ModelProfile.REVIEWER)
+                    else None
+                ),
             )
             # 只淘汰同 profile 下的按 code 显式条目（键带 "explicit" 哨兵），
-            # 保证不误删 get_chat_model 的普通条目；不同 code/档位允许共存。
+            # 保证不误删 get_chat_model 的普通条目；同档位不同 code 会互汰、不同档位可共存。
             stale = [k for k in self._cache if k[-1] == "explicit" and k[0] == profile.value and k != key]
             for k in stale:
                 del self._cache[k]
