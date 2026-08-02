@@ -22,12 +22,14 @@ from app.agent.contracts import (
 )
 from app.agent.graphs.grading import GRADING_AGENT_NODE, GRADING_STRUCTURER_NODE
 from app.agent.subagents.grading import (
+    _plain_report_prompt,
     create_node as create_grading_node,
     invoke_plain_grader,
 )
 from app.agent.subagents.grading_review import create_node as create_review_node
 from app.agent.subagents.grading_structurer import (
     build_structurer_prompt,
+    create_node as create_structurer_node,
     invoke_structurer,
 )
 
@@ -310,3 +312,40 @@ def test_structurer_score_out_of_bounds_degrades():
     assert "report_pair" not in result
     assert result["grading_failure"]["stage"] == GRADING_STRUCTURER_NODE
     assert result["grading_failure"]["error"]
+
+
+# ========== 代码质量修复：注册表取 Agent + 普通报告 Prompt 断言 ==========
+
+def test_structurer_create_node_uses_get_structurer_agent():
+    """create_node 经注册表公开方法按 structurer_model_code 取 Agent，结果写 report_pair。"""
+    agent = _FakeAgent({
+        "structured_response": _valid_pair_payload(),
+        "messages": [AIMessage(
+            content="",
+            usage_metadata={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+        )],
+    })
+    requested = []
+
+    class _StructurerRegistry:
+        def get_structurer_agent(self, db, *, model_code):
+            requested.append(model_code)
+            return agent
+
+    node = create_structurer_node(object(), _StructurerRegistry())
+    result = node(_structurer_state())
+
+    assert requested == ["deepseek"]
+    assert len(agent.calls) == 1
+    assert "grading_failure" not in result
+    assert result["report_pair"].primary.total_score == 86
+
+
+def test_plain_report_prompt_wraps_rule_and_forbids_structured_output():
+    """普通报告 Prompt 用不可信块包裹教师规则，且不要求模型输出结构化 JSON。"""
+    prompt = _plain_report_prompt(_plain_state(), reviewer=False)
+
+    assert "BEGIN_UNTRUSTED_RULE" in prompt
+    assert "END_UNTRUSTED_RULE" in prompt
+    assert "按实验要求评分" in prompt
+    assert "不要输出结构化 JSON" in prompt

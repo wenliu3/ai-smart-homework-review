@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from .contracts import (
     GradingDraft,
+    GradingReportPair,
     ModelGovernanceResponse,
     ModelProfile,
     PlagiarismExplanation,
@@ -177,6 +178,18 @@ GRADING_REVIEW_SPECIALIST_V1 = register_prompt(PromptTemplate(
 - 不输出可信总分；不修改教师评分。
 - 信息不足时在 limitations 中说明。
 """,
+))
+
+# 独立结构化模型（可选路径，任务 5）的 Prompt：由原 STRUCTURER_SYSTEM_PROMPT 迁移至此，
+# 作为唯一版本化来源。规则文本经 grading_structurer.build_structurer_prompt 在消息通道
+# 自包含下发（get_structurer_agent 的系统 Prompt 传空串，避免双通道重复）。
+GRADING_STRUCTURER_V1 = register_prompt(PromptTemplate(
+    name="grading_structurer",
+    version="v1",
+    content=(
+        "你是批改报告整理 Agent。你只能整理两份已有批改报告，禁止读取不存在的原始作业，"
+        "禁止重新评分，禁止补造分数、证据或扣分理由。报告信息不足时写入 extraction_errors。"
+    ),
 ))
 
 PLAGIARISM_ANALYSIS_SPECIALIST_V1 = register_prompt(PromptTemplate(
@@ -556,6 +569,52 @@ class AgentRegistry:
             self._cache[cache_key] = agent
             return agent
 
+    def get_structurer_agent(self, db: Session, *, model_code: str):
+        """按管理员绑定 code 构建独立结构化模型 Agent（可选路径，任务 5）。
+
+        - 档位 ModelProfile.GRADING_STRUCTURER（temperature=0.0 / 20s 超时），
+          response_format=GradingReportPair，tools=[]，context_schema=None。
+        - 系统 Prompt 传空串：规则文本（GRADING_STRUCTURER_V1）经
+          build_structurer_prompt 在消息通道自包含下发，不在此重复，避免双通道重复。
+        - 模型经网关 get_chat_model_by_code 严格按 code 路由，绝不回退默认模型。
+
+        缓存键首元素 "grading_structurer" 哨兵，与 get_specialist（(agent_name, ...)）和
+        get_grading_agent（"grading_direct"）命名空间隔离；淘汰只作用于同 code 的条目。
+        """
+        prompt = get_prompt("grading_structurer")
+        profile = ModelProfile.GRADING_STRUCTURER
+        config = get_config_by_code(db, model_code, profile)
+        model_cache_key = (profile.value, config.id, config.updated_at, prompt.version)
+        cache_key = ("grading_structurer", model_code, model_cache_key, prompt.version)
+
+        with self._lock:
+            cached = self._cache.get(cache_key)
+            if cached is not None:
+                return cached
+            llm = self._model_gateway.get_chat_model_by_code(
+                db,
+                model_code=model_code,
+                profile=profile,
+                prompt_version=prompt.version,
+            )
+            agent = self._agent_factory(
+                model=llm,
+                tools=[],
+                system_prompt="",
+                context_schema=None,
+                response_format=GradingReportPair,
+                middleware=[tool_budget_middleware],
+            )
+            # 淘汰同 model_code 下过期的结构化 Agent 条目（"grading_structurer" 命名空间）
+            stale = [
+                k for k in self._cache
+                if k[0] == "grading_structurer" and k[1] == model_code and k != cache_key
+            ]
+            for k in stale:
+                del self._cache[k]
+            self._cache[cache_key] = agent
+            return agent
+
     def clear_cache(self) -> None:
         with self._lock:
             self._cache.clear()
@@ -586,6 +645,7 @@ __all__ = [
     "TEACHER_ACTION_SPECIALIST_V1",
     "GRADING_SPECIALIST_V1",
     "GRADING_REVIEW_SPECIALIST_V1",
+    "GRADING_STRUCTURER_V1",
     "PLAGIARISM_ANALYSIS_SPECIALIST_V1",
     "PLAGIARISM_REVIEWER_V1",
     "LEARNING_COACH_V1",
