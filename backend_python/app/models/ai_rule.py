@@ -15,4 +15,6 @@ class AiRule(Base, TimestampMixin, ModelMixin):
     visibility = Column(String(20), default="private")
     tags = Column(JSON, default=list)
     max_score = Column(Integer, default=100)
+    # 多维度评分标准：[{"id","title","maxScore","instructions"}, ...]；空/缺失时回退单维度 overall
+    criteria = Column(JSON, nullable=True)
     created_by = Column(JSON, nullable=True)  # {id, name}

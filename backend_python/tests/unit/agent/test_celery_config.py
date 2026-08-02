@@ -30,6 +30,20 @@ def test_ai_rule_is_normalized_to_versioned_rubric():
     ]
 
 
+def test_multi_dimension_rubric_carries_instructions():
+    rubric = rubric_from_ai_rule({
+        "criteria": [
+            {"id": "content", "title": "内容", "maxScore": 60, "instructions": "要点齐全、论证充分"},
+            {"id": "language", "title": "语言", "maxScore": 40, "instructions": "表达规范"},
+        ],
+    })
+
+    assert rubric.version == "rubric-v1"
+    assert rubric.total_score == 100
+    assert rubric.criteria[0].instructions == "要点齐全、论证充分"
+    assert rubric.criteria[1].instructions == "表达规范"
+
+
 def test_legacy_ai_rule_gets_single_dimension_rubric():
     rubric = rubric_from_ai_rule({
         "prompt": "按要求批改",

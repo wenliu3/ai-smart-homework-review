@@ -81,6 +81,16 @@ def test_current_grading_job_updates_only_ai_fields(db):
     assert applied is True
     assert submission.ai_score == 88
     assert submission.ai_review_content == "总体完成良好"
+    assert submission.ai_review_items == [
+        {
+            "criterion_id": "quality",
+            "title": "质量",
+            "score": 88.0,
+            "max_score": 100.0,
+            "feedback": "完成良好",
+            "evidence_refs": ["submission:text:1"],
+        }
+    ]
     assert submission.status == "teacher_reviewed"
     assert submission.teacher_score == 95
     assert submission.teacher_review_content == "教师最终评价"

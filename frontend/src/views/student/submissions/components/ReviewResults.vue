@@ -106,6 +106,38 @@
               </div>
             </div>
             <div class="review-content-scroll">
+              <!-- 多维度评分：有分项时按维度渲染分项卡 -->
+              <div
+                v-if="aiReview.items && aiReview.items.length"
+                class="dimension-items"
+              >
+                <div
+                  v-for="item in aiReview.items"
+                  :key="item.criterionId || item.title"
+                  class="dimension-item"
+                  :data-testid="`dimension-item-${item.criterionId || item.title}`"
+                >
+                  <div class="dimension-item__header">
+                    <span class="dimension-item__title">{{ item.title }}</span>
+                    <span
+                      class="dimension-item__score"
+                      :class="{
+                        'is-full':
+                          Number(item.score) >= Number(item.maxScore),
+                      }"
+                    >
+                      <strong>{{ item.score }}</strong>
+                      <span>/ {{ item.maxScore }}</span>
+                    </span>
+                  </div>
+                  <p v-if="item.feedback" class="dimension-item__feedback">
+                    <span class="dimension-item__feedback-label"
+                      >评分说明：</span
+                    >
+                    {{ item.feedback }}
+                  </p>
+                </div>
+              </div>
               <div
                 class="prose max-w-none whitespace-pre-wrap"
                 v-html="formatReviewContent(aiReview.content)"
@@ -777,6 +809,62 @@ defineOptions({
 .tab-label .el-tag {
   font-weight: 600;
   font-family: "SF Mono", "Monaco", "Inconsolata", "Roboto Mono", monospace;
+}
+
+/* 多维度评分分项卡 */
+.dimension-items {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.dimension-item {
+  border: 1px solid #e4e7ed;
+  border-radius: 10px;
+  padding: 14px 16px;
+  background: #fafbfd;
+}
+
+.dimension-item__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.dimension-item__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.dimension-item__score {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.dimension-item__score strong {
+  font-size: 18px;
+  color: #5d50ce;
+}
+
+.dimension-item__score.is-full strong {
+  color: #16a34a;
+}
+
+.dimension-item__feedback {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #6b7280;
+}
+
+.dimension-item__feedback-label {
+  font-weight: 600;
+  color: #4b5563;
 }
 
 /* 标签页内容样式 */

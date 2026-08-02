@@ -125,6 +125,95 @@
             />
           </el-form-item>
         </el-col>
+
+        <el-col :span="24">
+          <div class="criteria-section">
+            <div class="criteria-section__header">
+              <span class="criteria-section__title">评分标准（多维度）</span>
+              <el-button
+                size="small"
+                type="primary"
+                plain
+                :icon="Plus"
+                @click="addCriterion"
+              >
+                添加评分维度
+              </el-button>
+            </div>
+
+            <div v-if="formData.criteria.length" class="criteria-list">
+              <div
+                v-for="(criterion, index) in formData.criteria"
+                :key="criterion.id"
+                class="criterion-card"
+              >
+                <div class="criterion-card__header">
+                  <span class="criterion-card__index">维度 {{ index + 1 }}</span>
+                  <el-button
+                    type="danger"
+                    text
+                    :icon="Delete"
+                    @click="removeCriterion(index)"
+                  >
+                    删除
+                  </el-button>
+                </div>
+                <el-row :gutter="16">
+                  <el-col :span="isMobile ? 24 : 14">
+                    <el-form-item
+                      label="名称"
+                      :prop="`criteria.${index}.title`"
+                      :rules="criterionNameRules"
+                      class="criterion-field"
+                    >
+                      <el-input
+                        v-model="criterion.title"
+                        placeholder="评分维度名称，如：内容完整性"
+                        maxlength="50"
+                        show-word-limit
+                      />
+                    </el-form-item>
+                  </el-col>
+                  <el-col :span="isMobile ? 24 : 10">
+                    <el-form-item
+                      label="满分"
+                      :prop="`criteria.${index}.maxScore`"
+                      :rules="criterionScoreRules"
+                      class="criterion-field"
+                    >
+                      <el-input-number
+                        v-model="criterion.maxScore"
+                        :min="1"
+                        :max="1000"
+                        :precision="0"
+                        controls-position="right"
+                        placeholder="满分"
+                        style="width: 100%"
+                      />
+                    </el-form-item>
+                  </el-col>
+                </el-row>
+                <el-form-item
+                  label="评分要求"
+                  :prop="`criteria.${index}.instructions`"
+                  class="criterion-field criterion-field--instructions"
+                >
+                  <el-input
+                    v-model="criterion.instructions"
+                    type="textarea"
+                    :rows="2"
+                    maxlength="500"
+                    show-word-limit
+                    placeholder="该维度考察什么、评分要点、扣分情形（可选）"
+                  />
+                </el-form-item>
+              </div>
+            </div>
+            <div v-else class="criteria-section__empty">
+              未配置评分标准时，AI 将按整体质量给出单一总分
+            </div>
+          </div>
+        </el-col>
       </el-row>
     </el-form>
 
@@ -142,6 +231,7 @@
 <script setup>
 import { ref, reactive, computed, nextTick, onMounted } from "vue";
 import { ElMessage } from "element-plus";
+import { Plus, Delete } from "@element-plus/icons-vue";
 import { createAiRule, updateAiRule, getAiRuleById } from "@/api/ai-rule";
 import { aiModelApi } from "@/api/ai-models";
 import { useStore } from "vuex";
@@ -183,7 +273,35 @@ const formData = reactive({
   status: "active",
   visibility: "private",
   tags: [],
+  criteria: [],
 });
+
+// 评分标准项唯一 id 生成序号（编辑旧数据时保留原 id）
+const criterionSeq = ref(0);
+
+// 评分维度行内校验规则
+const criterionNameRules = [
+  { required: true, message: "请输入评分维度名称", trigger: "blur" },
+];
+const criterionScoreRules = [
+  { required: true, message: "请输入该维度满分", trigger: "blur" },
+];
+
+// 添加评分维度
+const addCriterion = () => {
+  criterionSeq.value += 1;
+  formData.criteria.push({
+    id: `criterion-${Date.now()}-${criterionSeq.value}`,
+    title: "",
+    maxScore: undefined,
+    instructions: "",
+  });
+};
+
+// 删除评分维度
+const removeCriterion = (index) => {
+  formData.criteria.splice(index, 1);
+};
 
 // 常用标签
 const commonTags = ref([
@@ -274,6 +392,7 @@ const resetForm = () => {
   formData.status = "active";
   formData.visibility = "private";
   formData.tags = [];
+  formData.criteria = [];
 
   if (formRef.value) {
     formRef.value.clearValidate();
@@ -310,6 +429,14 @@ const loadRuleData = async (ruleId) => {
     formData.status = response.status;
     formData.visibility = response.visibility;
     formData.tags = response.tags || [];
+    formData.criteria = response.criteria
+      ? response.criteria.map((c) => ({
+          id: c.id,
+          title: c.title || "",
+          maxScore: c.maxScore,
+          instructions: c.instructions || "",
+        }))
+      : [];
   } catch (error) {
     console.error("加载规则数据失败", error);
     ElMessage.error("加载规则数据失败");
@@ -334,6 +461,12 @@ const handleSubmit = async () => {
       status: formData.status,
       visibility: formData.visibility,
       tags: formData.tags,
+      criteria: formData.criteria.map((c) => ({
+        id: c.id,
+        title: c.title.trim(),
+        maxScore: c.maxScore,
+        instructions: c.instructions ? c.instructions.trim() : "",
+      })),
     };
 
     // 只有当description不为空时才添加到提交数据中
@@ -393,5 +526,66 @@ onMounted(() => {
 
 .empty-models p {
   margin: 8px 0 0 0;
+}
+
+/* 多维度评分标准配置区 */
+.criteria-section {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px 16px;
+  background: #fafbfc;
+}
+
+.criteria-section__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.criteria-section__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.criteria-section__empty {
+  padding: 12px;
+  text-align: center;
+  color: #909399;
+  font-size: 13px;
+  background: #f5f7fa;
+  border: 1px dashed #dcdfe6;
+  border-radius: 6px;
+}
+
+.criteria-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.criterion-card {
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  padding: 12px 16px;
+  background: #fff;
+}
+
+.criterion-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.criterion-card__index {
+  font-size: 13px;
+  font-weight: 600;
+  color: #5d50ce;
+}
+
+.criterion-field {
+  margin-bottom: 16px;
 }
 </style>

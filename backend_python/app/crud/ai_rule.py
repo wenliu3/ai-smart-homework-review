@@ -97,7 +97,8 @@ def copy(db: Session, rule_id: int, name: str | None) -> dict:
         name=name or f"{original.name} (副本)",
         description=original.description, model_type=original.model_type,
         prompt=original.prompt, status="inactive", visibility="private",
-        tags=original.tags, max_score=original.max_score, created_by=original.created_by,
+        tags=original.tags, max_score=original.max_score,
+        criteria=original.criteria, created_by=original.created_by,
     )
     db.add(new_rule)
     db.commit()

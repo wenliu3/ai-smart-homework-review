@@ -1,5 +1,13 @@
 import request from "@/utils/request";
 
+// 多维度评分标准项
+export interface AiRuleCriterion {
+  id?: string;
+  title: string;
+  maxScore: number;
+  instructions?: string;
+}
+
 // AI规则接口类型定义
 export interface AiRule {
   id: string;
@@ -11,6 +19,7 @@ export interface AiRule {
   status: "active" | "inactive";
   visibility: "private" | "public" | "system";
   tags: string[];
+  criteria?: AiRuleCriterion[];
   createdBy?: {
     id: string;
     name: string;
@@ -42,6 +51,7 @@ export interface CreateAiRuleDto {
   visibility?: "private" | "public" | "system";
   status?: "active" | "inactive";
   tags?: string[];
+  criteria?: AiRuleCriterion[];
 }
 
 // 更新AI规则DTO
@@ -54,6 +64,7 @@ export interface UpdateAiRuleDto {
   visibility?: "private" | "public" | "system";
   status?: "active" | "inactive";
   tags?: string[];
+  criteria?: AiRuleCriterion[];
 }
 
 /**
@@ -167,6 +178,7 @@ export function getAvailableAiRules(status = "active") {
       maxScore?: number;
       visibility: string;
       tags: string[];
+      criteria?: AiRuleCriterion[];
     }>
   >({
     url: "/v1/ai-rules/available/list",

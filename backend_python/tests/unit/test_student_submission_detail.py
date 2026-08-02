@@ -5,7 +5,7 @@ import pytest
 from app.core.exceptions import BadRequestException, NotFoundException
 from app.crud import assignment as assignment_crud
 from app.crud import submission as submission_crud
-from app.models import Assignment, Class, ClassStudent
+from app.models import Assignment, Class, ClassStudent, Submission
 
 
 def _grant_assignment_access(db, teacher, student):
@@ -279,6 +279,125 @@ def test_get_my_submission_defaults_ai_rule_max_score_to_100(
 
     assert result["assignment"]["aiRule"].get("maxScore", 100) == 100
     assert result["assignment"]["rawMaxScore"] == 100
+
+
+def test_get_my_submission_returns_ai_review_dimension_items(
+    db, teacher, student,
+):
+    classroom = _grant_assignment_access(db, teacher, student)
+    assignment = Assignment(
+        title="多维度批改作业",
+        teacher_id=teacher.id,
+        teacher_name=teacher.name,
+        classes=[{"id": str(classroom.id), "name": classroom.name}],
+        start_date=datetime.now() - timedelta(days=1),
+        end_date=datetime.now() + timedelta(days=1),
+        status="published",
+        ai_rule={
+            "id": "9",
+            "name": "多维度规则",
+            "modelType": "mimo",
+            "prompt": "按维度评分",
+            "maxScore": 100,
+            "criteria": [
+                {"id": "content", "title": "内容完整性", "maxScore": 60},
+                {"id": "expression", "title": "表达规范", "maxScore": 40},
+            ],
+        },
+    )
+    db.add(assignment)
+    db.commit()
+    db.refresh(assignment)
+    submission = Submission(
+        assignment_id=assignment.id,
+        student_id=student.id,
+        class_id=classroom.id,
+        status="ai_reviewed",
+        submission_count=1,
+        ai_score=88,
+        ai_review_content="总体完成良好",
+        ai_review_items=[
+            {
+                "criterion_id": "content",
+                "title": "内容完整性",
+                "score": 54,
+                "max_score": 60,
+                "feedback": "要点齐全，示例充分",
+                "evidence_refs": ["submission:text:1"],
+            },
+            {
+                "criterion_id": "expression",
+                "title": "表达规范",
+                "score": 34,
+                "max_score": 40,
+                "feedback": "个别语句不通顺",
+                "evidence_refs": [],
+            },
+        ],
+    )
+    db.add(submission)
+    db.commit()
+
+    result = submission_crud.get_my_submission(
+        db, assignment_id=assignment.id, student_id=student.id,
+    )
+
+    assert result["aiReview"]["score"] == 88
+    assert result["aiReview"]["items"] == [
+        {
+            "criterionId": "content",
+            "title": "内容完整性",
+            "score": 54,
+            "maxScore": 60,
+            "feedback": "要点齐全，示例充分",
+            "evidenceRefs": ["submission:text:1"],
+        },
+        {
+            "criterionId": "expression",
+            "title": "表达规范",
+            "score": 34,
+            "maxScore": 40,
+            "feedback": "个别语句不通顺",
+            "evidenceRefs": [],
+        },
+    ]
+
+
+def test_get_my_submission_ai_review_items_is_none_when_missing(
+    db, teacher, student,
+):
+    """单维度/旧数据没有分项：aiReview.items 应为 None，前端保持纯文本展示。"""
+    classroom = _grant_assignment_access(db, teacher, student)
+    assignment = Assignment(
+        title="单维度批改作业",
+        teacher_id=teacher.id,
+        teacher_name=teacher.name,
+        classes=[{"id": str(classroom.id), "name": classroom.name}],
+        start_date=datetime.now() - timedelta(days=1),
+        end_date=datetime.now() + timedelta(days=1),
+        status="published",
+        ai_rule={"id": "9", "modelType": "mimo", "prompt": "整体评分", "maxScore": 100},
+    )
+    db.add(assignment)
+    db.commit()
+    db.refresh(assignment)
+    submission = Submission(
+        assignment_id=assignment.id,
+        student_id=student.id,
+        class_id=classroom.id,
+        status="ai_reviewed",
+        submission_count=1,
+        ai_score=90,
+        ai_review_content="整体不错",
+    )
+    db.add(submission)
+    db.commit()
+
+    result = submission_crud.get_my_submission(
+        db, assignment_id=assignment.id, student_id=student.id,
+    )
+
+    assert result["aiReview"]["items"] is None
 
 
 def test_student_cannot_read_unpublished_assignment_even_with_membership(

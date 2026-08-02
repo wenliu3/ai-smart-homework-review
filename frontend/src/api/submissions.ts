@@ -48,11 +48,22 @@ export interface Submission {
   gradingRunId?: string | null;
 }
 
+// 多维度评分分项（单维度/旧数据时不存在）
+export interface AiReviewItem {
+  criterionId: string;
+  title: string;
+  score: number;
+  maxScore: number;
+  feedback: string;
+  evidenceRefs?: string[];
+}
+
 // AI批改信息
 export interface AiReview {
   content: string;
   score: number;
   reviewedAt: string;
+  items?: AiReviewItem[];
   aiReviewMetadata?: {
     error?: string;
     errorTime?: string;

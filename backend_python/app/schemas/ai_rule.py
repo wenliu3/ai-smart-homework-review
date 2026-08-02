@@ -2,6 +2,15 @@
 from pydantic import BaseModel
 
 
+class AiRuleCriterion(BaseModel):
+    """多维度评分标准项（与前端 AiRuleCriterion 对齐）"""
+
+    id: str | None = None
+    title: str
+    maxScore: float
+    instructions: str = ""
+
+
 class AiRuleCreate(BaseModel):
     name: str
     description: str = ""
@@ -11,6 +20,7 @@ class AiRuleCreate(BaseModel):
     visibility: str = "private"
     tags: list[str] = []
     maxScore: int = 100
+    criteria: list[AiRuleCriterion] | None = None
     createdBy: dict | None = None
 
 
@@ -23,6 +33,7 @@ class AiRuleUpdate(BaseModel):
     visibility: str | None = None
     tags: list[str] | None = None
     maxScore: int | None = None
+    criteria: list[AiRuleCriterion] | None = None
 
 
 class CopyRuleRequest(BaseModel):

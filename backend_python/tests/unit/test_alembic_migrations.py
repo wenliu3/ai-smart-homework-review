@@ -54,6 +54,17 @@ def test_upgrade_head_adds_submission_grading_run_id_column(tmp_path):
     assert "grading_run_id" in columns
 
 
+def test_upgrade_head_adds_multi_dimension_grading_columns(tmp_path):
+    db_path = tmp_path / "multidim.db"
+    command.upgrade(_make_config(db_path), "head")
+
+    insp = inspect(create_engine(f"sqlite:///{db_path.as_posix()}"))
+    ai_rule_cols = {col["name"] for col in insp.get_columns("ai_rules")}
+    submission_cols = {col["name"] for col in insp.get_columns("submissions")}
+    assert "criteria" in ai_rule_cols
+    assert "ai_review_items" in submission_cols
+
+
 def test_downgrade_base_drops_all_tables(tmp_path):
     db_path = tmp_path / "downgrade.db"
     cfg = _make_config(db_path)

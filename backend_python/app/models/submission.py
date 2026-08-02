@@ -17,6 +17,9 @@ class Submission(Base, TimestampMixin, ModelMixin):
     submitted_at = Column(DateTime, nullable=True)
     ai_score = Column(Float, nullable=True)
     ai_review_content = Column(Text, nullable=True)
+    # 多维度评分分项落库：GradingDraft.items 的 snake_case 数组
+    # [{"criterion_id","title","score","max_score","feedback","evidence_refs"}, ...]
+    ai_review_items = Column(JSON, nullable=True)
     teacher_score = Column(Float, nullable=True)
     teacher_review_content = Column(Text, nullable=True)
     teacher_reviewed_at = Column(DateTime, nullable=True)

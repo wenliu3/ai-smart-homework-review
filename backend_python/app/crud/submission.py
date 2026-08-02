@@ -52,6 +52,9 @@ def apply_ai_grading_result(
         .values(
             ai_score=primary.total_score,
             ai_review_content=content,
+            ai_review_items=[
+                item.model_dump(mode="json") for item in primary.items
+            ],
             status=case(
                 (
                     Submission.status == "teacher_reviewed",
@@ -138,6 +141,27 @@ def _to100(score, max_score):
     return round((score / max_score) * 100) if max_score > 0 else score
 
 
+def _ai_review_items_to_api(items) -> list | None:
+    """把落库的 snake_case 分项数组转成前端 camelCase 结构。
+
+    每一项固定输出六键（缺失置默认），保证学生端分项卡渲染稳定；
+    无分项（旧数据 / 单维度规则）时返回 None，前端保持纯文本展示。
+    """
+    if not items:
+        return None
+    result = []
+    for item in items:
+        result.append({
+            "criterionId": item.get("criterion_id"),
+            "title": item.get("title"),
+            "score": item.get("score"),
+            "maxScore": item.get("max_score"),
+            "feedback": item.get("feedback") or "",
+            "evidenceRefs": item.get("evidence_refs") or [],
+        })
+    return result
+
+
 def submit(db: Session, student_id: int, data: dict) -> dict:
     """学生提交作业 — 若已有提交则更新(允许重复提交)，草稿不触发 AI 批改"""
     assignment_id = data.get("assignmentId")
@@ -201,6 +225,7 @@ def submit(db: Session, student_id: int, data: dict) -> dict:
             submission.submitted_at = now()
             submission.ai_score = None
             submission.ai_review_content = None
+            submission.ai_review_items = None
     else:
         submission = Submission(
             assignment_id=assignment.id, student_id=student_id,
@@ -250,6 +275,7 @@ def get_my_submission(db: Session, assignment_id: int, student_id: int) -> dict:
                 "content": submission.ai_review_content or "",
                 "score": _to100(submission.ai_score, max_score),
                 "rawScore": submission.ai_score, "rawMaxScore": max_score,
+                "items": _ai_review_items_to_api(submission.ai_review_items),
                 "reviewedAt": submission.updated_at.isoformat() if submission.updated_at else None,
             }
         if submission.teacher_score is not None:

@@ -5,6 +5,14 @@ export enum AssignmentStatus {
   TERMINATED = "terminated",
 }
 
+// 多维度评分标准项（与 ai-rule.ts 的 AiRuleCriterion 保持一致）
+export interface AiRuleCriterion {
+  id?: string;
+  title: string;
+  maxScore: number;
+  instructions?: string;
+}
+
 // AI规则快照接口
 export interface AiRuleSnapshot {
   id: string; // 原始规则ID（编辑时需要）
@@ -12,6 +20,7 @@ export interface AiRuleSnapshot {
   modelType: string;
   prompt: string;
   maxScore?: number;
+  criteria?: AiRuleCriterion[];
   originalRuleId?: string;
   snapshotAt?: string;
 }

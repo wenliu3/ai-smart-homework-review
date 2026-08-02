@@ -165,6 +165,14 @@ import { Setting } from "@element-plus/icons-vue";
 import { getAvailableAiRules } from "@/api/ai-rule";
 import { normalizeAiRuleSnapshot } from "@/utils/aiRule";
 
+// 多维度评分标准项
+interface AiRuleCriterion {
+  id?: string;
+  title: string;
+  maxScore: number;
+  instructions?: string;
+}
+
 // 从API获取的完整AI规则信息
 interface AiRuleItem {
   id: string;
@@ -173,6 +181,7 @@ interface AiRuleItem {
   modelType: string;
   prompt: string;
   maxScore?: number;
+  criteria?: AiRuleCriterion[];
   visibility: string;
   tags: string[];
 }
@@ -184,6 +193,7 @@ interface AiRuleSnapshot {
   modelType: string;
   prompt: string;
   maxScore?: number;
+  criteria?: AiRuleCriterion[];
 }
 
 interface Props {
@@ -255,6 +265,9 @@ const confirmRuleSelection = () => {
       modelType: selectedRule.modelType,
       prompt: selectedRule.prompt,
       maxScore: selectedRule.maxScore,
+      ...(selectedRule.criteria?.length
+        ? { criteria: selectedRule.criteria }
+        : {}),
     });
     emit("update:modelValue", ruleSnapshot);
     showRuleSelector.value = false;

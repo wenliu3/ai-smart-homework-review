@@ -63,6 +63,75 @@ describe("ReviewResults", () => {
     expect(wrapper.text()).not.toContain("评价进行中");
   });
 
+  it("多维度评分时按维度渲染分项卡（标题/得分/扣分原因）", () => {
+    const wrapper = mountReview({
+      aiReview: {
+        content: "总体完成良好",
+        score: 88,
+        reviewedAt: "2026-08-01T12:00:00",
+        items: [
+          {
+            criterionId: "content",
+            title: "内容完整性",
+            score: 54,
+            maxScore: 60,
+            feedback: "要点齐全，示例充分",
+          },
+          {
+            criterionId: "expression",
+            title: "表达规范",
+            score: 34,
+            maxScore: 40,
+            feedback: "个别语句不通顺",
+          },
+        ],
+      },
+      teacherReview: null,
+      submissionStatus: "ai_reviewed",
+      assignment: {
+        status: "published",
+        dueDate: "2099-08-05T18:00:00",
+        aiRule: { prompt: "请评分" },
+      },
+    });
+
+    const contentCard = wrapper.get(
+      '[data-testid="dimension-item-content"]'
+    );
+    expect(contentCard.text()).toContain("内容完整性");
+    expect(contentCard.text()).toContain("54");
+    expect(contentCard.text()).toContain("/ 60");
+    expect(contentCard.text()).toContain("要点齐全，示例充分");
+
+    const expressionCard = wrapper.get(
+      '[data-testid="dimension-item-expression"]'
+    );
+    expect(expressionCard.text()).toContain("表达规范");
+    expect(expressionCard.text()).toContain("个别语句不通顺");
+  });
+
+  it("无分项（单维度/旧数据）时保持纯文本评价展示", () => {
+    const wrapper = mountReview({
+      aiReview: {
+        content: "整体不错",
+        score: 90,
+        reviewedAt: "2026-08-01T12:00:00",
+      },
+      teacherReview: null,
+      submissionStatus: "ai_reviewed",
+      assignment: {
+        status: "published",
+        dueDate: "2099-08-05T18:00:00",
+        aiRule: { prompt: "请评分" },
+      },
+    });
+
+    expect(
+      wrapper.find('[data-testid^="dimension-item"]').exists()
+    ).toBe(false);
+    expect(wrapper.text()).toContain("整体不错");
+  });
+
   it("评价为零分时仍显示分数标签", () => {
     const wrapper = mountReview({
       aiReview: {
