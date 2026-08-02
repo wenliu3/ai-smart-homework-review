@@ -57,4 +57,43 @@ describe("AiRuleSelector", () => {
       maxScore: 60,
     });
   });
+
+  it("规则未带 maxScore 时 emit 的快照兜底为 100", async () => {
+    getAvailableAiRulesMock.mockResolvedValue([
+      {
+        id: "9",
+        name: "实验报告规则",
+        description: "",
+        modelType: "mimo",
+        prompt: "按实验要求评分",
+        visibility: "private",
+        tags: [],
+      },
+    ]);
+    const wrapper = mount(AiRuleSelector, {
+      props: { modelValue: null },
+      global: { plugins: [ElementPlus] },
+    });
+    await flushPromises();
+
+    await wrapper.get(".config-btn").trigger("click");
+    await flushPromises();
+
+    (wrapper.vm as unknown as { tempSelectedRuleId: string }).tempSelectedRuleId =
+      "9";
+    await wrapper.vm.$nextTick();
+
+    const confirmButton = wrapper.find(".dialog-footer .el-button--primary");
+    expect(confirmButton.exists()).toBe(true);
+    await confirmButton.trigger("click");
+    await flushPromises();
+
+    expect(wrapper.emitted("update:modelValue")?.at(-1)?.[0]).toEqual({
+      id: "9",
+      name: "实验报告规则",
+      modelType: "mimo",
+      prompt: "按实验要求评分",
+      maxScore: 100,
+    });
+  });
 });

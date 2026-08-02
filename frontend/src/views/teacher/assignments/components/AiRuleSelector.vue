@@ -163,6 +163,7 @@
 import { ref, computed, onMounted } from "vue";
 import { Setting } from "@element-plus/icons-vue";
 import { getAvailableAiRules } from "@/api/ai-rule";
+import { normalizeAiRuleSnapshot } from "@/utils/aiRule";
 
 // 从API获取的完整AI规则信息
 interface AiRuleItem {
@@ -248,14 +249,13 @@ const confirmRuleSelection = () => {
   );
   if (selectedRule) {
     // 将完整的AI规则信息转换为简化的快照格式
-    const ruleSnapshot: AiRuleSnapshot = {
+    const ruleSnapshot: AiRuleSnapshot = normalizeAiRuleSnapshot({
       id: selectedRule.id,
       name: selectedRule.name,
       modelType: selectedRule.modelType,
       prompt: selectedRule.prompt,
-      // 旧数据未带 maxScore 时按 100 兼容，保证批改量表满分不丢失
-      maxScore: selectedRule.maxScore ?? 100,
-    };
+      maxScore: selectedRule.maxScore,
+    });
     emit("update:modelValue", ruleSnapshot);
     showRuleSelector.value = false;
     tempSelectedRuleId.value = "";
