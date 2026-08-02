@@ -21,14 +21,7 @@ from app.models import (
     Submission,
 )
 from app.tasks import grading as grading_tasks
-
-
-def _usage(prompt: int, completion: int) -> dict:
-    return {
-        "prompt_tokens": prompt,
-        "completion_tokens": completion,
-        "total_tokens": prompt + completion,
-    }
+from tests.factories import _outcome, _usage
 
 
 class _UsageSpecialists:
@@ -133,8 +126,6 @@ def test_grading_run_persists_usage_and_increments_model(
         submission=submission, user_id=student.id, actor_role="student",
     )
 
-    from tests.integration.agent.test_grading_jobs import _outcome
-
     grading_tasks.execute_grading_job(
         submission_id=submission.id,
         submission_count=2,
@@ -182,12 +173,15 @@ def _enabled_assignment() -> Assignment:
     )
 
 
-def test_enabled_path_persists_raw_reports_and_outcome_without_secrets(
-    db, assistant_db, student, ai_model_factory, monkeypatch,
-):
-    """开启路径：Run 同时有 grading_raw_reports 与 grading_outcome；产物不含密钥/路径。"""
-    ai_model_factory(code="mimo", is_default=False)
-    ai_model_factory(code="deepseek", is_default=True)
+@pytest.fixture()
+def enabled_grading_job(db, assistant_db, student, ai_model_factory, monkeypatch):
+    """开启路径的完整 setup：mimo/deepseek 模型 + 作业 + 提交 + 投递。
+
+    返回 (run_id, submission, mimo, deepseek)；测试各自补 workflow_runner 的
+    图结果并执行 execute_grading_job。
+    """
+    mimo = ai_model_factory(code="mimo", is_default=False)
+    deepseek = ai_model_factory(code="deepseek", is_default=True)
     db.add(_enabled_assignment())
     db.commit()
     assignment = db.query(Assignment).one()
@@ -208,15 +202,21 @@ def test_enabled_path_persists_raw_reports_and_outcome_without_secrets(
         db, assistant_db,
         submission=submission, user_id=student.id, actor_role="student",
     )
+    return run_id, submission, mimo, deepseek
 
-    from tests.integration.agent.test_grading_jobs import _outcome
+
+def test_enabled_path_persists_raw_reports_and_outcome_without_secrets(
+    db, assistant_db, enabled_grading_job,
+):
+    """开启路径：Run 同时有 grading_raw_reports 与 grading_outcome；产物不含密钥/路径。"""
+    run_id, submission, _, _ = enabled_grading_job
 
     grading_tasks.execute_grading_job(
         submission_id=submission.id,
         submission_count=2,
         rubric_version="rubric-v3",
         run_id=run_id,
-        user_id=student.id,
+        user_id=submission.student_id,
         business_db=db,
         run_db=assistant_db,
         workflow_runner=lambda *_: {
@@ -258,40 +258,17 @@ def test_enabled_path_persists_raw_reports_and_outcome_without_secrets(
 
 
 def test_enabled_path_increments_usage_by_model_code(
-    db, assistant_db, student, ai_model_factory, monkeypatch,
+    db, assistant_db, enabled_grading_job,
 ):
     """模型用量按 code 分别累计到 mimo 与 deepseek，不全记默认模型。"""
-    mimo = ai_model_factory(code="mimo", is_default=False)
-    deepseek = ai_model_factory(code="deepseek", is_default=True)
-    db.add(_enabled_assignment())
-    db.commit()
-    assignment = db.query(Assignment).one()
-    submission = Submission(
-        assignment_id=assignment.id,
-        student_id=student.id,
-        class_id=1,
-        status="submitted",
-        submission_count=2,
-    )
-    db.add(submission)
-    db.commit()
-    db.refresh(submission)
-    monkeypatch.setattr(
-        grading_tasks.run_grading_task, "delay", lambda **kwargs: None,
-    )
-    run_id = grading_tasks.enqueue_grading_job(
-        db, assistant_db,
-        submission=submission, user_id=student.id, actor_role="student",
-    )
-
-    from tests.integration.agent.test_grading_jobs import _outcome
+    run_id, submission, mimo, deepseek = enabled_grading_job
 
     grading_tasks.execute_grading_job(
         submission_id=submission.id,
         submission_count=2,
         rubric_version="rubric-v3",
         run_id=run_id,
-        user_id=student.id,
+        user_id=submission.student_id,
         business_db=db,
         run_db=assistant_db,
         workflow_runner=lambda *_: {

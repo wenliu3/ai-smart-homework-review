@@ -4,9 +4,6 @@ import pytest
 
 from app.agent.contracts import (
     AGENT_RULE_MODEL_NOT_CONFIGURED,
-    CriterionGrade,
-    GradingDraft,
-    GradingOutcome,
 )
 from app.crud import ai_model as ai_model_crud
 from app.crud.submission import apply_ai_grading_result
@@ -19,30 +16,7 @@ from app.tasks.grading import (
     enqueue_grading_job,
     execute_grading_job,
 )
-
-
-def _outcome(needs_human_review: bool = False) -> GradingOutcome:
-    primary = GradingDraft(
-        rubric_version="rubric-v3",
-        items=[
-            CriterionGrade(
-                criterion_id="quality",
-                title="质量",
-                score=88,
-                max_score=100,
-                feedback="完成良好",
-                evidence_refs=["submission:text:1"],
-            ),
-        ],
-        summary="总体完成良好",
-    )
-    review = primary.model_copy(deep=True)
-    return GradingOutcome(
-        primary=primary,
-        review=review,
-        score_difference=0,
-        needs_human_review=needs_human_review,
-    )
+from tests.factories import _outcome
 
 
 def test_grading_idempotency_key_is_stable_and_versioned():
@@ -481,6 +455,24 @@ def test_routing_config_codes_stable_across_default_switch(db, ai_model_factory)
 def test_routing_config_missing_rule_model_fails_controlled(db):
     """缺少 ai_rule.modelType：任务在模型调用前以稳定错误码受控失败。"""
     db.add(_routing_assignment(with_model_type=False))
+    db.commit()
+
+    with pytest.raises(GradingRoutingError) as exc_info:
+        grading_tasks._grading_routing_config(db, db.query(Assignment).one())
+
+    assert exc_info.value.code == AGENT_RULE_MODEL_NOT_CONFIGURED
+
+
+def test_routing_config_structurer_binding_conflict_fails_controlled(
+    db, ai_model_factory,
+):
+    """绑定配置冲突：get_grading_structurer_binding 抛 BizException → 稳定错误码受控失败。"""
+    first = ai_model_factory(code="mimo", is_default=True)
+    second = ai_model_factory(code="deepseek", is_default=False)
+    first.profile_bindings = {"grading_structurer": True}
+    second.profile_bindings = {"grading_structurer": True}
+    db.commit()
+    db.add(_routing_assignment())
     db.commit()
 
     with pytest.raises(GradingRoutingError) as exc_info:

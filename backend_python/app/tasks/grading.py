@@ -282,7 +282,15 @@ def _grading_routing_config(business_db: Session, assignment: Assignment) -> dic
             AGENT_RULE_MODEL_NOT_CONFIGURED,
             "作业 AI 规则未配置规则模型（modelType），无法发起批改",
         )
-    binding = ai_model_crud.get_grading_structurer_binding(business_db)
+    try:
+        binding = ai_model_crud.get_grading_structurer_binding(business_db)
+    except BizException as exc:
+        # 绑定配置冲突等读取失败：与绑定无效同等对待，以稳定错误码受控失败，
+        # 避免落到通用 except 被吞成 AGENT_GRADING_FAILED。
+        raise GradingRoutingError(
+            AGENT_RULE_MODEL_NOT_CONFIGURED,
+            f"独立结构化绑定配置读取失败：{exc.message}",
+        ) from exc
     structurer_enabled = bool(binding.get("enabled"))
     structurer_model_code = binding.get("modelCode")
     if structurer_enabled:
@@ -324,6 +332,9 @@ def _record_grading_model_usage(business_db: Session, graph_result: dict) -> Non
             )
         except Exception:
             logger.warning("批改模型用量统计写入失败 code=%s", code, exc_info=True)
+            # increment_usage 内部 commit：失败会把共享会话置于 aborted 态，
+            # 不回滚则后续模型的用量全部静默丢失。这里恢复会话，继续累计其他 code。
+            business_db.rollback()
 
 
 def build_grading_state(
@@ -403,6 +414,26 @@ def _run_production_workflow(
         structurer_node=structurer_node,
     )
     return graph.invoke(state)
+
+
+def _fail_run_with_code(
+    audit: Session,
+    run_id: str,
+    user_id: int,
+    code: str,
+) -> None:
+    """把仍在 running/processing 的批改 run 标记为 failed 并写入稳定错误码。
+
+    execute_grading_job 的受控失败分支共用；仅当前状态可失败时才落库，
+    终态（completed/cancelled/failed）保持不变。调用方用
+    `try: _fail_run_with_code(...) finally: raise` 保证原异常继续上抛。
+    """
+    existing = agent_run.get_run(audit, run_id, user_id)
+    if (
+        existing is not None
+        and existing.status in {"running", "processing"}
+    ):
+        agent_run.fail_run(audit, run_id, user_id, code)
 
 
 def execute_grading_job(
@@ -587,52 +618,22 @@ def execute_grading_job(
         _record_grading_model_usage(biz, graph_result)
         return {"status": status, "run_id": run_id}
     except GradingRoutingError as exc:
-        # 运行配置无效（缺规则模型 modelType / 独立结构化绑定损坏）：
+        # 运行配置无效（缺规则模型 modelType / 独立结构化绑定损坏/冲突）：
         # 模型调用前受控失败，用独立稳定错误码标记 run，不吞成 AGENT_GRADING_FAILED。
         try:
-            existing = agent_run.get_run(audit, run_id, user_id)
-            if (
-                existing is not None
-                and existing.status in {"running", "processing"}
-            ):
-                agent_run.fail_run(
-                    audit,
-                    run_id,
-                    user_id,
-                    exc.code,
-                )
+            _fail_run_with_code(audit, run_id, user_id, exc.code)
         finally:
             raise
     except SoftTimeLimitExceeded:
         # Celery 软超时：预算应先于它触发，走到这里说明 worker 卡死，
         # 用独立错误码标记以便与普通失败区分（运营排查队列拥塞）
         try:
-            existing = agent_run.get_run(audit, run_id, user_id)
-            if (
-                existing is not None
-                and existing.status in {"running", "processing"}
-            ):
-                agent_run.fail_run(
-                    audit,
-                    run_id,
-                    user_id,
-                    AGENT_GRADING_TIMEOUT,
-                )
+            _fail_run_with_code(audit, run_id, user_id, AGENT_GRADING_TIMEOUT)
         finally:
             raise
     except Exception:
         try:
-            existing = agent_run.get_run(audit, run_id, user_id)
-            if (
-                existing is not None
-                and existing.status in {"running", "processing"}
-            ):
-                agent_run.fail_run(
-                    audit,
-                    run_id,
-                    user_id,
-                    "AGENT_GRADING_FAILED",
-                )
+            _fail_run_with_code(audit, run_id, user_id, "AGENT_GRADING_FAILED")
         finally:
             raise
     finally:
