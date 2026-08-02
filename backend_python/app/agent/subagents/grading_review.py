@@ -9,7 +9,7 @@ from typing import Callable
 
 from ..graphs.grading import GRADING_REVIEW_NODE
 from ..registry import AgentRegistry, agent_registry
-from .grading import invoke_plain_grader, invoke_structured_grader
+from .grading import invoke_structured_grader
 
 
 def _has_images(state: dict) -> bool:
@@ -21,20 +21,6 @@ def create_node(db, registry: AgentRegistry | None = None) -> Callable:
     reg = registry or agent_registry
 
     def grading_review_node(state: dict) -> dict:
-        if state.get("structurer_enabled"):
-            # 独立结构化路径：同一规则模型按 state.rule_model_code 独立出普通报告
-            agent = reg.get_grading_agent(
-                db,
-                model_code=state["rule_model_code"],
-                reviewer=True,
-                structured=False,
-            )
-            return invoke_plain_grader(
-                agent,
-                state,
-                reviewer=True,
-                stage=GRADING_REVIEW_NODE,
-            )
         specialist = (
             "grading_review_vision" if _has_images(state) else "grading_review"
         )

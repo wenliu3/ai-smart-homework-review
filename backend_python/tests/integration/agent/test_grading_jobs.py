@@ -470,5 +470,3 @@ def test_grading_state_carries_explicit_routing(db, student):
 
     assert state["rule_model_code"] == "mimo"
     assert state["rule_prompt"] == "按实验要求评分"
-    assert "structurer_enabled" not in state
-    assert "structurer_model_code" not in state

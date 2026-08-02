@@ -30,7 +30,6 @@ PROFILE_SETTINGS: dict[ModelProfile, dict] = {
     ModelProfile.GENERAL: {"temperature": 0.3, "max_tokens": 2000, "timeout": 40},
     ModelProfile.VISION_GRADER: {"temperature": 0.2, "max_tokens": 4000, "timeout": 120},
     ModelProfile.REVIEWER: {"temperature": 0.1, "max_tokens": 2000, "timeout": 40},
-    ModelProfile.GRADING_STRUCTURER: {"temperature": 0.0, "max_tokens": 4000, "timeout": 20},
 }
 
 # DeepSeek V4 系列默认开启 thinking 模式，而 thinking 模式不支持 LangChain 的

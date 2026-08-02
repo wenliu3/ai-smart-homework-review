@@ -27,7 +27,7 @@ def test_actor_context_rejects_invalid_role(role):
 
 
 def test_model_profile_values():
-    assert {p.value for p in ModelProfile} == {"router", "general", "vision_grader", "reviewer", "grading_structurer"}
+    assert {p.value for p in ModelProfile} == {"router", "general", "vision_grader", "reviewer"}
 
 
 def test_usage_summary_total_tokens():

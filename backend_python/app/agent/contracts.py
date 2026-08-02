@@ -18,7 +18,6 @@ class ModelProfile(str, Enum):
     GENERAL = "general"
     VISION_GRADER = "vision_grader"
     REVIEWER = "reviewer"
-    GRADING_STRUCTURER = "grading_structurer"
 
 
 class TeacherIntent(str, Enum):
@@ -286,13 +285,6 @@ class GradingDraft(BaseModel):
         return self
 
 
-class GradingReportPair(BaseModel):
-    schema_version: str = "v1"
-    primary: GradingDraft
-    review: GradingDraft
-    extraction_errors: list[str] = Field(default_factory=list)
-
-
 class GradingOutcome(BaseModel):
     """主批改与独立复核的确定性比较结果。"""
 
@@ -415,8 +407,8 @@ AGENT_BUDGET_EXCEEDED = "AGENT_BUDGET_EXCEEDED"
 AGENT_RUN_CANCELLED = "AGENT_RUN_CANCELLED"
 # 批改任务被 Celery 软超时打断（区别于普通失败，供运营排查队列拥塞）
 AGENT_GRADING_TIMEOUT = "AGENT_GRADING_TIMEOUT"
-# 批改运行配置无效：作业未配置规则模型（ai_rule.modelType）或独立结构化绑定
-# 损坏。任务在模型调用前受控失败，与普通批改失败（AGENT_GRADING_FAILED）区分。
+# 批改运行配置无效：作业未配置规则模型（ai_rule.modelType）。
+# 任务在模型调用前受控失败，与普通批改失败（AGENT_GRADING_FAILED）区分。
 AGENT_RULE_MODEL_NOT_CONFIGURED = "AGENT_RULE_MODEL_NOT_CONFIGURED"
 
 # 兜底安全消息：绝不携带异常类型与内部细节

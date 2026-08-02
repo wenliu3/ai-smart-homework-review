@@ -18,7 +18,7 @@ export interface AiModel {
   lastBalance: number; // 最后查询的余额
   balanceCurrency: string; // 余额货币
   lastBalanceCheck?: Date; // 最后余额检查时间
-  updatedAt?: string; // 配置更新时间（能力测试通过标记据此失效）
+  updatedAt?: string; // 配置更新时间
 }
 
 // 模型余额接口
@@ -88,21 +88,6 @@ export interface UpdateAiModelData {
 export interface SetDefaultResult {
   success: boolean;
   message: string;
-}
-
-// 独立结构化模型绑定配置
-export interface GradingStructurerConfig {
-  enabled: boolean;
-  modelCode: string | null;
-  model: AiModel | null;
-}
-
-// 结构化输出能力测试结果（绝不包含模型原始输出）
-export interface StructuredOutputTestResult {
-  success: boolean;
-  modelCode: string;
-  message: string;
-  responseTime?: number;
 }
 
 /**
@@ -187,40 +172,6 @@ export const aiModelApi = {
     return request({
       url: "/admin/ai-models/active",
       method: "GET",
-    });
-  },
-
-  /**
-   * 获取独立结构化模型绑定配置
-   */
-  getGradingStructurerConfig(): Promise<GradingStructurerConfig> {
-    return request({
-      url: "/admin/ai-models/grading-structurer/config",
-      method: "GET",
-    });
-  },
-
-  /**
-   * 更新独立结构化模型绑定配置
-   */
-  updateGradingStructurerConfig(body: {
-    enabled: boolean;
-    modelCode?: string | null;
-  }): Promise<GradingStructurerConfig> {
-    return request({
-      url: "/admin/ai-models/grading-structurer/config",
-      method: "PUT",
-      data: body,
-    });
-  },
-
-  /**
-   * 结构化输出能力测试（只用所选模型，不读取学生数据）
-   */
-  testStructuredOutput(code: string): Promise<StructuredOutputTestResult> {
-    return request({
-      url: `/admin/ai-models/${code}/test-structured-output`,
-      method: "POST",
     });
   },
 

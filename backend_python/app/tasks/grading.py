@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from ..agent.graphs.grading import build_grading_graph
 from ..agent.runtime import BudgetExceeded, grading_run_budget
-from ..agent.subagents import grading, grading_review, grading_structurer
+from ..agent.subagents import grading
 from ..agent.tools.content import (
     extract_reference_materials,
     normalize_submission_content,
@@ -23,7 +23,6 @@ from ..agent.contracts import (
     RubricCriterion,
 )
 from ..config import settings
-from ..core.exceptions import BizException
 from ..crud import agent_run, agent_session
 from ..crud import ai_model as ai_model_crud
 from ..crud.submission import (
@@ -230,7 +229,7 @@ def _record_grading_run_id(
 class GradingRoutingError(Exception):
     """任务层受控失败：批改运行配置无效，需以稳定错误码标记 run。
 
-    覆盖「作业未配置规则模型」与「独立结构化绑定损坏」两类配置错误；
+    覆盖「作业未配置规则模型」配置错误；
     code 为 contracts 里的稳定错误码（如 AGENT_RULE_MODEL_NOT_CONFIGURED），
     由 execute_grading_job 的 except 分支写到 run.error_code。
     """
@@ -239,34 +238,6 @@ class GradingRoutingError(Exception):
         self.code = code
         self.message = message
         super().__init__(message)
-
-
-def _validate_structurer_binding(business_db: Session, model_code: str | None) -> None:
-    """模型调用前校验独立结构化绑定有效：模型存在、启用且已配置 Key。
-
-    绑定来自 get_grading_structurer_binding（只回 active 模型），此处防御性
-    复检：宁可让任务以稳定错误码受控失败，也不走到图里的模型调用才发现
-    配置损坏。校验失败抛 GradingRoutingError。
-    """
-    if not model_code:
-        raise GradingRoutingError(
-            AGENT_RULE_MODEL_NOT_CONFIGURED,
-            "独立结构化路径已开启，但未绑定结构化模型",
-        )
-    try:
-        from ..agent.contracts import ModelProfile
-        from ..agent.gateway import get_config_by_code
-
-        get_config_by_code(
-            business_db,
-            model_code,
-            ModelProfile.GRADING_STRUCTURER,
-        )
-    except BizException as exc:
-        raise GradingRoutingError(
-            AGENT_RULE_MODEL_NOT_CONFIGURED,
-            f"独立结构化模型绑定无效：{exc.message}",
-        ) from exc
 
 
 def _grading_routing_config(business_db: Session, assignment: Assignment) -> dict:
@@ -561,23 +532,6 @@ def execute_grading_job(
             "schema_version": outcome.schema_version,
             "payload": outcome.model_dump(mode="json"),
         }]
-        # 仅开启路径：保留两份普通文本原始报告 + 各自模型 code 供审计。
-        # 报告由规则/结构化模型生成，payload 绝不写入 API Key / Base URL / 附件路径。
-        if (
-            graph_result.get("structurer_enabled")
-            and graph_result.get("grading_report")
-            and graph_result.get("review_report")
-        ):
-            artifacts.append({
-                "artifact_type": "grading_raw_reports",
-                "schema_version": "v1",
-                "payload": {
-                    "primary": graph_result["grading_report"],
-                    "review": graph_result["review_report"],
-                    "rule_model_code": graph_result.get("rule_model_code"),
-                    "structurer_model_code": graph_result.get("structurer_model_code"),
-                },
-            })
         agent_run.finalize_run(
             audit,
             run_id,
@@ -589,7 +543,7 @@ def execute_grading_job(
         _record_grading_model_usage(biz, graph_result)
         return {"status": status, "run_id": run_id}
     except GradingRoutingError as exc:
-        # 运行配置无效（缺规则模型 modelType / 独立结构化绑定损坏/冲突）：
+        # 运行配置无效（缺规则模型 modelType）：
         # 模型调用前受控失败，用独立稳定错误码标记 run，不吞成 AGENT_GRADING_FAILED。
         try:
             _fail_run_with_code(audit, run_id, user_id, exc.code)

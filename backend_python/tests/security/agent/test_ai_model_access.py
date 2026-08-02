@@ -20,9 +20,6 @@ PROTECTED_REQUESTS = [
     ("GET", f"{BASE}/deepseek-chat/balance"),
     ("POST", f"{BASE}/deepseek-chat/test"),
     ("GET", f"{BASE}/deepseek-chat/stats"),
-    ("GET", f"{BASE}/grading-structurer/config"),
-    ("PUT", f"{BASE}/grading-structurer/config"),
-    ("POST", f"{BASE}/deepseek/test-structured-output"),
 ]
 
 
@@ -135,52 +132,3 @@ def test_update_config_accepts_new_real_api_key(
     db.expire_all()
     stored = db.query(AiModel).filter(AiModel.code == "deepseek-chat").one()
     assert stored.api_key == "sk-new-key-abcdef123456"
-
-
-def test_superadmin_grading_structurer_config_binding_and_mask(
-    client, superadmin, auth_header, ai_model_factory,
-):
-    """超管可读写独立结构化绑定；响应中的 apiKey 必须脱敏。"""
-    ai_model_factory(api_key="sk-live-secret-key-123456")
-
-    put = client.put(
-        f"{BASE}/grading-structurer/config",
-        headers=auth_header(superadmin),
-        json={"enabled": True, "modelCode": "deepseek-chat"},
-    )
-    assert put.status_code == 200
-    assert put.json()["data"]["enabled"] is True
-    assert put.json()["data"]["modelCode"] == "deepseek-chat"
-    assert "sk-live-secret-key-123456" not in put.text
-
-    get = client.get(
-        f"{BASE}/grading-structurer/config",
-        headers=auth_header(superadmin),
-    )
-    assert get.status_code == 200
-    data = get.json()["data"]
-    assert data["enabled"] is True
-    assert data["modelCode"] == "deepseek-chat"
-    assert data["model"]["apiKey"] == "sk-l****3456"
-    assert "sk-live-secret-key-123456" not in get.text
-
-
-def test_superadmin_grading_structurer_config_can_disable(
-    client, superadmin, auth_header, ai_model_factory,
-):
-    ai_model_factory(api_key="sk-live-secret-key-123456")
-    client.put(
-        f"{BASE}/grading-structurer/config",
-        headers=auth_header(superadmin),
-        json={"enabled": True, "modelCode": "deepseek-chat"},
-    )
-    resp = client.put(
-        f"{BASE}/grading-structurer/config",
-        headers=auth_header(superadmin),
-        json={"enabled": False},
-    )
-    assert resp.status_code == 200
-    data = resp.json()["data"]
-    assert data["enabled"] is False
-    assert data["modelCode"] is None
-    assert data["model"] is None

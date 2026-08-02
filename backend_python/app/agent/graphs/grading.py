@@ -1,17 +1,16 @@
-"""双 Agent 批改 LangGraph（含可选独立结构化节点）。"""
+"""单 Agent 批改 LangGraph。"""
 from __future__ import annotations
 
 from typing import Annotated, Callable, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from ..contracts import GradingDraft, GradingOutcome, GradingReportPair, GradingRubric
+from ..contracts import GradingDraft, GradingOutcome, GradingRubric
 
 NORMALIZE_CONTENT_NODE = "normalize_submission_content"
 GRADING_AGENT_NODE = "grading_agent"
 GRADING_REVIEW_NODE = "grading_review_agent"
 GRADING_DECISION_NODE = "grading_decision"
-GRADING_STRUCTURER_NODE = "grading_structurer"
 
 
 
@@ -56,15 +55,9 @@ class GradingState(TypedDict, total=False):
     runtime_budget: object
     grading_draft: GradingDraft
     review_draft: GradingDraft
-    # 可选独立结构化路径（任务 5）：规则模型出两份普通文本报告，
-    # 独立结构化模型一次整理为 GradingReportPair
-    structurer_enabled: bool
+    # 单 Agent 路由：规则模型 code 与规则文本（来自作业快照 ai_rule.modelType）
     rule_prompt: str
     rule_model_code: str
-    structurer_model_code: str
-    grading_report: str
-    review_report: str
-    report_pair: GradingReportPair
     # 结构化校验失败（含一次修复重试后仍失败）时的降级信息：
     # {stage, error, raw_response}；存在即跳过后续节点，任务层转人工
     grading_failure: dict
@@ -161,7 +154,6 @@ __all__ = [
     "GRADING_AGENT_NODE",
     "GRADING_DECISION_NODE",
     "GRADING_REVIEW_NODE",
-    "GRADING_STRUCTURER_NODE",
     "GradingState",
     "NORMALIZE_CONTENT_NODE",
     "build_grading_graph",
