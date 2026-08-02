@@ -357,7 +357,7 @@ const waitingForTeacherOnly = computed(
 const runFailed = computed(() => props.gradingRun?.status === "failed");
 const runCancelled = computed(() => props.gradingRun?.status === "cancelled");
 
-// 评价摘要标题（优先级：教师结果 > AI 结果 > Run 失败/取消 > 进行中）
+// 评价摘要标题（优先级：教师结果 > AI 结果 > Run 失败/取消 > 等待教师批改 > 进行中 > 未取得终态）
 const overviewTitle = computed(() => {
   if (displayScore.value !== null) return "本次作业评价";
   if (runFailed.value) return "AI 批改失败";
@@ -372,11 +372,11 @@ const overviewSubtitle = computed(() => {
   if (displayScore.value !== null) {
     return `${displaySource.value}已给出评价，可切换标签查看详细反馈`;
   }
-  if (waitingForTeacherOnly.value) {
-    return "本作业未启用 AI 评价，教师批改后将在这里显示反馈";
-  }
   if (runFailed.value || runCancelled.value) {
     return "AI 批改出现问题，教师批改后将在这里显示反馈";
+  }
+  if (waitingForTeacherOnly.value) {
+    return "本作业未启用 AI 评价，教师批改后将在这里显示反馈";
   }
   if (props.isPolling) {
     return "评价完成后将在这里显示得分与改进建议";

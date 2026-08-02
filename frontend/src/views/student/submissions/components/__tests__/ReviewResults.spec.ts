@@ -105,6 +105,30 @@ describe("ReviewResults", () => {
     expect(failedWrapper.text()).not.toContain("AGENT_GRADING_TIMEOUT");
   });
 
+  it("等待教师批改与 failed run 并存时标题与副标题保持一致", () => {
+    // 过期作业 → aiSupported=false（waitingForTeacherOnly 为 true）；
+    // 历史 failed run 同时存在 → 标题应优先显示失败终态，副标题不得回落到“未启用 AI 评价”
+    const wrapper = mountReview({
+      aiReview: null,
+      teacherReview: null,
+      submissionStatus: "submitted",
+      assignment: {
+        status: "published",
+        dueDate: "2000-01-01T00:00:00",
+        aiRule: { prompt: "请评分" },
+      },
+      gradingRun: {
+        status: "failed",
+        errorCode: "AGENT_GRADING_TIMEOUT",
+        finalOutput: null,
+      },
+    });
+
+    expect(wrapper.text()).toContain("AI 批改失败");
+    expect(wrapper.text()).toContain("AI 批改出现问题，教师批改后将在这里显示反馈");
+    expect(wrapper.text()).not.toContain("本作业未启用 AI 评价");
+  });
+
   it("批改 Run 取消时显示已取消终态文案", () => {
     const cancelledWrapper = mountReview({
       aiReview: null,
