@@ -245,10 +245,22 @@ def test_structured_output(db: Session, code: str) -> dict:
         )
         raw = result.get("structured_response") if isinstance(result, dict) else None
         GradingReportPair.model_validate(raw, strict=True)
+    except ValidationError as exc:
+        # 只取 loc + msg，丢弃 input/input_value：pydantic 的 str(exc) 会内嵌
+        # 模型原始输出（input_value='...'），绝不能让原始输出回传客户端
+        summary = "；".join(
+            f"{'.'.join(map(str, err.get('loc', []))) or 'value'}: {err.get('msg', '')}"
+            for err in exc.errors()
+        )
+        return {
+            "success": False,
+            "modelCode": code,
+            "message": f"结构化输出能力验证失败：{_truncate_error(summary)}",
+            "responseTime": _elapsed_ms(start),
+        }
     except (
         GraphRecursionError,
         StructuredOutputError,
-        ValidationError,
         TypeError,
         ValueError,
     ) as exc:

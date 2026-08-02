@@ -22,6 +22,7 @@ PROTECTED_REQUESTS = [
     ("GET", f"{BASE}/deepseek-chat/stats"),
     ("GET", f"{BASE}/grading-structurer/config"),
     ("PUT", f"{BASE}/grading-structurer/config"),
+    ("POST", f"{BASE}/deepseek/test-structured-output"),
 ]
 
 

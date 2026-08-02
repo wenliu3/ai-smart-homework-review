@@ -248,8 +248,10 @@ def test_structurer_capability_test_failure_summary_not_raw(
     assert data["message"]
     assert isinstance(data.get("responseTime"), int)
     assert "RAW_GARBAGE_001" not in resp.text
+    assert "RAW_GARBAGE_00" not in resp.text  # 截断后也不得泄露原始输出
     assert "RAW_SECRET_002" not in resp.text
     assert "structured_response" not in resp.text
+    assert "input_value=" not in resp.text  # pydantic 错误不得带 input 字段
 
 
 def test_structurer_capability_test_failure_keeps_binding(
