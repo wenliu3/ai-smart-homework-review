@@ -139,7 +139,9 @@ class ModelGateway:
             params["timeout"] = timeout
         thinking_kwargs = _deepseek_thinking_kwargs(config)
         if thinking_kwargs:
-            params["model_kwargs"] = thinking_kwargs
+            # 自定义 API 参数必须走 extra_body：model_kwargs 会被展开成请求参数，
+            # 而 extra_body 才会作为请求体字段发给服务端（langchain-openai 约定）。
+            params["extra_body"] = thinking_kwargs
         return init_chat_model(
             model=f"openai:{config.model_name}",
             api_key=config.api_key,
