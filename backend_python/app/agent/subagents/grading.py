@@ -33,8 +33,10 @@ from .messages import collect_invoke_usage, merge_usage
 
 # 直接结构化路径的预算余量守卫（秒）：进入 Agent 前/返回后都要求剩余不少于此值
 MIN_GRADING_BUDGET_SECONDS = 5
-# 直接结构化路径的底层模型调用上限：recursion_limit 收口值，也是测试断言基准
-MAX_STRUCTURED_CALLS = 2
+# 直接结构化路径的底层模型调用上限：recursion_limit 收口值，也是测试断言基准。
+# 2 对"模型一次成功产出"够用，但 AI 在复杂作业上常需先尝试工具调用再重试，
+# 2 步会过早截断导致整次批改降级转人工。提到 5 给足重试空间，同时仍限制无限自循环。
+MAX_STRUCTURED_CALLS = 5
 
 
 def _consume_model_call(budget) -> None:
