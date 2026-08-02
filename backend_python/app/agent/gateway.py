@@ -20,12 +20,17 @@ logger = logging.getLogger(__name__)
 
 MODEL_NOT_CONFIGURED_CODE = 10016
 
+# 批改主批改/复核每次底层请求的请求超时（秒）：按 code 显式路由时，
+# 不再沿用 VISION_GRADER/REVIEWER 的 120/40 秒长超时。
+GRADING_LLM_TIMEOUT = 35
+
 # 能力档位参数（规格 11.2）：初期共用默认物理模型，参数按档位隔离
 PROFILE_SETTINGS: dict[ModelProfile, dict] = {
     ModelProfile.ROUTER: {"temperature": 0.1, "max_tokens": 500, "timeout": 15},
     ModelProfile.GENERAL: {"temperature": 0.3, "max_tokens": 2000, "timeout": 40},
     ModelProfile.VISION_GRADER: {"temperature": 0.2, "max_tokens": 4000, "timeout": 120},
     ModelProfile.REVIEWER: {"temperature": 0.1, "max_tokens": 2000, "timeout": 40},
+    ModelProfile.GRADING_STRUCTURER: {"temperature": 0.0, "max_tokens": 4000, "timeout": 20},
 }
 
 
@@ -36,6 +41,30 @@ def mask_secret(value: str | None) -> str:
     if len(value) <= 8:
         return "****"
     return f"{value[:4]}****{value[-4:]}"
+
+
+def get_config_by_code(db: Session, model_code: str, profile: ModelProfile) -> AiModel:
+    """按 AI 规则模型 code 精确获取激活配置。
+
+    只认 status=="active" 且 code 精确匹配的模型；不存在、未激活或
+    未配置 API Key 均抛 BizException(10016)。**绝不回退默认模型**——
+    独立结构化链路绑定了哪个模型就用哪个，绑定失效立即失败而不是悄悄换模型。
+    """
+    config = db.query(AiModel).filter(
+        AiModel.status == "active",
+        AiModel.code == model_code,
+    ).first()
+    if not config:
+        raise BizException(
+            MODEL_NOT_CONFIGURED_CODE,
+            f"未找到启用状态下的 AI 规则模型「{model_code}」（档位 {profile.value}），请先在系统中配置并启用该模型",
+        )
+    if not (config.api_key or "").strip():
+        raise BizException(
+            MODEL_NOT_CONFIGURED_CODE,
+            f"AI 规则模型「{config.name}」未配置 API Key",
+        )
+    return config
 
 
 class ModelGateway:
@@ -102,14 +131,57 @@ class ModelGateway:
                 max_retries=1,
                 **PROFILE_SETTINGS[profile],
             )
-            # 淘汰同 profile 下配置过期的条目；不同 profile 允许共存
-            stale = [k for k in self._cache if k[0] == profile.value and k != key]
+            # 淘汰同 profile 下配置过期的条目；不同 profile 允许共存。
+            # 只清理本方法产生的普通条目（键不含 "explicit" 哨兵），
+            # 不误删 get_chat_model_by_code 的按 code 显式条目。
+            stale = [k for k in self._cache if k[-1] != "explicit" and k[0] == profile.value and k != key]
             for k in stale:
                 del self._cache[k]
             self._cache[key] = llm
             logger.info(
                 "ChatModel 已创建: profile=%s model=%s",
                 profile.value,
+                config.model_name,
+            )
+            return llm
+
+    def get_chat_model_by_code(
+        self, db: Session, *, model_code: str, profile: ModelProfile, prompt_version: str = "v1",
+    ) -> BaseChatModel:
+        """按 AI 规则模型 code 显式路由创建并缓存 ChatModel。
+
+        与 get_chat_model 不同：这里严格按 code 取激活配置，不参与默认模型链，
+        配置不存在/未激活/无 Key 时抛 10016 而**不回退默认模型**。
+        缓存键在既有四元组后追加 "explicit" 哨兵，与 get_chat_model 的普通条目
+        相互隔离；淘汰时也只清理同 profile 下的显式条目。
+        """
+        config = get_config_by_code(db, model_code, profile)
+        key = (profile.value, config.id, config.updated_at, prompt_version, "explicit")
+        with self._lock:
+            cached = self._cache.get(key)
+            if cached is not None:
+                return cached
+            params = dict(PROFILE_SETTINGS[profile])
+            if profile in (ModelProfile.VISION_GRADER, ModelProfile.REVIEWER):
+                # 批改主/复核按 code 路由时不再用 120/40 秒长超时，统一收口
+                params["timeout"] = GRADING_LLM_TIMEOUT
+            llm = init_chat_model(
+                model=f"openai:{config.model_name}",
+                api_key=config.api_key,
+                base_url=config.base_url,
+                # 瞬时错误（连接错误/429）同模型重试一次（规划 4.2）
+                max_retries=1,
+                **params,
+            )
+            # 只淘汰同 profile 下的按 code 显式条目（键带 "explicit" 哨兵），
+            # 保证不误删 get_chat_model 的普通条目；不同 code/档位允许共存。
+            stale = [k for k in self._cache if k[-1] == "explicit" and k[0] == profile.value and k != key]
+            for k in stale:
+                del self._cache[k]
+            self._cache[key] = llm
+            logger.info(
+                "ChatModel 已创建(按 code): code=%s model=%s",
+                model_code,
                 config.model_name,
             )
             return llm

@@ -24,7 +24,7 @@ from .contracts import (
     SpecialistResponse,
     TeacherActionResponse,
 )
-from .gateway import model_gateway as _default_gateway
+from .gateway import get_config_by_code, model_gateway as _default_gateway
 from .tools.common import ALL_TOOLS, TeacherContext
 from .tools.teacher import STRUCTURED_TOOLS
 from .tools.student import STUDENT_TOOLS, StudentContext
@@ -505,6 +505,51 @@ class AgentRegistry:
             )
             # 淘汰同 agent_name 下过期的缓存条目
             stale = [k for k in self._cache if k[0] == agent_name and k != cache_key]
+            for k in stale:
+                del self._cache[k]
+            self._cache[cache_key] = agent
+            return agent
+
+    def get_grading_agent(
+        self, db: Session, *, model_code: str, reviewer: bool, structured: bool,
+    ):
+        """按 AI 规则模型 code 构建批改/复核 Agent（独立结构化直接路径）。
+
+        - reviewer=True：复核 Prompt（grading_review_specialist）+ REVIEWER 档位；
+          reviewer=False：主批改 Prompt（grading_specialist）+ VISION_GRADER 档位。
+        - structured 决定是否传 GradingDraft 作为 response_format。
+        - 模型经网关 get_chat_model_by_code 严格按 code 路由，绝不回退默认模型。
+
+        缓存键含 model_code/reviewer/structured 与配置缓存键，独立于
+        get_specialist 的键；淘汰逻辑只作用于本方法产生的条目（k[1] 为 model_code）。
+        """
+        prompt = get_prompt("grading_review_specialist" if reviewer else "grading_specialist")
+        profile = ModelProfile.REVIEWER if reviewer else ModelProfile.VISION_GRADER
+        config = get_config_by_code(db, model_code, profile)
+        model_cache_key = (profile.value, config.id, config.updated_at, prompt.version)
+        cache_key = ("grading", model_code, reviewer, structured, model_cache_key, prompt.version)
+
+        with self._lock:
+            cached = self._cache.get(cache_key)
+            if cached is not None:
+                return cached
+            llm = self._model_gateway.get_chat_model_by_code(
+                db,
+                model_code=model_code,
+                profile=profile,
+                prompt_version=prompt.version,
+            )
+            agent = self._agent_factory(
+                model=llm,
+                tools=[],
+                system_prompt=prompt.content,
+                context_schema=None,
+                response_format=GradingDraft if structured else None,
+                middleware=[tool_budget_middleware],
+            )
+            # 淘汰同 model_code 下过期的按 code 批改 Agent 条目；
+            # 与 get_specialist 的 (agent_name, ...) 键不冲突（k[1] 是字符串 code）。
+            stale = [k for k in self._cache if k[0] == "grading" and k[1] == model_code and k != cache_key]
             for k in stale:
                 del self._cache[k]
             self._cache[cache_key] = agent
