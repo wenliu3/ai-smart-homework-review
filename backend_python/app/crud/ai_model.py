@@ -16,6 +16,26 @@ _SECRET_COLUMNS = ("api_key", "access_key", "secret_key")
 # 独立结构化模型绑定相关：复用网关统一错误码
 MODEL_NOT_CONFIGURED_CODE = 10016
 
+# 能力测试固定 Prompt：不含任何学生/作业/证据数据，仅用于验证结构化输出能力
+_STRUCTURED_CAPABILITY_PROMPT = (
+    "结构化输出能力测试（占位素材，非真实批改内容）：\n"
+    "主批改报告：内容完整，依据充分。\n"
+    "独立复核报告：内容较完整，个别依据不足。\n"
+    "请按 GradingReportPair 结构返回主批改与独立复核两份占位草案。"
+)
+
+
+def _elapsed_ms(start: float) -> int:
+    return round((time.time() - start) * 1000)
+
+
+def _truncate_error(text: str, limit: int = 160) -> str:
+    """截断错误摘要：能力测试失败时绝不把模型原始输出整段回传给客户端。"""
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "…"
+
 # /active 端点（教师可访问）只返回的非敏感字段（camelCase）
 _ACTIVE_PUBLIC_FIELDS = ("code", "name", "provider", "modelName", "status", "isDefault")
 
@@ -177,6 +197,80 @@ def get_grading_structurer_binding(db: Session) -> dict:
         "enabled": True,
         "modelCode": model.code,
         "model": _to_public_dict(model),
+    }
+
+
+def test_structured_output(db: Session, code: str) -> dict:
+    """结构化输出能力测试：验证所选模型能否输出 GradingReportPair。
+
+    - 只用管理员选中的模型（不读取任何学生/作业数据）；固定无业务数据 Prompt，
+      同一 GradingReportPair Schema，recursion_limit=2。
+    - 成功返回 success=true；任何失败（模型异常/输出非法/超时等）都返回
+      success=false + 截断错误摘要，绝不含模型原始输出。
+    - 不读写结构化绑定状态：能力测试不影响 get/set 绑定。
+    """
+    model = db.query(AiModel).filter(AiModel.code == code).first()
+    if not model:
+        raise NotFoundException(10015, "模型不存在")
+    if model.status != "active":
+        return {
+            "success": False,
+            "modelCode": code,
+            "message": "模型未启用，无法进行结构化输出能力测试",
+            "responseTime": 0,
+        }
+    if not (model.api_key or "").strip():
+        return {
+            "success": False,
+            "modelCode": code,
+            "message": "模型未配置 API Key，无法进行结构化输出能力测试",
+            "responseTime": 0,
+        }
+
+    # 延迟导入：避免 crud 与 agent 包形成模块级循环依赖（agent.service 会反向 import crud）
+    from ..agent.contracts import GradingReportPair
+    from ..agent.registry import agent_registry
+    from langchain.agents.structured_output import StructuredOutputError
+    from langchain_core.messages import HumanMessage
+    from langgraph.errors import GraphRecursionError
+    from pydantic import ValidationError
+
+    agent = agent_registry.get_structurer_agent(db, model_code=code)
+    messages = [HumanMessage(content=_STRUCTURED_CAPABILITY_PROMPT)]
+    start = time.time()
+    try:
+        result = agent.invoke(
+            {"messages": messages},
+            config={"recursion_limit": 2},
+        )
+        raw = result.get("structured_response") if isinstance(result, dict) else None
+        GradingReportPair.model_validate(raw, strict=True)
+    except (
+        GraphRecursionError,
+        StructuredOutputError,
+        ValidationError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        return {
+            "success": False,
+            "modelCode": code,
+            "message": f"结构化输出能力验证失败：{_truncate_error(str(exc))}",
+            "responseTime": _elapsed_ms(start),
+        }
+    except Exception as exc:  # 兜底：任何异常都归为失败，绝不出原始输出
+        logger.error(f"结构化输出能力测试异常 [{code}]: {exc}")
+        return {
+            "success": False,
+            "modelCode": code,
+            "message": f"结构化输出能力验证失败：{_truncate_error(str(exc))}",
+            "responseTime": _elapsed_ms(start),
+        }
+    return {
+        "success": True,
+        "modelCode": code,
+        "message": "结构化输出能力验证通过",
+        "responseTime": _elapsed_ms(start),
     }
 
 

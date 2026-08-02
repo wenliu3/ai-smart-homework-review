@@ -20,6 +20,84 @@
       </div>
     </div>
 
+    <!-- 独立结构化模型配置卡片（任务 9） -->
+    <div class="structurer-card mb-6">
+      <div class="structurer-card-header">
+        <div class="structurer-card-title">
+          <h3 class="text-lg font-semibold mb-0">独立结构化模型</h3>
+          <p class="text-gray-500 mt-1 text-sm">
+            开启后由管理员指定的模型将两份普通批改报告统一整理为可校验的结构化结果。启用前必须先通过结构化输出能力测试。
+          </p>
+        </div>
+        <label class="structurer-switch">
+          <input
+            type="checkbox"
+            data-testid="structurer-enabled"
+            v-model="structurerEnabled"
+          />
+          <span class="structurer-switch-text">{{
+            structurerEnabled ? "已启用" : "已关闭"
+          }}</span>
+        </label>
+      </div>
+
+      <div v-if="structurerEnabled" class="structurer-body">
+        <div class="structurer-row">
+          <label class="structurer-label" for="structurer-model-select"
+            >结构化模型</label
+          >
+          <select
+            id="structurer-model-select"
+            data-testid="structurer-model-select"
+            v-model="structurerModelCode"
+            class="structurer-select"
+          >
+            <option :value="null" disabled>请选择模型</option>
+            <option v-for="m in activeModels" :key="m.code" :value="m.code">
+              {{ m.name }}（{{ m.code }}）
+            </option>
+          </select>
+          <el-button
+            class="ml-2"
+            data-testid="structurer-test"
+            size="small"
+            :disabled="!structurerModelCode"
+            :loading="structurerTesting"
+            @click="runStructurerCapabilityTest"
+          >
+            能力测试
+          </el-button>
+        </div>
+
+        <div
+          v-if="structurerTestState"
+          class="structurer-test-status"
+          :class="structurerTestState.success ? 'is-success' : 'is-error'"
+        >
+          {{ structurerTestState.message }}
+        </div>
+
+        <p v-if="selectedModelNeedsKey" class="structurer-hint">
+          该模型未配置 API Key，请先到下方「{{ selectedActiveModel?.name }}」标签页配置密钥后再测试。
+        </p>
+      </div>
+
+      <div class="structurer-footer">
+        <div v-if="structurerError" class="structurer-error mb-2">
+          {{ structurerError }}
+        </div>
+        <el-button
+          type="primary"
+          data-testid="structurer-save"
+          :disabled="!canSaveStructurer"
+          :loading="structurerSaving"
+          @click="saveGradingStructurerConfig"
+        >
+          保存配置
+        </el-button>
+      </div>
+    </div>
+
     <!-- 模型配置标签页 -->
     <el-tabs
       v-model="activeTab"
@@ -395,6 +473,22 @@ const savingBasic = ref(false);
 const balanceLoading = reactive({ deepseek: false, mimo: false });
 const testLoading = reactive({ deepseek: false, mimo: false });
 
+// 独立结构化模型绑定（任务 9）
+const structurerEnabled = ref(false);
+const structurerModelCode = ref<string | null>(null);
+const activeModels = ref<AiModel[]>([]);
+const structurerTesting = ref(false);
+const structurerSaving = ref(false);
+const structurerError = ref("");
+const structurerTestState = ref<{ success: boolean; message: string } | null>(
+  null
+);
+// 能力测试通过标记：仅当模型 code 与 updatedAt 均未变化时有效
+const structurerTestPassedFor = ref<{
+  code: string;
+  updatedAt: string | null;
+} | null>(null);
+
 const deepseekModel = ref<AiModel | null>(null);
 const mimoModel = ref<AiModel | null>(null);
 const deepseekBalance = ref<ModelBalance | null>(null);
@@ -442,6 +536,37 @@ const currentForm = computed(() => {
   return activeTab.value === "deepseek" ? deepseekForm : mimoForm;
 });
 
+// 结构化模型卡片计算属性（任务 9）
+const selectedActiveModel = computed<AiModel | null>(() => {
+  const code = structurerModelCode.value;
+  if (!code) return null;
+  return activeModels.value.find((m) => m.code === code) ?? null;
+});
+
+const selectedModelNeedsKey = computed(() => {
+  const model = selectedActiveModel.value;
+  return !!model && !(model.apiKey || "").trim();
+});
+
+const isStructurerTestValid = computed(() => {
+  const model = selectedActiveModel.value;
+  if (!model) return false;
+  const passed = structurerTestPassedFor.value;
+  return (
+    !!passed &&
+    passed.code === model.code &&
+    passed.updatedAt === (model.updatedAt ?? null)
+  );
+});
+
+const canSaveStructurer = computed(() => {
+  // 关闭时无需选择模型
+  if (!structurerEnabled.value) return true;
+  // 开启时：必须选择模型且通过能力测试
+  if (!structurerModelCode.value) return false;
+  return isStructurerTestValid.value;
+});
+
 // 方法
 const loadModelData = async () => {
   loading.value = true;
@@ -474,6 +599,9 @@ const loadModelData = async () => {
       mimoBasicForm.baseUrl = mimo.baseUrl;
     }
 
+    // 结构化模型下拉候选：仅 active 模型
+    activeModels.value = response.models.filter((m) => m.status === "active");
+
     // 加载余额信息
     await loadBalances();
   } catch (error) {
@@ -500,6 +628,84 @@ const loadBalances = async () => {
     }
   } catch (error) {
     console.error("加载余额失败:", error);
+  }
+};
+
+// 独立结构化模型配置（任务 9）
+const loadGradingStructurerConfig = async () => {
+  try {
+    const config = await aiModelApi.getGradingStructurerConfig();
+    structurerEnabled.value = config.enabled;
+    structurerModelCode.value = config.modelCode;
+    // 本会话尚未通过能力测试，禁止直接保存启用态
+    structurerTestPassedFor.value = null;
+    structurerTestState.value = null;
+  } catch (error: any) {
+    console.error("加载独立结构化模型配置失败:", error);
+  }
+};
+
+const runStructurerCapabilityTest = async () => {
+  const code = structurerModelCode.value;
+  if (!code) return;
+  structurerTesting.value = true;
+  structurerError.value = "";
+  try {
+    const result = await aiModelApi.testStructuredOutput(code);
+    structurerTestState.value = result;
+    if (result.success) {
+      const model = activeModels.value.find((m) => m.code === code) ?? null;
+      structurerTestPassedFor.value = model
+        ? { code: model.code, updatedAt: model.updatedAt ?? null }
+        : { code, updatedAt: null };
+      ElMessage.success(result.message || "结构化输出能力验证通过");
+    } else {
+      structurerTestPassedFor.value = null;
+      ElMessage.error(result.message || "结构化输出能力验证失败");
+    }
+  } catch (error: any) {
+    structurerTestPassedFor.value = null;
+    structurerError.value = error?.message || "能力测试失败，请检查模型配置";
+    ElMessage.error(structurerError.value);
+  } finally {
+    structurerTesting.value = false;
+  }
+};
+
+const saveGradingStructurerConfig = async () => {
+  structurerSaving.value = true;
+  structurerError.value = "";
+  const previous = {
+    enabled: structurerEnabled.value,
+    modelCode: structurerModelCode.value,
+  };
+  try {
+    const config = await aiModelApi.updateGradingStructurerConfig({
+      enabled: structurerEnabled.value,
+      modelCode: structurerEnabled.value ? structurerModelCode.value : null,
+    });
+    structurerEnabled.value = config.enabled;
+    structurerModelCode.value = config.modelCode;
+    // 配置已变更，能力测试通过标记失效
+    structurerTestPassedFor.value = null;
+    structurerTestState.value = null;
+    ElMessage.success("独立结构化模型配置已保存");
+  } catch (error: any) {
+    try {
+      // 保存失败：恢复服务端状态
+      const server = await aiModelApi.getGradingStructurerConfig();
+      structurerEnabled.value = server.enabled;
+      structurerModelCode.value = server.modelCode;
+    } catch {
+      // 服务端拉取失败时回退到保存前的本地选择
+      structurerEnabled.value = previous.enabled;
+      structurerModelCode.value = previous.modelCode;
+    }
+    structurerTestPassedFor.value = null;
+    structurerError.value = error?.message || "保存失败，请重试";
+    ElMessage.error(structurerError.value);
+  } finally {
+    structurerSaving.value = false;
   }
 };
 
@@ -701,6 +907,7 @@ const formatDate = (date: Date | string | undefined) => {
 // 生命周期
 onMounted(() => {
   loadModelData();
+  loadGradingStructurerConfig();
 });
 
 // 定时刷新数据（每30秒）
@@ -758,6 +965,106 @@ onUnmounted(() => {
 
 .model-tabs {
   margin-top: 20px;
+}
+
+/* 独立结构化模型配置卡片（任务 9） */
+.structurer-card {
+  background: #fafafa;
+  border: 1px solid #e4e7ed;
+  border-radius: 6px;
+  padding: 16px;
+}
+
+.structurer-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.structurer-card-title {
+  flex: 1;
+}
+
+.structurer-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.structurer-switch input {
+  width: 36px;
+  height: 20px;
+  cursor: pointer;
+  accent-color: #409eff;
+}
+
+.structurer-switch-text {
+  font-size: 14px;
+  color: #606266;
+}
+
+.structurer-body {
+  margin-top: 16px;
+  border-top: 1px dashed #e4e7ed;
+  padding-top: 16px;
+}
+
+.structurer-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.structurer-label {
+  font-size: 14px;
+  color: #606266;
+  white-space: nowrap;
+}
+
+.structurer-select {
+  min-width: 220px;
+  height: 28px;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  padding: 0 8px;
+  color: #303133;
+  background: #fff;
+  outline: none;
+}
+
+.structurer-test-status {
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+.structurer-test-status.is-success {
+  color: #67c23a;
+}
+
+.structurer-test-status.is-error {
+  color: #f56c6c;
+}
+
+.structurer-hint {
+  margin-top: 10px;
+  font-size: 13px;
+  color: #e6a23c;
+}
+
+.structurer-error {
+  font-size: 13px;
+  color: #f56c6c;
+}
+
+.structurer-footer {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
 }
 
 .model-config-form {

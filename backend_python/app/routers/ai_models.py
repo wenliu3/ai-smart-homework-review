@@ -46,6 +46,12 @@ def update_grading_structurer_config(body: GradingStructurerBindingUpdate, curre
     return ok(ai_model_crud.set_grading_structurer_binding(db, enabled=body.enabled, model_code=body.modelCode))
 
 
+@router.post("/admin/ai-models/{code}/test-structured-output")
+def test_structured_output(code: str, current_user: User = Depends(require_roles("superadmin")), db: Session = Depends(get_db)):
+    """结构化输出能力测试 — 只用所选模型 + 固定无业务数据 Prompt，返回 success/摘要，绝不含原始输出"""
+    return ok(ai_model_crud.test_structured_output(db, code))
+
+
 @router.get("/admin/ai-models/{code}")
 def get_detail(code: str, current_user: User = Depends(require_roles("superadmin")), db: Session = Depends(get_db)):
     """根据 code 查询单个 AI 模型配置（密钥脱敏）"""
