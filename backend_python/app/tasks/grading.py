@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from ..agent.graphs.grading import build_grading_graph
 from ..agent.runtime import BudgetExceeded, grading_run_budget
-from ..agent.subagents import grading, grading_review
+from ..agent.subagents import grading, grading_review, grading_structurer
 from ..agent.tools.content import (
     extract_reference_materials,
     normalize_submission_content,
@@ -18,17 +18,26 @@ from ..agent.tools.content import (
 from ..assistant_database import AssistantSessionLocal
 from ..agent.contracts import (
     AGENT_GRADING_TIMEOUT,
+    AGENT_RULE_MODEL_NOT_CONFIGURED,
     GradingRubric,
     RubricCriterion,
 )
 from ..config import settings
+from ..core.exceptions import BizException
 from ..crud import agent_run, agent_session
+from ..crud import ai_model as ai_model_crud
 from ..crud.submission import (
     apply_ai_grading_result,
     mark_submission_needs_manual_grading,
 )
 from ..database import SessionLocal
-from ..models import AgentRun, AgentSession, Assignment, Submission
+from ..models import (
+    AgentRun,
+    AgentSession,
+    AiModel,
+    Assignment,
+    Submission,
+)
 from .celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -217,27 +226,104 @@ def _record_grading_run_id(
     business_db.commit()
 
 
-def _record_grading_model_usage(business_db: Session, graph_result: dict) -> None:
-    """批改运行的模型用量累加（尽力而为，失败不影响批改结果）。"""
-    usage = graph_result.get("usage") or {}
-    calls = getattr(
-        graph_result.get("runtime_budget"), "model_call_count", 0,
-    ) or (1 if usage else 0)
-    if not usage and calls <= 0:
-        return
-    try:
-        from ..agent.gateway import model_gateway
-        from ..crud import ai_model as ai_model_crud
+class GradingRoutingError(Exception):
+    """任务层受控失败：批改运行配置无效，需以稳定错误码标记 run。
 
-        config = model_gateway.get_default_config(business_db)
-        ai_model_crud.increment_usage(
-            business_db,
-            model_id=config.id,
-            calls=calls,
-            tokens=int(usage.get("total_tokens", 0)),
+    覆盖「作业未配置规则模型」与「独立结构化绑定损坏」两类配置错误；
+    code 为 contracts 里的稳定错误码（如 AGENT_RULE_MODEL_NOT_CONFIGURED），
+    由 execute_grading_job 的 except 分支写到 run.error_code。
+    """
+
+    def __init__(self, code: str, message: str):
+        self.code = code
+        self.message = message
+        super().__init__(message)
+
+
+def _validate_structurer_binding(business_db: Session, model_code: str | None) -> None:
+    """模型调用前校验独立结构化绑定有效：模型存在、启用且已配置 Key。
+
+    绑定来自 get_grading_structurer_binding（只回 active 模型），此处防御性
+    复检：宁可让任务以稳定错误码受控失败，也不走到图里的模型调用才发现
+    配置损坏。校验失败抛 GradingRoutingError。
+    """
+    if not model_code:
+        raise GradingRoutingError(
+            AGENT_RULE_MODEL_NOT_CONFIGURED,
+            "独立结构化路径已开启，但未绑定结构化模型",
         )
-    except Exception:
-        logger.warning("批改模型用量统计写入失败", exc_info=True)
+    try:
+        from ..agent.contracts import ModelProfile
+        from ..agent.gateway import get_config_by_code
+
+        get_config_by_code(
+            business_db,
+            model_code,
+            ModelProfile.GRADING_STRUCTURER,
+        )
+    except BizException as exc:
+        raise GradingRoutingError(
+            AGENT_RULE_MODEL_NOT_CONFIGURED,
+            f"独立结构化模型绑定无效：{exc.message}",
+        ) from exc
+
+
+def _grading_routing_config(business_db: Session, assignment: Assignment) -> dict:
+    """构造批改链路的显式运行配置：规则模型 + 可选独立结构化绑定。
+
+    规则模型 code 只来自作业快照 ai_rule.modelType，**绝不回退默认模型**；
+    缺少时抛 GradingRoutingError（稳定错误码 AGENT_RULE_MODEL_NOT_CONFIGURED）。
+    独立结构化绑定读管理员配置，开启时在模型调用前复检绑定有效性。
+    """
+    ai_rule = assignment.ai_rule or {}
+    rule_model_code = str(ai_rule.get("modelType") or "").strip()
+    if not rule_model_code:
+        raise GradingRoutingError(
+            AGENT_RULE_MODEL_NOT_CONFIGURED,
+            "作业 AI 规则未配置规则模型（modelType），无法发起批改",
+        )
+    binding = ai_model_crud.get_grading_structurer_binding(business_db)
+    structurer_enabled = bool(binding.get("enabled"))
+    structurer_model_code = binding.get("modelCode")
+    if structurer_enabled:
+        _validate_structurer_binding(business_db, structurer_model_code)
+    return {
+        "rule_model_code": rule_model_code,
+        "rule_prompt": str(ai_rule.get("prompt") or "").strip(),
+        "structurer_enabled": structurer_enabled,
+        "structurer_model_code": structurer_model_code,
+    }
+
+
+def _record_grading_model_usage(business_db: Session, graph_result: dict) -> None:
+    """批改运行的模型用量按实际 model code 分别累计（尽力而为，失败不影响批改结果）。
+
+    图状态 model_usage 形如 {code: {"calls": N, "total_tokens": T}}，逐项按 code
+    查模型 id 后原子自增；找不到对应模型时跳过该项并记 warning，绝不回退默认
+    模型、绝不阻塞批改结果。
+    """
+    model_usage = graph_result.get("model_usage") or {}
+    if not model_usage:
+        return
+    for code, stats in model_usage.items():
+        try:
+            model = business_db.query(AiModel).filter(
+                AiModel.code == code,
+            ).first()
+            if model is None:
+                logger.warning(
+                    "批改用量引用的模型 code 不存在，跳过累计: %s",
+                    code,
+                )
+                continue
+            ai_model_crud.increment_usage(
+                business_db,
+                model_id=model.id,
+                calls=int(stats.get("calls", 0)),
+                tokens=int(stats.get("total_tokens", 0)),
+            )
+        except Exception:
+            logger.warning("批改模型用量统计写入失败 code=%s", code, exc_info=True)
 
 
 def build_grading_state(
@@ -245,9 +331,24 @@ def build_grading_state(
     assignment: Assignment,
     rubric: GradingRubric,
     upload_dir=None,
+    routing: dict | None = None,
 ) -> dict:
-    """构造批改图初始状态：作业要求 + 参考资料 + 预算（规划 3B.1 / 3B.2）。"""
+    """构造批改图初始状态：作业要求 + 参考资料 + 预算 + 显式路由配置。
+
+    routing 由任务层（_grading_routing_config）注入，包含 rule_model_code /
+    rule_prompt / structurer_enabled / structurer_model_code。未提供时（无 db
+    上下文的单元测试）保守取 ai_rule 里的规则模型与规则文本，结构化路径默认
+    关闭，保证现有用例不因缺字段而崩。
+    """
     base = upload_dir if upload_dir is not None else settings.upload_path
+    if routing is None:
+        ai_rule = assignment.ai_rule or {}
+        routing = {
+            "rule_model_code": str(ai_rule.get("modelType") or "").strip(),
+            "rule_prompt": str(ai_rule.get("prompt") or "").strip(),
+            "structurer_enabled": False,
+            "structurer_model_code": None,
+        }
     return {
         "submission_id": submission.id,
         "submission_count": submission.submission_count,
@@ -258,6 +359,10 @@ def build_grading_state(
             base,
         ),
         "runtime_budget": grading_run_budget(),
+        "rule_model_code": routing["rule_model_code"],
+        "rule_prompt": routing["rule_prompt"],
+        "structurer_enabled": routing["structurer_enabled"],
+        "structurer_model_code": routing["structurer_model_code"],
     }
 
 
@@ -276,12 +381,28 @@ def _run_production_workflow(
             ),
         }
 
+    # 显式运行配置一次计算：state 与 structurer_node 共用同一路由决策，
+    # 保证「structurer_enabled 置 True 的 run 一定带 structurer_node」的原子性，
+    # 避免 decide 因缺 grading_draft 而 KeyError。
+    routing = _grading_routing_config(business_db, assignment)
+    state = build_grading_state(
+        submission,
+        assignment,
+        rubric,
+        routing=routing,
+    )
+    structurer_node = (
+        grading_structurer.create_node(business_db)
+        if routing["structurer_enabled"]
+        else None
+    )
     graph = build_grading_graph(
         normalize_node,
         grading.create_node(business_db),
         grading_review.create_node(business_db),
+        structurer_node=structurer_node,
     )
-    return graph.invoke(build_grading_state(submission, assignment, rubric))
+    return graph.invoke(state)
 
 
 def execute_grading_job(
@@ -433,20 +554,55 @@ def execute_grading_job(
                 else "批改完成。"
             )
             status = "completed"
+        artifacts = [{
+            "artifact_type": "grading_outcome",
+            "schema_version": outcome.schema_version,
+            "payload": outcome.model_dump(mode="json"),
+        }]
+        # 仅开启路径：保留两份普通文本原始报告 + 各自模型 code 供审计。
+        # 报告由规则/结构化模型生成，payload 绝不写入 API Key / Base URL / 附件路径。
+        if (
+            graph_result.get("structurer_enabled")
+            and graph_result.get("grading_report")
+            and graph_result.get("review_report")
+        ):
+            artifacts.append({
+                "artifact_type": "grading_raw_reports",
+                "schema_version": "v1",
+                "payload": {
+                    "primary": graph_result["grading_report"],
+                    "review": graph_result["review_report"],
+                    "rule_model_code": graph_result.get("rule_model_code"),
+                    "structurer_model_code": graph_result.get("structurer_model_code"),
+                },
+            })
         agent_run.finalize_run(
             audit,
             run_id,
             user_id,
             final_output=final_output,
-            artifacts=[{
-                "artifact_type": "grading_outcome",
-                "schema_version": outcome.schema_version,
-                "payload": outcome.model_dump(mode="json"),
-            }],
+            artifacts=artifacts,
             usage=graph_result.get("usage") or None,
         )
         _record_grading_model_usage(biz, graph_result)
         return {"status": status, "run_id": run_id}
+    except GradingRoutingError as exc:
+        # 运行配置无效（缺规则模型 modelType / 独立结构化绑定损坏）：
+        # 模型调用前受控失败，用独立稳定错误码标记 run，不吞成 AGENT_GRADING_FAILED。
+        try:
+            existing = agent_run.get_run(audit, run_id, user_id)
+            if (
+                existing is not None
+                and existing.status in {"running", "processing"}
+            ):
+                agent_run.fail_run(
+                    audit,
+                    run_id,
+                    user_id,
+                    exc.code,
+                )
+        finally:
+            raise
     except SoftTimeLimitExceeded:
         # Celery 软超时：预算应先于它触发，走到这里说明 worker 卡死，
         # 用独立错误码标记以便与普通失败区分（运营排查队列拥塞）
@@ -515,6 +671,7 @@ def run_grading_task(
 
 
 __all__ = [
+    "GradingRoutingError",
     "build_grading_idempotency_key",
     "enqueue_grading_job",
     "execute_grading_job",

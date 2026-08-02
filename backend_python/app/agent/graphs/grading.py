@@ -26,6 +26,25 @@ def _accumulate_usage(left: dict, right: dict) -> dict:
     }
 
 
+def _accumulate_model_usage(left: dict, right: dict) -> dict:
+    """model_usage 通道 reducer：按 model_code 累加 calls 与 total_tokens。
+
+    每个节点把 {code: {"calls": N, "total_tokens": T}} 归入对应模型 code，
+    这里把同一 code 的多节点贡献合并成运行级单模型用量。
+    """
+    left = left or {}
+    right = right or {}
+    result: dict = {}
+    for code in {*left, *right}:
+        l = left.get(code) or {}
+        r = right.get(code) or {}
+        result[code] = {
+            "calls": int(l.get("calls", 0)) + int(r.get("calls", 0)),
+            "total_tokens": int(l.get("total_tokens", 0)) + int(r.get("total_tokens", 0)),
+        }
+    return result
+
+
 class GradingState(TypedDict, total=False):
     submission_id: int
     submission_count: int
@@ -51,6 +70,8 @@ class GradingState(TypedDict, total=False):
     grading_failure: dict
     outcome: GradingOutcome
     usage: Annotated[dict, _accumulate_usage]
+    # 按实际模型 code 拆分的运行级用量：{code: {"calls": N, "total_tokens": T}}
+    model_usage: Annotated[dict, _accumulate_model_usage]
     visited_nodes: list[str]
 
 

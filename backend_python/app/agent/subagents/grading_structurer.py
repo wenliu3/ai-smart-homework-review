@@ -27,6 +27,7 @@ from .grading import (
     _assert_remaining_budget,
     _consume_model_call,
     _grading_failure,
+    _model_usage_entry,
 )
 from .messages import collect_invoke_usage, merge_usage
 
@@ -88,6 +89,7 @@ def invoke_structurer(agent, state: dict) -> dict:
         return {
             **_grading_failure(GRADING_STRUCTURER_NODE, str(exc), ""),
             "usage": {},
+            **_model_usage_entry(state.get("structurer_model_code"), {}),
         }
     # 模型调用已返回：预算仍须有余量，否则中断而不是使用可能不完整的产出
     _assert_remaining_budget(budget, "结构化模型调用返回后剩余预算不足")
@@ -104,6 +106,7 @@ def invoke_structurer(agent, state: dict) -> dict:
         return {
             **_grading_failure(GRADING_STRUCTURER_NODE, str(exc), raw_response),
             "usage": total_usage,
+            **_model_usage_entry(state.get("structurer_model_code"), total_usage),
         }
     if pair.extraction_errors:
         return {
@@ -113,6 +116,7 @@ def invoke_structurer(agent, state: dict) -> dict:
                 raw_response,
             ),
             "usage": total_usage,
+            **_model_usage_entry(state.get("structurer_model_code"), total_usage),
         }
     try:
         pair.primary.validate_against(state["rubric"])
@@ -121,8 +125,13 @@ def invoke_structurer(agent, state: dict) -> dict:
         return {
             **_grading_failure(GRADING_STRUCTURER_NODE, str(exc), raw_response),
             "usage": total_usage,
+            **_model_usage_entry(state.get("structurer_model_code"), total_usage),
         }
-    return {"report_pair": pair, "usage": total_usage}
+    return {
+        "report_pair": pair,
+        "usage": total_usage,
+        **_model_usage_entry(state.get("structurer_model_code"), total_usage),
+    }
 
 
 def create_node(db, registry: AgentRegistry | None = None) -> Callable:

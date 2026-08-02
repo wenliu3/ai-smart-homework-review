@@ -135,7 +135,9 @@ def invoke_with_repair(
     last_error = ""
     raw_response = ""
     total_usage: dict = {}
+    calls = 0
     for _attempt in range(2):
+        calls += 1
         _consume_model_call(budget)
         result = agent.invoke({"messages": messages})
         total_usage = merge_usage(total_usage, collect_invoke_usage(result))
@@ -164,6 +166,11 @@ def invoke_with_repair(
         return {
             "review_draft" if reviewer else "grading_draft": draft,
             "usage": total_usage,
+            **_model_usage_entry(
+                state.get("rule_model_code"),
+                total_usage,
+                calls=calls,
+            ),
         }
     return {
         "grading_failure": {
@@ -172,6 +179,11 @@ def invoke_with_repair(
             "raw_response": raw_response[:4000],
         },
         "usage": total_usage,
+        **_model_usage_entry(
+            state.get("rule_model_code"),
+            total_usage,
+            calls=calls,
+        ),
     }
 
 
@@ -182,6 +194,30 @@ def _grading_failure(stage: str, error: str, raw_response: str) -> dict:
             "stage": stage,
             "error": error[:1000],
             "raw_response": raw_response[:4000],
+        },
+    }
+
+
+def _model_usage_entry(
+    code: str | None,
+    usage: dict | None,
+    *,
+    calls: int = 1,
+) -> dict:
+    """把一个节点的一次/多次模型调用归入对应 model code（model_usage 聚合）。
+
+    code 缺失（旧单元测试未带 rule_model_code/structurer_model_code）时返回空
+    字典，不产生用量条目也不抛异常。total_tokens 取本节点用量聚合的总量。
+    """
+    if not code:
+        return {}
+    tokens = int((usage or {}).get("total_tokens", 0))
+    return {
+        "model_usage": {
+            code: {
+                "calls": max(calls, 0),
+                "total_tokens": tokens,
+            },
         },
     }
 
@@ -220,6 +256,7 @@ def invoke_structured_grader(
         return {
             **_grading_failure(stage, str(exc), ""),
             "usage": {},
+            **_model_usage_entry(state.get("rule_model_code"), {}),
         }
     # 模型调用已返回：预算仍须有余量，否则中断而不是使用可能不完整的产出
     _assert_remaining_budget(budget, "模型调用返回后剩余预算不足")
@@ -238,10 +275,12 @@ def invoke_structured_grader(
         return {
             **_grading_failure(stage, str(exc), raw_response),
             "usage": total_usage,
+            **_model_usage_entry(state.get("rule_model_code"), total_usage),
         }
     return {
         "review_draft" if reviewer else "grading_draft": draft,
         "usage": total_usage,
+        **_model_usage_entry(state.get("rule_model_code"), total_usage),
     }
 
 
@@ -275,6 +314,7 @@ def invoke_plain_grader(
         return {
             **_grading_failure(stage, str(exc), ""),
             "usage": {},
+            **_model_usage_entry(state.get("rule_model_code"), {}),
         }
     # 模型调用已返回：预算仍须有余量，否则中断而不是使用可能不完整的产出
     _assert_remaining_budget(budget, "模型调用返回后剩余预算不足")
@@ -290,10 +330,12 @@ def invoke_plain_grader(
         return {
             **_grading_failure(stage, "批改模型未返回普通文本报告", ""),
             "usage": total_usage,
+            **_model_usage_entry(state.get("rule_model_code"), total_usage),
         }
     return {
         "grading_report" if not reviewer else "review_report": text,
         "usage": total_usage,
+        **_model_usage_entry(state.get("rule_model_code"), total_usage),
     }
 
 
