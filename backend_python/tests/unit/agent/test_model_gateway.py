@@ -126,3 +126,23 @@ def test_model_creation_log_never_contains_api_key_fragments(
 
     assert api_key[:4] not in caplog.text
     assert api_key[-4:] not in caplog.text
+
+
+def test_deepseek_v4_llm_disables_thinking_for_tool_choice(db, ai_model_factory):
+    """DeepSeek V4 默认 thinking 不支持强制 tool_choice，网关应自动关闭 thinking。"""
+    ai_model_factory(code="deepseek-v4-flash")
+    gw = ModelGateway()
+
+    llm = gw.get_chat_model(db, ModelProfile.GENERAL, prompt_version="v1")
+
+    assert (llm.model_kwargs or {}).get("thinking") == {"type": "disabled"}
+
+
+def test_non_v4_model_has_no_thinking_kwargs(db, ai_model_factory):
+    """非 DeepSeek V4 模型（如 deepseek-chat / mimo）不注入 thinking 参数。"""
+    ai_model_factory(code="deepseek-chat")
+    gw = ModelGateway()
+
+    llm = gw.get_chat_model(db, ModelProfile.GENERAL, prompt_version="v1")
+
+    assert "thinking" not in (llm.model_kwargs or {})

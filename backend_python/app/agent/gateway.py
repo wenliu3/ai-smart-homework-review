@@ -33,6 +33,20 @@ PROFILE_SETTINGS: dict[ModelProfile, dict] = {
     ModelProfile.GRADING_STRUCTURER: {"temperature": 0.0, "max_tokens": 4000, "timeout": 20},
 }
 
+# DeepSeek V4 系列默认开启 thinking 模式，而 thinking 模式不支持 LangChain 的
+# 强制 tool_choice（结构化输出必需），会返回 400 "Thinking mode does not support
+# this tool_choice"。关闭 thinking 后即可正常做工具调用式结构化输出。
+_DISABLE_THINKING_KWARGS = {"thinking": {"type": "disabled"}}
+
+
+def _deepseek_thinking_kwargs(config: AiModel) -> dict | None:
+    """DeepSeek V4 模型返回关闭 thinking 的 model_kwargs，其余模型返回 None。"""
+    provider = (config.provider or "").lower()
+    model_name = (config.model_name or "").lower()
+    if "deepseek" in provider and "v4" in model_name:
+        return _DISABLE_THINKING_KWARGS
+    return None
+
 
 def mask_secret(value: str | None) -> str:
     """密钥脱敏：保留首尾各 4 位；长度 <= 8 全掩码；空值返回空串。"""
@@ -123,6 +137,9 @@ class ModelGateway:
         params = dict(PROFILE_SETTINGS[profile])
         if timeout is not None:
             params["timeout"] = timeout
+        thinking_kwargs = _deepseek_thinking_kwargs(config)
+        if thinking_kwargs:
+            params["model_kwargs"] = thinking_kwargs
         return init_chat_model(
             model=f"openai:{config.model_name}",
             api_key=config.api_key,
