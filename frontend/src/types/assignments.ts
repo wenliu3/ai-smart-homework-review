@@ -11,6 +11,7 @@ export interface AiRuleSnapshot {
   name: string;
   modelType: string;
   prompt: string;
+  maxScore?: number;
   originalRuleId?: string;
   snapshotAt?: string;
 }

@@ -377,7 +377,10 @@ const loadAssignmentData = async () => {
       title: assignment.title,
       description: assignment.description,
       classes: assignment.classes.map((cls) => cls.id),
-      aiRule: assignment.aiRule,
+      // 旧快照未带 maxScore 时按 100 兼容，保证重新提交时满分不丢失
+      aiRule: assignment.aiRule
+        ? { ...assignment.aiRule, maxScore: assignment.aiRule.maxScore ?? 100 }
+        : null,
       startDate: moment(assignment.startDate).format("YYYY-MM-DD HH:mm:ss"),
       endDate: moment(assignment.endDate).format("YYYY-MM-DD HH:mm:ss"),
       allowAttachments: assignment.allowAttachments || false,
@@ -397,7 +400,10 @@ const buildAssignmentData = (includeStatus = false) => {
     title: formData.title,
     description: formData.description,
     classes: formData.classes,
-    aiRule: formData.aiRule,
+    // 提交 DTO 快照必须携带 maxScore，旧数据缺失时按 100 兼容
+    aiRule: formData.aiRule
+      ? { ...formData.aiRule, maxScore: formData.aiRule.maxScore ?? 100 }
+      : formData.aiRule,
     startDate: formData.startDate,
     endDate: formData.endDate,
     allowAttachments: formData.allowAttachments,

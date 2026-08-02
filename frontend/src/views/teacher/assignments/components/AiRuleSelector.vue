@@ -171,6 +171,7 @@ interface AiRuleItem {
   description?: string;
   modelType: string;
   prompt: string;
+  maxScore?: number;
   visibility: string;
   tags: string[];
 }
@@ -181,6 +182,7 @@ interface AiRuleSnapshot {
   name: string;
   modelType: string;
   prompt: string;
+  maxScore?: number;
 }
 
 interface Props {
@@ -251,6 +253,8 @@ const confirmRuleSelection = () => {
       name: selectedRule.name,
       modelType: selectedRule.modelType,
       prompt: selectedRule.prompt,
+      // 旧数据未带 maxScore 时按 100 兼容，保证批改量表满分不丢失
+      maxScore: selectedRule.maxScore ?? 100,
     };
     emit("update:modelValue", ruleSnapshot);
     showRuleSelector.value = false;

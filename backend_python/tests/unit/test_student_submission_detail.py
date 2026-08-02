@@ -216,6 +216,71 @@ def test_submit_without_attachments_still_works_when_teacher_disabled_them(
     assert result.attachments == []
 
 
+def test_get_my_submission_preserves_ai_rule_max_score_snapshot(
+    db, teacher, student,
+):
+    classroom = _grant_assignment_access(db, teacher, student)
+    ai_rule = {
+        "id": "9",
+        "name": "实验报告规则",
+        "modelType": "mimo",
+        "prompt": "按实验要求评分",
+        "maxScore": 60,
+    }
+    assignment = Assignment(
+        title="结构化批改作业",
+        teacher_id=teacher.id,
+        teacher_name=teacher.name,
+        classes=[{"id": str(classroom.id), "name": classroom.name}],
+        start_date=datetime.now() - timedelta(days=1),
+        end_date=datetime.now() + timedelta(days=1),
+        status="published",
+        ai_rule=ai_rule,
+    )
+    db.add(assignment)
+    db.commit()
+    db.refresh(assignment)
+
+    result = submission_crud.get_my_submission(
+        db, assignment_id=assignment.id, student_id=student.id,
+    )
+
+    assert result["assignment"]["aiRule"]["maxScore"] == 60
+    assert result["assignment"]["rawMaxScore"] == 60
+
+
+def test_get_my_submission_defaults_ai_rule_max_score_to_100(
+    db, teacher, student,
+):
+    classroom = _grant_assignment_access(db, teacher, student)
+    old_ai_rule = {
+        "id": "9",
+        "name": "实验报告规则",
+        "modelType": "mimo",
+        "prompt": "按实验要求评分",
+    }
+    assignment = Assignment(
+        title="旧数据作业",
+        teacher_id=teacher.id,
+        teacher_name=teacher.name,
+        classes=[{"id": str(classroom.id), "name": classroom.name}],
+        start_date=datetime.now() - timedelta(days=1),
+        end_date=datetime.now() + timedelta(days=1),
+        status="published",
+        ai_rule=old_ai_rule,
+    )
+    db.add(assignment)
+    db.commit()
+    db.refresh(assignment)
+
+    result = submission_crud.get_my_submission(
+        db, assignment_id=assignment.id, student_id=student.id,
+    )
+
+    assert result["assignment"]["aiRule"].get("maxScore", 100) == 100
+    assert result["assignment"]["rawMaxScore"] == 100
+
+
 def test_student_cannot_read_unpublished_assignment_even_with_membership(
     db, teacher, student,
 ):

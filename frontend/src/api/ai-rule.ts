@@ -7,6 +7,7 @@ export interface AiRule {
   description?: string;
   modelType: "deepseek" | "mimo";
   prompt: string;
+  maxScore?: number;
   status: "active" | "inactive";
   visibility: "private" | "public" | "system";
   tags: string[];
@@ -37,6 +38,7 @@ export interface CreateAiRuleDto {
   description?: string;
   modelType: "deepseek" | "mimo";
   prompt: string;
+  maxScore?: number;
   visibility?: "private" | "public" | "system";
   status?: "active" | "inactive";
   tags?: string[];
@@ -48,6 +50,7 @@ export interface UpdateAiRuleDto {
   description?: string;
   modelType?: "deepseek" | "mimo";
   prompt?: string;
+  maxScore?: number;
   visibility?: "private" | "public" | "system";
   status?: "active" | "inactive";
   tags?: string[];
@@ -161,6 +164,7 @@ export function getAvailableAiRules(status = "active") {
       description: string;
       modelType: string;
       prompt: string;
+      maxScore?: number;
       visibility: string;
       tags: string[];
     }>
