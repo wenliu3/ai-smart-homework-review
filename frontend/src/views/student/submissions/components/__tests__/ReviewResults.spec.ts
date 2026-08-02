@@ -151,6 +151,30 @@ describe("ReviewResults", () => {
     expect(cancelledWrapper.text()).not.toContain("AGENT_RUN_CANCELLED");
   });
 
+  it("批改 Run 已完成但无 AI/教师结果时显示等待人工批改（降级终态）", () => {
+    const wrapper = mountReview({
+      aiReview: null,
+      teacherReview: null,
+      submissionStatus: "submitted",
+      assignment: {
+        status: "published",
+        dueDate: "2099-08-05T18:00:00",
+        aiRule: { prompt: "请评分" },
+      },
+      gradingRun: {
+        status: "completed",
+        errorCode: null,
+        finalOutput: "AI 批改未通过结构化校验，已转教师人工批改。",
+      },
+      isPolling: false,
+    });
+
+    expect(wrapper.text()).toContain("等待教师人工批改");
+    expect(wrapper.text()).toContain("AI 批改未生成有效评分，教师批改后将在这里显示反馈");
+    expect(wrapper.text()).not.toContain("AI 智能评价中");
+    expect(wrapper.text()).not.toContain("暂未取得最终状态");
+  });
+
   it("轮询进行中仍显示 AI 智能评价中", () => {
     const wrapper = mountReview({
       aiReview: null,

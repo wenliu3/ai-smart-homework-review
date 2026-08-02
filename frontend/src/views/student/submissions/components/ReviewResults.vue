@@ -139,10 +139,23 @@
             </div>
           </div>
 
-          <!-- AI评价进行中 / 未取得终态 -->
+          <!-- AI评价进行中 / 降级转人工 / 未取得终态 -->
           <div v-else class="no-review-content">
             <div class="ai-empty-state">
-              <template v-if="isPolling">
+              <template v-if="runDegraded">
+                <div class="empty-description">
+                  <h4 class="text-gray-700 mb-2 text-lg">
+                    等待教师人工批改
+                  </h4>
+                  <p class="text-gray-500 mb-1">
+                    AI 批改已完成但未生成有效评分
+                  </p>
+                  <p class="text-gray-400 text-sm">
+                    教师批改后将在这里显示反馈
+                  </p>
+                </div>
+              </template>
+              <template v-else-if="isPolling">
                 <div class="ai-loading-container large">
                   <img
                     src="@/assets/image/ai_loading.gif"
@@ -353,15 +366,23 @@ const waitingForTeacherOnly = computed(
     !props.teacherReview
 );
 
-// 批改 Run 终态：failed/cancelled 均为真实终态，优先于进行中状态展示
+// 批改 Run 终态：failed/cancelled 为错误；completed 且无 AI/教师结果 = 受控降级转人工。
+// 均为真实终态，优先于进行中状态展示。
 const runFailed = computed(() => props.gradingRun?.status === "failed");
 const runCancelled = computed(() => props.gradingRun?.status === "cancelled");
+const runDegraded = computed(
+  () =>
+    props.gradingRun?.status === "completed" &&
+    !props.aiReview &&
+    !props.teacherReview
+);
 
-// 评价摘要标题（优先级：教师结果 > AI 结果 > Run 失败/取消 > 等待教师批改 > 进行中 > 未取得终态）
+// 评价摘要标题（优先级：教师结果 > AI 结果 > Run 失败/取消 > 降级转人工 > 等待教师批改 > 进行中 > 未取得终态）
 const overviewTitle = computed(() => {
   if (displayScore.value !== null) return "本次作业评价";
   if (runFailed.value) return "AI 批改失败";
   if (runCancelled.value) return "AI 批改已取消";
+  if (runDegraded.value) return "等待教师人工批改";
   if (waitingForTeacherOnly.value) return "等待教师批改";
   if (props.isPolling) return "评价进行中";
   // 轮询已停止且仍未取得结果：不再继续写“评价中”
@@ -374,6 +395,9 @@ const overviewSubtitle = computed(() => {
   }
   if (runFailed.value || runCancelled.value) {
     return "AI 批改出现问题，教师批改后将在这里显示反馈";
+  }
+  if (runDegraded.value) {
+    return "AI 批改未生成有效评分，教师批改后将在这里显示反馈";
   }
   if (waitingForTeacherOnly.value) {
     return "本作业未启用 AI 评价，教师批改后将在这里显示反馈";

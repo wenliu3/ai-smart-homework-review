@@ -9,6 +9,7 @@ import type {
   Submission,
 } from "@/api/submissions";
 import { getRun } from "@/api/assistant";
+import { ElMessage } from "element-plus";
 
 vi.mock("vue-router", () => ({
   useRoute: () => ({
@@ -23,6 +24,7 @@ vi.mock("element-plus", () => ({
     error: vi.fn(),
     success: vi.fn(),
     warning: vi.fn(),
+    info: vi.fn(),
   },
   ElMessageBox: { confirm: vi.fn() },
 }));
@@ -245,5 +247,31 @@ describe("useSubmissionManagement grading run summary", () => {
     await management.loadData();
 
     expect(management.gradingRun.value).toBeNull();
+  });
+
+  it("treats a completed run without AI result as terminal (degraded to manual review)", async () => {
+    const management = mountManagement();
+
+    vi.mocked(SubmissionsApi.getMySubmission).mockResolvedValue(
+      makeDetail("submitted")
+    );
+    vi.mocked(getRun).mockResolvedValue({
+      runId: "run-1",
+      status: "completed",
+      errorCode: null,
+      finalOutput: "AI 批改未通过结构化校验，已转教师人工批改。",
+      intent: null,
+      startedAt: null,
+      finishedAt: null,
+    });
+
+    await management.loadData();
+    expect(management.gradingRun.value).toMatchObject({ status: "completed" });
+
+    // completed + 无 AI 结果 = 终态：不启动轮询，提示人工批改（不再停留在评价中）
+    management.checkAndStartPolling();
+    expect(ElMessage.info).toHaveBeenCalledWith(
+      "AI 批改已完成但未生成有效评分，请等待教师人工批改"
+    );
   });
 });

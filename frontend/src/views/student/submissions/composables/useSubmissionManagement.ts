@@ -171,15 +171,17 @@ export function useSubmissionManagement() {
   // 获取当前状态（供轮询使用）
   const getCurrentStatus = () => {
     const aiReview = submissionData.value?.aiReview;
-    // failed/cancelled 均为真实终态：视为错误以立即终止轮询
-    const runTerminal =
-      gradingRun.value?.status === "failed" ||
-      gradingRun.value?.status === "cancelled";
+    // 批改 run 终态：failed/cancelled 为错误；completed 且无 AI 结果 = 受控降级转人工。
+    // 三者都应立即终止轮询——run 已结束，结果不会再变化，不能一直停留在“评价中”。
+    const runStatus = gradingRun.value?.status;
+    const runFailedOrCancelled =
+      runStatus === "failed" || runStatus === "cancelled";
+    const runCompletedNoResult = runStatus === "completed" && !aiReview;
     return {
       status: submissionData.value?.submission?.status,
       hasAiReview: !!aiReview,
       hasAiError:
-        !!aiReview?.aiReviewMetadata?.error || runTerminal, // 批改 run 失败/取消同样视为错误
+        !!aiReview?.aiReviewMetadata?.error || runFailedOrCancelled || runCompletedNoResult,
       assignment: submissionData.value?.assignment,
     };
   };
@@ -260,6 +262,8 @@ export function useSubmissionManagement() {
         ElMessage.warning("AI 批改已取消，请等待教师人工批改");
       } else if (runStatus === "failed") {
         ElMessage.error("AI 批改运行失败，请等待教师人工批改");
+      } else if (runStatus === "completed") {
+        ElMessage.info("AI 批改已完成但未生成有效评分，请等待教师人工批改");
       } else {
         ElMessage.error("AI评价失败");
       }
