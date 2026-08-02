@@ -31,6 +31,29 @@ from ..tools.content import (
 )
 from .messages import collect_invoke_usage, merge_usage
 
+# 直接结构化路径的预算余量守卫（秒）：进入 Agent 前/返回后都要求剩余不少于此值
+MIN_GRADING_BUDGET_SECONDS = 5
+# 直接结构化路径的底层模型调用上限：recursion_limit 收口值，也是测试断言基准
+MAX_STRUCTURED_CALLS = 2
+
+
+def _consume_model_call(budget) -> None:
+    """进入 Agent 前守卫并消费一次模型调用预算。
+
+    剩余预算不足一次调用时直接中断（规划 4.2），避免调用中途被
+    Celery 软超时打断丢失产出。budget 为 None（无预算场景）时不守卫。
+    """
+    if budget is not None:
+        if budget.remaining_seconds < MIN_GRADING_BUDGET_SECONDS:
+            raise BudgetExceeded("剩余预算不足以发起模型调用")
+        budget.consume_model_call()
+
+
+def _assert_remaining_budget(budget, reason: str) -> None:
+    """模型调用返回后校验预算仍有余量；不足则中断而不是降级。"""
+    if budget is not None and budget.remaining_seconds < MIN_GRADING_BUDGET_SECONDS:
+        raise BudgetExceeded(reason)
+
 
 def _grading_prompt(state: dict, *, reviewer: bool) -> str:
     rubric = state["rubric"]
@@ -75,12 +98,7 @@ def invoke_with_repair(
     raw_response = ""
     total_usage: dict = {}
     for _attempt in range(2):
-        if budget is not None:
-            # 剩余预算不足以完成一次模型调用时直接中断（规划 4.2），
-            # 避免调用中途被 Celery 软超时打断丢失产出
-            if budget.remaining_seconds < 5:
-                raise BudgetExceeded("剩余预算不足以发起模型调用")
-            budget.consume_model_call()
+        _consume_model_call(budget)
         result = agent.invoke({"messages": messages})
         total_usage = merge_usage(total_usage, collect_invoke_usage(result))
         raw = result.get("structured_response") if isinstance(result, dict) else None
@@ -150,16 +168,11 @@ def invoke_structured_grader(
     budget = state.get("runtime_budget")
     content = _grading_message_content(state, reviewer=reviewer)
     messages = [HumanMessage(content=content)]
-    if budget is not None:
-        # 剩余预算不足以完成一次模型调用时直接中断（规划 4.2），
-        # 避免调用中途被 Celery 软超时打断丢失产出
-        if budget.remaining_seconds < 5:
-            raise BudgetExceeded("剩余预算不足以发起模型调用")
-        budget.consume_model_call()
+    _consume_model_call(budget)
     try:
         result = agent.invoke(
             {"messages": messages},
-            config={"recursion_limit": 2},
+            config={"recursion_limit": MAX_STRUCTURED_CALLS},
         )
     except (
         GraphRecursionError,
@@ -171,8 +184,7 @@ def invoke_structured_grader(
             "usage": {},
         }
     # 模型调用已返回：预算仍须有余量，否则中断而不是使用可能不完整的产出
-    if budget is not None and budget.remaining_seconds < 5:
-        raise BudgetExceeded("模型调用返回后剩余预算不足")
+    _assert_remaining_budget(budget, "模型调用返回后剩余预算不足")
     total_usage = merge_usage({}, collect_invoke_usage(result))
     raw = result.get("structured_response") if isinstance(result, dict) else None
     raw_response = (

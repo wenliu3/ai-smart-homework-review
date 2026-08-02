@@ -1,10 +1,11 @@
 """批改 Subagent 的结构化调用收口与降级（规划 3B.2 / 任务 4）。
 
-- 直接结构化路径（真实 create_agent）底层模型调用锁定到最多 2 次：
-  模型不产出结构化工具调用（返回普通文本）或产出非法工具参数时，
-  response_format 机制会在内部反复重试，recursion_limit 默认 9999
-  会形成无界模型调用——invoke_structured_grader 显式传 recursion_limit=2
-  收口，并把递归上限 / 结构化输出错误 / 校验错误转换为有限 grading_failure。
+- 直接结构化路径（真实 create_agent）底层模型调用锁定到最多
+  MAX_STRUCTURED_CALLS 次：模型不产出结构化工具调用（返回普通文本）或
+  产出非法工具参数时，response_format 机制会在内部反复重试，recursion_limit
+  默认 9999 会形成无界模型调用——invoke_structured_grader 显式收口
+  recursion_limit=MAX_STRUCTURED_CALLS，并把递归上限 / 结构化输出错误 /
+  校验错误转换为有限 grading_failure。
 - 结构化校验失败 → grading_failure（原始输出留证），不抛异常。
 - 每次模型调用消费 RunBudget.model_call。
 """
@@ -25,6 +26,7 @@ from app.agent.contracts import (
 from app.agent.graphs.grading import GRADING_AGENT_NODE
 from app.agent.runtime import BudgetExceeded, RunBudget
 from app.agent.subagents.grading import (
+    MAX_STRUCTURED_CALLS,
     create_node as create_grading_node,
     invoke_structured_grader,
 )
@@ -56,7 +58,8 @@ class _BoundedPlainTextModel(BaseChatModel):
 
     raise_at：假模型自身抛 GraphRecursionError 的调用次数。没有 recursion_limit
     收口时 LangChain 会递归到默认 9999 次太慢，这里用 raise_at=3 快速截断，
-    让「无收口」的红灯可控；核心断言是 call_count <= 2，与 raise_at 无关。
+    让「无收口」的红灯可控；核心断言是 call_count <= MAX_STRUCTURED_CALLS，
+    与 raise_at 无关。call_count 守卫提升到基类 _generate，子类只覆写 _produce。
     """
     call_count: int = 0
     raise_at: int = 3
@@ -75,6 +78,9 @@ class _BoundedPlainTextModel(BaseChatModel):
         self.call_count += 1
         if self.raise_at is not None and self.call_count >= self.raise_at:
             raise GraphRecursionError("假模型模拟递归上限（无收口时截断重试）")
+        return self._produce(messages)
+
+    def _produce(self, messages) -> ChatResult:
         return ChatResult(generations=[ChatGeneration(
             message=AIMessage(content="普通文本"),
         )])
@@ -87,10 +93,7 @@ class _BoundedInvalidToolModel(_BoundedPlainTextModel):
     def _llm_type(self) -> str:
         return "bounded-invalid-tool-fake"
 
-    def _generate(self, messages, stop=None, run_manager=None, **kwargs):
-        self.call_count += 1
-        if self.raise_at is not None and self.call_count >= self.raise_at:
-            raise GraphRecursionError("假模型模拟递归上限（无收口时截断重试）")
+    def _produce(self, messages) -> ChatResult:
         name = self.bound_tools[0].name if self.bound_tools else "GradingDraft"
         return ChatResult(generations=[ChatGeneration(
             message=AIMessage(content="", tool_calls=[{
@@ -100,6 +103,25 @@ class _BoundedInvalidToolModel(_BoundedPlainTextModel):
                     "items": "not-a-list",
                     "summary": "非法工具参数",
                 },
+                "id": f"call_{self.call_count}",
+                "type": "tool_call",
+            }]),
+        )])
+
+
+class _BoundedValidToolModel(_BoundedPlainTextModel):
+    """首个调用即产出合法 GradingDraft 工具调用的假模型（happy path）。"""
+
+    @property
+    def _llm_type(self) -> str:
+        return "bounded-valid-tool-fake"
+
+    def _produce(self, messages) -> ChatResult:
+        name = self.bound_tools[0].name if self.bound_tools else "GradingDraft"
+        return ChatResult(generations=[ChatGeneration(
+            message=AIMessage(content="", tool_calls=[{
+                "name": name,
+                "args": _valid_payload(),
                 "id": f"call_{self.call_count}",
                 "type": "tool_call",
             }]),
@@ -149,38 +171,44 @@ def _state(budget=None):
 
 # ========== 直接结构化路径调用上限（任务 4） ==========
 
-def test_plain_text_model_calls_bounded_to_two():
-    fake = _BoundedPlainTextModel()
-    agent = create_agent(
-        model=fake,
+def _build_structured_agent(model):
+    return create_agent(
+        model=model,
         tools=[],
         system_prompt="你是结构化批改 Agent",
         response_format=GradingDraft,
     )
+
+
+@pytest.mark.parametrize("model_cls", [
+    _BoundedPlainTextModel,
+    _BoundedInvalidToolModel,
+])
+def test_non_structured_output_bounded_to_max_calls(model_cls):
+    """模型不产出合法结构化输出时，底层调用锁死在 MAX_STRUCTURED_CALLS 内。"""
+    fake = model_cls()
+    agent = _build_structured_agent(fake)
 
     result = invoke_structured_grader(
         agent, _state(), reviewer=False, stage=GRADING_AGENT_NODE,
     )
 
     assert result["grading_failure"]["stage"] == GRADING_AGENT_NODE
-    assert fake.call_count <= 2
+    assert fake.call_count <= MAX_STRUCTURED_CALLS
 
 
-def test_invalid_tool_args_model_calls_bounded_to_two():
-    fake = _BoundedInvalidToolModel()
-    agent = create_agent(
-        model=fake,
-        tools=[],
-        system_prompt="你是结构化批改 Agent",
-        response_format=GradingDraft,
-    )
+def test_valid_structured_tool_call_returns_draft_in_one_call():
+    """首个调用即产出合法结构化输出时，recursion_limit 不截断、恰好一次。"""
+    fake = _BoundedValidToolModel()
+    agent = _build_structured_agent(fake)
 
     result = invoke_structured_grader(
         agent, _state(), reviewer=False, stage=GRADING_AGENT_NODE,
     )
 
-    assert result["grading_failure"]["stage"] == GRADING_AGENT_NODE
-    assert fake.call_count <= 2
+    assert "grading_failure" not in result
+    assert result["grading_draft"].total_score == 85
+    assert fake.call_count == 1
 
 
 # ========== 结构化校验与降级 ==========
