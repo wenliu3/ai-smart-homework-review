@@ -39,6 +39,7 @@ from ..models import (
     Submission,
 )
 from .celery_app import celery_app
+from .grading_request import GradingTask
 
 logger = logging.getLogger(__name__)
 
@@ -652,6 +653,9 @@ def execute_grading_job(
     # soft_time_limit 是 worker 卡死时的最后兜底；hard limit 再留 30s 清理余量
     soft_time_limit=120,
     time_limit=150,
+    # 父进程硬超时（time_limit）时，Request.on_timeout 钩子负责把 run 收口
+    # 为 failed/AGENT_GRADING_TIMEOUT（子进程已被 kill，无法自行收口）
+    base=GradingTask,
 )
 def run_grading_task(
     self,

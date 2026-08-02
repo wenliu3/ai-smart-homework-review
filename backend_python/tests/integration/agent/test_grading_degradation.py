@@ -17,10 +17,17 @@ from app.agent.contracts import (
     GradingOutcome,
 )
 from app.agent.runtime import BudgetExceeded
+from app.crud.agent_run import (
+    GRADING_STALE_SECONDS,
+    create_run,
+    finalize_stale_grading_runs,
+)
+from app.crud.agent_session import create_session
 from app.crud.submission import apply_ai_grading_result
 from app.models import AgentArtifact, AgentRun, Assignment, Submission
 from app.tasks import grading as grading_tasks
 from app.tasks.grading import enqueue_grading_job, execute_grading_job
+from app.tasks.grading_request import mark_grading_timeout_from_request
 
 
 def _setup(db, student, *, description="", attachments=None):
@@ -233,3 +240,179 @@ def test_grading_state_includes_assignment_context(db, student, tmp_path):
     assert "参考答案要点" in state["reference_materials"]
     assert state["runtime_budget"].max_model_calls == 6
     assert state["submission_id"] == submission.id
+
+
+# ========== 任务 7：硬超时父进程收口与历史僵尸 Run ==========
+
+def _stale_grading_run(
+    assistant_db,
+    student,
+    *,
+    status="processing",
+    age_seconds=GRADING_STALE_SECONDS + 20,
+    intent="grading",
+):
+    """构造指定状态/启动时间/意图的批改 run（可独立于真实任务队列）。"""
+    session = create_session(
+        assistant_db,
+        user_id=student.id,
+        actor_role="student",
+        session_id="grading-stale-0001",
+    )
+    run = create_run(assistant_db, session.id, user_id=student.id, intent=intent)
+    assistant_db.query(AgentRun).filter(AgentRun.id == run.id).update(
+        {
+            AgentRun.status: status,
+            AgentRun.started_at: datetime.now() - timedelta(seconds=age_seconds),
+        },
+        synchronize_session=False,
+    )
+    assistant_db.commit()
+    return run
+
+
+def test_hard_timeout_request_finalizes_run(
+    db, assistant_db, student, monkeypatch,
+):
+    """Celery 父进程硬超时收口：running run → failed/AGENT_GRADING_TIMEOUT。"""
+    _, submission = _setup(db, student)
+    run_id = _enqueue(db, assistant_db, student, submission, monkeypatch)
+    run = assistant_db.query(AgentRun).filter(AgentRun.id == run_id).one()
+    assert run.status == "running"
+
+    mark_grading_timeout_from_request({"run_id": run.id, "user_id": student.id})
+
+    assistant_db.refresh(run)
+    assert run.status == "failed"
+    assert run.error_code == AGENT_GRADING_TIMEOUT
+
+
+def test_hard_timeout_request_is_idempotent(
+    db, assistant_db, student, monkeypatch,
+):
+    """重复收口幂等：第二次调用不再改写状态。"""
+    _, submission = _setup(db, student)
+    run_id = _enqueue(db, assistant_db, student, submission, monkeypatch)
+    run = assistant_db.query(AgentRun).filter(AgentRun.id == run_id).one()
+
+    mark_grading_timeout_from_request({"run_id": run.id, "user_id": student.id})
+    mark_grading_timeout_from_request({"run_id": run.id, "user_id": student.id})
+
+    assistant_db.refresh(run)
+    assert run.status == "failed"
+    assert run.error_code == AGENT_GRADING_TIMEOUT
+
+
+@pytest.mark.parametrize("terminal_status", ["completed", "cancelled"])
+def test_hard_timeout_request_keeps_terminal_runs(
+    db, assistant_db, student, monkeypatch, terminal_status,
+):
+    """已终态的 run 不被硬超时收口覆盖。"""
+    _, submission = _setup(db, student)
+    run_id = _enqueue(db, assistant_db, student, submission, monkeypatch)
+    run = assistant_db.query(AgentRun).filter(AgentRun.id == run_id).one()
+    run.status = terminal_status
+    assistant_db.commit()
+
+    mark_grading_timeout_from_request({"run_id": run.id, "user_id": student.id})
+
+    assistant_db.expire_all()
+    persisted = assistant_db.query(AgentRun).filter(AgentRun.id == run_id).one()
+    assert persisted.status == terminal_status
+    assert persisted.error_code is None
+
+
+def test_stale_grading_run_finalized_on_read(assistant_db, student):
+    """超阈值僵尸 processing 批改 run 在读取时收口为 failed/AGENT_GRADING_TIMEOUT。"""
+    run = _stale_grading_run(assistant_db, student)
+
+    closed = finalize_stale_grading_runs(assistant_db, user_id=student.id)
+
+    assert closed == 1
+    assistant_db.expire_all()
+    persisted = assistant_db.query(AgentRun).filter(AgentRun.id == run.id).one()
+    assert persisted.status == "failed"
+    assert persisted.error_code == AGENT_GRADING_TIMEOUT
+    assert persisted.finished_at is not None
+
+
+def test_stale_grading_run_finalized_without_owner_filter(assistant_db, student):
+    """不传 user_id 时收口任意归属的僵尸批改 run。"""
+    run = _stale_grading_run(assistant_db, student)
+
+    closed = finalize_stale_grading_runs(assistant_db)
+
+    assert closed == 1
+    assistant_db.expire_all()
+    persisted = assistant_db.query(AgentRun).filter(AgentRun.id == run.id).one()
+    assert persisted.status == "failed"
+    assert persisted.error_code == AGENT_GRADING_TIMEOUT
+
+
+def test_stale_finalize_is_idempotent(assistant_db, student):
+    """僵尸收口幂等：第二次调用不产生额外更新。"""
+    run = _stale_grading_run(assistant_db, student)
+
+    assert finalize_stale_grading_runs(assistant_db, user_id=student.id) == 1
+    assert finalize_stale_grading_runs(assistant_db, user_id=student.id) == 0
+    assistant_db.expire_all()
+    persisted = assistant_db.query(AgentRun).filter(AgentRun.id == run.id).one()
+    assert persisted.status == "failed"
+    assert persisted.error_code == AGENT_GRADING_TIMEOUT
+
+
+@pytest.mark.parametrize(
+    "status",
+    ["running", "completed", "failed", "cancelled"],
+)
+def test_stale_grading_run_keeps_non_processing_status(
+    assistant_db, student, status,
+):
+    """非 processing 状态（即使超阈值）不被收口。"""
+    run = _stale_grading_run(assistant_db, student, status=status)
+
+    closed = finalize_stale_grading_runs(assistant_db, user_id=student.id)
+
+    assert closed == 0
+    assistant_db.expire_all()
+    persisted = assistant_db.query(AgentRun).filter(AgentRun.id == run.id).one()
+    assert persisted.status == status
+
+
+def test_fresh_processing_grading_run_not_finalized(assistant_db, student):
+    """阈值内的新鲜 processing run 保持原状。"""
+    run = _stale_grading_run(assistant_db, student, age_seconds=60)
+
+    closed = finalize_stale_grading_runs(assistant_db, user_id=student.id)
+
+    assert closed == 0
+    assistant_db.expire_all()
+    persisted = assistant_db.query(AgentRun).filter(AgentRun.id == run.id).one()
+    assert persisted.status == "processing"
+
+
+def test_stale_non_grading_intent_not_finalized(assistant_db, student):
+    """非批改意图的僵尸 run 不收口。"""
+    run = _stale_grading_run(assistant_db, student, intent="teacher_query")
+
+    closed = finalize_stale_grading_runs(assistant_db, user_id=student.id)
+
+    assert closed == 0
+    assistant_db.expire_all()
+    persisted = assistant_db.query(AgentRun).filter(AgentRun.id == run.id).one()
+    assert persisted.status == "processing"
+
+
+def test_stale_run_of_other_owner_not_finalized(
+    assistant_db, student, user_factory,
+):
+    """传 user_id 时只收口该归属的 run，他人僵尸 run 不动。"""
+    other = user_factory("t_other", "teacher")
+    run = _stale_grading_run(assistant_db, student)
+
+    closed = finalize_stale_grading_runs(assistant_db, user_id=other.id)
+
+    assert closed == 0
+    assistant_db.expire_all()
+    persisted = assistant_db.query(AgentRun).filter(AgentRun.id == run.id).one()
+    assert persisted.status == "processing"

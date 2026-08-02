@@ -14,6 +14,7 @@
 身份只来自 `require_roles("teacher")`，请求体不接受 user_id/teacher_id/student_id。
 """
 import json
+import logging
 import re
 from uuid import uuid4
 
@@ -55,6 +56,8 @@ from ..schemas.assistant import (
 )
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
 
 _SESSION_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{8,64}$")
 _RUN_ID_PATTERN = re.compile(r"^(?:[a-f0-9]{32}|[a-f0-9]{64})$")
@@ -129,6 +132,14 @@ def get_run(
     run = agent_run_crud.get_run(sdb, run_id, user_id=actor.id)
     if not run:
         raise NotFoundException(10015, "运行不存在")
+    # 读取时顺手收口该用户的历史僵尸批改 run（processing 超阈值）：
+    # 幂等、失败不影响正常读取，只记日志
+    try:
+        agent_run_crud.finalize_stale_grading_runs(sdb, user_id=actor.id)
+    except Exception:
+        logger.exception("收口陈旧批改运行失败 run_id=%s", run_id)
+        sdb.rollback()
+    sdb.expire_all()
     return ok({
         "runId": run.id,
         "status": run.status,

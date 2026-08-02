@@ -11,7 +11,7 @@
 - 图状态不得保存 ORM 对象；本模块只在持久化边界构造 ORM 实例。
 """
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import uuid4
 
 from sqlalchemy import func
@@ -20,6 +20,10 @@ from sqlalchemy.orm import Session
 from ..models import AgentArtifact, AgentMessage, AgentRun, AgentSession, AgentStep
 
 logger = logging.getLogger(__name__)
+
+# 批改 run 陈旧的判定阈值（秒）：processing 超过该时长仍未结束视为僵尸 run
+# （worker 已被硬超时 kill 或队列拥塞），读取时收口为 failed/AGENT_GRADING_TIMEOUT。
+GRADING_STALE_SECONDS = 180
 
 
 # ========== Run 生命周期 ==========
@@ -134,6 +138,44 @@ def cancel_run(db: Session, run_id: str, user_id: int) -> None:
     run.status = "cancelled"
     run.finished_at = datetime.now()
     db.commit()
+
+
+def finalize_stale_grading_runs(
+    db: Session,
+    *,
+    user_id: int | None = None,
+    max_age_seconds: int = GRADING_STALE_SECONDS,
+) -> int:
+    """收口历史陈旧僵尸批改 run：processing 且超阈值未结束 → failed/AGENT_GRADING_TIMEOUT。
+
+    - 幂等：只动 `intent=="grading"` 且 `status=="processing"` 的目标行，
+      终态（completed/failed/cancelled）与 running 永不被覆盖；
+    - 时间边界用应用时钟 `datetime.now()`（与 create_run 写入的 started_at 同源），
+      批量 UPDATE 直接落库；传 `user_id` 时再限定归属，防止收口他人 run；
+    - 返回收口行数。调用方（路由层）负责兜底异常，本函数不向调用方抛破坏性错误。
+    """
+    from ..agent.contracts import AGENT_GRADING_TIMEOUT
+
+    cutoff = datetime.now() - timedelta(seconds=max_age_seconds)
+    query = db.query(AgentRun).filter(
+        AgentRun.intent == "grading",
+        AgentRun.status == "processing",
+        AgentRun.started_at < cutoff,
+    )
+    if user_id is not None:
+        query = query.filter(AgentRun.user_id == user_id)
+    closed = query.update(
+        {
+            AgentRun.status: "failed",
+            AgentRun.error_code: AGENT_GRADING_TIMEOUT,
+            AgentRun.finished_at: datetime.now(),
+        },
+        synchronize_session=False,
+    )
+    # 无目标行时不提交，避免读取路径每次查询都开启一个写事务
+    if closed:
+        db.commit()
+    return closed
 
 
 def finalize_run(
