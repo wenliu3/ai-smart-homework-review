@@ -10,7 +10,7 @@ from ..database import get_db
 from ..deps import require_roles
 from ..models import User
 from ..core.response import ok
-from ..schemas.ai_model import AiModelUpdate
+from ..schemas.ai_model import AiModelUpdate, GradingStructurerBindingUpdate
 from ..crud import ai_model as ai_model_crud
 
 router = APIRouter()
@@ -32,6 +32,18 @@ def get_active(current_user: User = Depends(require_roles("teacher", "superadmin
 def initialize(current_user: User = Depends(require_roles("superadmin")), db: Session = Depends(get_db)):
     """初始化预置 AI 模型(DeepSeek + 豆包)"""
     return ok(ai_model_crud.initialize(db))
+
+
+@router.get("/admin/ai-models/grading-structurer/config")
+def get_grading_structurer_config(current_user: User = Depends(require_roles("superadmin")), db: Session = Depends(get_db)):
+    """查询独立结构化模型绑定配置"""
+    return ok(ai_model_crud.get_grading_structurer_binding(db))
+
+
+@router.put("/admin/ai-models/grading-structurer/config")
+def update_grading_structurer_config(body: GradingStructurerBindingUpdate, current_user: User = Depends(require_roles("superadmin")), db: Session = Depends(get_db)):
+    """更新独立结构化模型绑定配置"""
+    return ok(ai_model_crud.set_grading_structurer_binding(db, enabled=body.enabled, model_code=body.modelCode))
 
 
 @router.get("/admin/ai-models/{code}")

@@ -5,13 +5,16 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 import requests
 from ..models import AiModel
-from ..core.exceptions import NotFoundException
+from ..core.exceptions import BizException, NotFoundException
 from ..core.utils import camel_to_snake
 
 logger = logging.getLogger(__name__)
 
 # 密钥字段：响应中脱敏，且客户端回传掩码值时不落库
 _SECRET_COLUMNS = ("api_key", "access_key", "secret_key")
+
+# 独立结构化模型绑定相关：复用网关统一错误码
+MODEL_NOT_CONFIGURED_CODE = 10016
 
 # /active 端点（教师可访问）只返回的非敏感字段（camelCase）
 _ACTIVE_PUBLIC_FIELDS = ("code", "name", "provider", "modelName", "status", "isDefault")
@@ -111,6 +114,70 @@ def set_default(db: Session, code: str) -> dict:
     model.is_default = True
     db.commit()
     return {"success": True, "message": f"已将 {model.name} 设为默认模型"}
+
+
+def _set_structurer_flag(model: AiModel, enabled: bool) -> None:
+    """给单个模型打上/移除独立结构化标记。
+
+    必须 dict 复制再写回，避免原地修改 JSON 列不被 SQLAlchemy 追踪。
+    """
+    bindings = dict(model.profile_bindings or {})
+    if enabled:
+        bindings["grading_structurer"] = True
+    else:
+        bindings.pop("grading_structurer", None)
+    model.profile_bindings = bindings or None
+
+
+def set_grading_structurer_binding(
+    db: Session, *, enabled: bool, model_code: str | None = None,
+) -> dict:
+    """设置独立结构化模型绑定 — 唯一绑定，同一事务内完成。
+
+    enabled=True：校验目标模型存在且可用，然后清除所有模型上的
+    grading_structurer 标记，再给目标模型打标记（保证唯一）。
+    enabled=False：仅清除全部标记。
+    返回与 get_grading_structurer_binding 相同的结构。
+    """
+    if enabled:
+        target = db.query(AiModel).filter(AiModel.code == model_code).first()
+        if not target:
+            raise NotFoundException(10015, "模型不存在")
+        if target.status != "active":
+            raise BizException(MODEL_NOT_CONFIGURED_CODE, "独立结构化模型必须处于启用状态")
+        if not (target.api_key or "").strip():
+            raise BizException(MODEL_NOT_CONFIGURED_CODE, "独立结构化模型未配置 API Key")
+        for m in db.query(AiModel).all():
+            _set_structurer_flag(m, False)
+        _set_structurer_flag(target, True)
+    else:
+        for m in db.query(AiModel).all():
+            _set_structurer_flag(m, False)
+    db.commit()
+    return get_grading_structurer_binding(db)
+
+
+def get_grading_structurer_binding(db: Session) -> dict:
+    """查询当前独立结构化模型绑定。
+
+    只认 active 模型的标记；命中多于 1 条视为历史脏数据抛业务异常；
+    无命中返回未启用结构。
+    """
+    candidates = db.query(AiModel).filter(AiModel.status == "active").all()
+    hits = [
+        m for m in candidates
+        if (m.profile_bindings or {}).get("grading_structurer")
+    ]
+    if len(hits) > 1:
+        raise BizException(MODEL_NOT_CONFIGURED_CODE, "结构化模型绑定配置冲突")
+    if not hits:
+        return {"enabled": False, "modelCode": None, "model": None}
+    model = hits[0]
+    return {
+        "enabled": True,
+        "modelCode": model.code,
+        "model": _to_public_dict(model),
+    }
 
 
 def _make_api_request(url: str, api_key: str, timeout: int = 10) -> requests.Response:
