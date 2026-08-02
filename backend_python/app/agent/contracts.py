@@ -18,6 +18,7 @@ class ModelProfile(str, Enum):
     GENERAL = "general"
     VISION_GRADER = "vision_grader"
     REVIEWER = "reviewer"
+    GRADING_STRUCTURER = "grading_structurer"
 
 
 class TeacherIntent(str, Enum):
@@ -283,6 +284,13 @@ class GradingDraft(BaseModel):
             if item.max_score != expected[item.criterion_id]:
                 raise ValueError("评分项满分与量表不匹配")
         return self
+
+
+class GradingReportPair(BaseModel):
+    schema_version: str = "v1"
+    primary: GradingDraft
+    review: GradingDraft
+    extraction_errors: list[str] = Field(default_factory=list)
 
 
 class GradingOutcome(BaseModel):
