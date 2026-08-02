@@ -135,11 +135,16 @@ def get_run(
     # 读取时顺手收口该用户的历史僵尸批改 run（processing 超阈值）：
     # 幂等、失败不影响正常读取，只记日志
     try:
-        agent_run_crud.finalize_stale_grading_runs(sdb, user_id=actor.id)
+        closed = agent_run_crud.finalize_stale_grading_runs(sdb, user_id=actor.id)
     except Exception:
         logger.exception("收口陈旧批改运行失败 run_id=%s", run_id)
         sdb.rollback()
-    sdb.expire_all()
+    else:
+        # closed>0 时函数内部已 commit（expire_on_commit=True 会过期整库对象），
+        # 这里再显式过期以保证响应读取收口后的终态；
+        # closed==0 时 DB 未变，跳过可避免每次读取都重载整行 + steps
+        if closed:
+            sdb.expire_all()
     return ok({
         "runId": run.id,
         "status": run.status,

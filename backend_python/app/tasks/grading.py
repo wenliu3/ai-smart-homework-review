@@ -655,6 +655,9 @@ def execute_grading_job(
     time_limit=150,
     # 父进程硬超时（time_limit）时，Request.on_timeout 钩子负责把 run 收口
     # 为 failed/AGENT_GRADING_TIMEOUT（子进程已被 kill，无法自行收口）
+    # 承重不变量：crud.agent_run.GRADING_STALE_SECONDS(180s) 必须大于本任务的
+    # time_limit(150s)，否则读取时的僵尸收口会先于父进程硬超时，把仍在跑的
+    # run 误标为失败。改任一侧时必须同步核对另一侧。
     base=GradingTask,
 )
 def run_grading_task(

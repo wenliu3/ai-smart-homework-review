@@ -17,6 +17,7 @@ from app.agent.contracts import (
     GradingOutcome,
 )
 from app.agent.runtime import BudgetExceeded
+from app.crud import agent_run as agent_run_crud
 from app.crud.agent_run import (
     GRADING_STALE_SECONDS,
     create_run,
@@ -320,6 +321,69 @@ def test_hard_timeout_request_keeps_terminal_runs(
     persisted = assistant_db.query(AgentRun).filter(AgentRun.id == run_id).one()
     assert persisted.status == terminal_status
     assert persisted.error_code is None
+
+
+def test_hard_timeout_request_finalizes_processing_run(
+    db, assistant_db, student, monkeypatch,
+):
+    """真实硬超时时 run 已被 claim 为 processing，钩子同样应收口。"""
+    _, submission = _setup(db, student)
+    run_id = _enqueue(db, assistant_db, student, submission, monkeypatch)
+    assistant_db.query(AgentRun).filter(AgentRun.id == run_id).update(
+        {AgentRun.status: "processing"},
+        synchronize_session=False,
+    )
+    assistant_db.commit()
+
+    mark_grading_timeout_from_request({"run_id": run_id, "user_id": student.id})
+
+    assistant_db.expire_all()
+    run = assistant_db.query(AgentRun).filter(AgentRun.id == run_id).one()
+    assert run.status == "failed"
+    assert run.error_code == AGENT_GRADING_TIMEOUT
+
+
+def test_hard_timeout_request_swallows_fail_run_exception(
+    db, assistant_db, student, monkeypatch,
+):
+    """收口清理异常绝不向上抛，不遮盖 Celery 原始超时失败。"""
+    _, submission = _setup(db, student)
+    run_id = _enqueue(db, assistant_db, student, submission, monkeypatch)
+
+    def _boom(db_, run_id_, user_id_, error_code):
+        raise RuntimeError("assistant db write failed")
+
+    monkeypatch.setattr(agent_run_crud, "fail_run", _boom)
+
+    # 不应抛异常，正常返回
+    mark_grading_timeout_from_request({"run_id": run_id, "user_id": student.id})
+
+    assistant_db.expire_all()
+    run = assistant_db.query(AgentRun).filter(AgentRun.id == run_id).one()
+    assert run.status == "running"
+
+
+def test_hard_timeout_request_skips_missing_payload(
+    db, assistant_db, student, monkeypatch,
+):
+    """缺 run_id/user_id 的 payload 被跳过，不抛异常也不改库。"""
+    _, submission = _setup(db, student)
+    run_id = _enqueue(db, assistant_db, student, submission, monkeypatch)
+
+    mark_grading_timeout_from_request({})
+    mark_grading_timeout_from_request({"run_id": run_id})
+    mark_grading_timeout_from_request({"user_id": student.id})
+
+    assistant_db.expire_all()
+    run = assistant_db.query(AgentRun).filter(AgentRun.id == run_id).one()
+    assert run.status == "running"
+    assert run.error_code is None
+
+
+def test_grading_stale_threshold_exceeds_hard_time_limit():
+    """承重不变量：僵尸收口阈值必须大于 Celery 硬超时 time_limit，
+    否则读取时收口会先于父进程硬超时把仍在跑的 run 误标失败。"""
+    assert GRADING_STALE_SECONDS > grading_tasks.run_grading_task.time_limit
 
 
 def test_stale_grading_run_finalized_on_read(assistant_db, student):
