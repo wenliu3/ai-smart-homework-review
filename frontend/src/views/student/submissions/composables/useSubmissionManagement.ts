@@ -1,4 +1,4 @@
-import { ref, computed, onUnmounted } from "vue";
+import { ref, computed, readonly, onUnmounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import SubmissionsApi, {
@@ -11,6 +11,13 @@ import { checkAiSupport } from "@/config/ai-config";
 import { getRun } from "@/api/assistant";
 import { isFormalSubmissionStatus } from "../utils/submissionLifecycle";
 
+/** 学生端看到的批改 Run 终态摘要（只读，不暴露内部堆栈）。 */
+export interface GradingRunSummary {
+  status: string | null;
+  errorCode: string | null;
+  finalOutput: string | null;
+}
+
 export function useSubmissionManagement() {
   const route = useRoute();
   const router = useRouter();
@@ -21,8 +28,9 @@ export function useSubmissionManagement() {
   const saving = ref(false);
   const deleting = ref(false);
   const submissionData = ref<MySubmissionDetail | null>(null);
-  // 批改运行状态（经 gradingRunId 查询）：failed 时立即停止轮询并提示
-  const gradingRunStatus = ref<string | null>(null);
+  // 批改 Run 终态摘要（经 gradingRunId 查询）：failed/cancelled 为真实终态，
+  // 轮询立即终止；网络错误不伪造失败（保持 null 视为进行中）
+  const gradingRun = ref<GradingRunSummary | null>(null);
 
   // AI评价轮询
   const {
@@ -163,12 +171,15 @@ export function useSubmissionManagement() {
   // 获取当前状态（供轮询使用）
   const getCurrentStatus = () => {
     const aiReview = submissionData.value?.aiReview;
+    // failed/cancelled 均为真实终态：视为错误以立即终止轮询
+    const runTerminal =
+      gradingRun.value?.status === "failed" ||
+      gradingRun.value?.status === "cancelled";
     return {
       status: submissionData.value?.submission?.status,
       hasAiReview: !!aiReview,
       hasAiError:
-        !!aiReview?.aiReviewMetadata?.error ||
-        gradingRunStatus.value === "failed", // 批改 run 失败同样视为错误
+        !!aiReview?.aiReviewMetadata?.error || runTerminal, // 批改 run 失败/取消同样视为错误
       assignment: submissionData.value?.assignment,
     };
   };
@@ -199,18 +210,22 @@ export function useSubmissionManagement() {
       console.log("📥 查询到的作业数据:", data);
       submissionData.value = data;
 
-      // 批改进行中时查一次 run 状态：failed 能立即停止轮询并提示，
+      // 批改进行中时查一次 run 状态：failed/cancelled 能立即停止轮询并提示，
       // 而不是等提交状态一直不变直到轮询次数耗尽
       const runId = data.submission?.gradingRunId;
       if (runId && data.submission?.status === "submitted" && !data.aiReview) {
         try {
           const run = await getRun(runId);
-          gradingRunStatus.value = run.status;
+          gradingRun.value = {
+            status: run.status,
+            errorCode: run.errorCode,
+            finalOutput: run.finalOutput,
+          };
         } catch {
-          // run 信息不可用不影响既有轮询逻辑
+          // run 信息不可用（网络/请求异常）不伪造失败：保持既有值，视为进行中
         }
       } else {
-        gradingRunStatus.value = null;
+        gradingRun.value = null;
       }
     } catch (error) {
       console.error("❌ 加载作业数据失败:", error);
@@ -233,15 +248,21 @@ export function useSubmissionManagement() {
     console.log("  - 作业截止时间:", assignment?.dueDate);
     console.log("  - 当前时间:", new Date().toISOString());
 
-    // 🔥 如果有AI错误，立即停止轮询并显示错误信息
+    // 🔥 如果有AI错误（含批改 Run 失败/取消），立即停止轮询并提示
     if (hasAiError) {
       console.log("❌ AI评价失败，停止轮询");
-      const errorMessage =
-        submissionData.value?.aiReview?.aiReviewMetadata?.error ||
-        (gradingRunStatus.value === "failed"
-          ? "AI 批改运行失败，请等待教师人工批改"
-          : "AI评价失败");
-      ElMessage.error(`AI评价失败: ${errorMessage}`);
+      const metadataError =
+        submissionData.value?.aiReview?.aiReviewMetadata?.error;
+      const runStatus = gradingRun.value?.status;
+      if (metadataError) {
+        ElMessage.error(`AI评价失败: ${metadataError}`);
+      } else if (runStatus === "cancelled") {
+        ElMessage.warning("AI 批改已取消，请等待教师人工批改");
+      } else if (runStatus === "failed") {
+        ElMessage.error("AI 批改运行失败，请等待教师人工批改");
+      } else {
+        ElMessage.error("AI评价失败");
+      }
       return;
     }
 
@@ -439,6 +460,9 @@ export function useSubmissionManagement() {
     // 轮询状态
     isPolling,
     pollingCount,
+
+    // 批改 Run 终态摘要（只读）
+    gradingRun: readonly(gradingRun),
 
     // 计算属性
     assignmentId,

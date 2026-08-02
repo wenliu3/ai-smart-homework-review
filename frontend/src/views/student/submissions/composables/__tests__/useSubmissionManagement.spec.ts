@@ -2,11 +2,13 @@ import { mount } from "@vue/test-utils";
 import { defineComponent, h, ref } from "vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import SubmissionsApi from "@/api/submissions";
 import type {
   Assignment,
   MySubmissionDetail,
   Submission,
 } from "@/api/submissions";
+import { getRun } from "@/api/assistant";
 
 vi.mock("vue-router", () => ({
   useRoute: () => ({
@@ -83,6 +85,7 @@ const makeDetail = (
         createdAt: "2026-08-01T12:00:00",
         isDraft: submissionStatus === "draft",
         submissionCount: 1,
+        gradingRunId: "run-1",
       }
     : null,
   aiReview: null,
@@ -179,5 +182,68 @@ describe("useSubmissionManagement lifecycle state", () => {
     expect(management.hasFormalSubmission.value).toBe(false);
     expect(management.showSubmissionForm.value).toBe(true);
     expect(management.showSubmittedContent.value).toBe(false);
+  });
+});
+
+describe("useSubmissionManagement grading run summary", () => {
+  it("exposes a failed grading run as a read-only summary after getRun resolves", async () => {
+    const management = mountManagement();
+
+    vi.mocked(SubmissionsApi.getMySubmission).mockResolvedValue(
+      makeDetail("submitted")
+    );
+    vi.mocked(getRun).mockResolvedValue({
+      runId: "run-1",
+      status: "failed",
+      errorCode: "AGENT_GRADING_TIMEOUT",
+      finalOutput: null,
+      intent: null,
+      startedAt: null,
+      finishedAt: null,
+    });
+
+    await management.loadData();
+
+    expect(management.gradingRun.value).toMatchObject({
+      status: "failed",
+      errorCode: "AGENT_GRADING_TIMEOUT",
+    });
+  });
+
+  it("exposes a cancelled grading run as a read-only summary", async () => {
+    const management = mountManagement();
+
+    vi.mocked(SubmissionsApi.getMySubmission).mockResolvedValue(
+      makeDetail("submitted")
+    );
+    vi.mocked(getRun).mockResolvedValue({
+      runId: "run-1",
+      status: "cancelled",
+      errorCode: "AGENT_RUN_CANCELLED",
+      finalOutput: null,
+      intent: null,
+      startedAt: null,
+      finishedAt: null,
+    });
+
+    await management.loadData();
+
+    expect(management.gradingRun.value).toMatchObject({
+      status: "cancelled",
+      errorCode: "AGENT_RUN_CANCELLED",
+    });
+  });
+
+  it("keeps gradingRun unresolved when getRun throws (network error is not a failure)", async () => {
+    const management = mountManagement();
+
+    vi.mocked(SubmissionsApi.getMySubmission).mockResolvedValue(
+      makeDetail("submitted")
+    );
+    vi.mocked(getRun).mockRejectedValue(new Error("network down"));
+
+    await management.loadData();
+
+    expect(management.gradingRun.value).toBeNull();
   });
 });

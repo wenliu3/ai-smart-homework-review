@@ -81,4 +81,93 @@ describe("ReviewResults", () => {
 
     expect(wrapper.text()).toContain("0分");
   });
+
+  it("批改 Run 失败时显示稳定失败终态文案", () => {
+    const failedWrapper = mountReview({
+      aiReview: null,
+      teacherReview: null,
+      submissionStatus: "submitted",
+      assignment: {
+        status: "published",
+        dueDate: "2099-08-05T18:00:00",
+        aiRule: { prompt: "请评分" },
+      },
+      gradingRun: {
+        status: "failed",
+        errorCode: "AGENT_GRADING_TIMEOUT",
+        finalOutput: null,
+      },
+    });
+
+    expect(failedWrapper.text()).toContain("AI 批改失败");
+    expect(failedWrapper.text()).toContain("等待教师人工批改");
+    expect(failedWrapper.text()).not.toContain("AI 智能评价中");
+    expect(failedWrapper.text()).not.toContain("AGENT_GRADING_TIMEOUT");
+  });
+
+  it("批改 Run 取消时显示已取消终态文案", () => {
+    const cancelledWrapper = mountReview({
+      aiReview: null,
+      teacherReview: null,
+      submissionStatus: "submitted",
+      assignment: {
+        status: "published",
+        dueDate: "2099-08-05T18:00:00",
+        aiRule: { prompt: "请评分" },
+      },
+      gradingRun: {
+        status: "cancelled",
+        errorCode: "AGENT_RUN_CANCELLED",
+        finalOutput: null,
+      },
+    });
+
+    expect(cancelledWrapper.text()).toContain("AI 批改已取消");
+    expect(cancelledWrapper.text()).not.toContain("AI 智能评价中");
+    expect(cancelledWrapper.text()).not.toContain("AGENT_RUN_CANCELLED");
+  });
+
+  it("轮询进行中仍显示 AI 智能评价中", () => {
+    const wrapper = mountReview({
+      aiReview: null,
+      teacherReview: null,
+      submissionStatus: "submitted",
+      assignment: {
+        status: "published",
+        dueDate: "2099-08-05T18:00:00",
+        aiRule: { prompt: "请评分" },
+      },
+      gradingRun: {
+        status: "running",
+        errorCode: null,
+        finalOutput: null,
+      },
+      isPolling: true,
+      pollingCount: 3,
+    });
+
+    expect(wrapper.text()).toContain("AI 智能评价中");
+  });
+
+  it("轮询停止且无终态时显示暂未取得最终状态", () => {
+    const wrapper = mountReview({
+      aiReview: null,
+      teacherReview: null,
+      submissionStatus: "submitted",
+      assignment: {
+        status: "published",
+        dueDate: "2099-08-05T18:00:00",
+        aiRule: { prompt: "请评分" },
+      },
+      gradingRun: {
+        status: "running",
+        errorCode: null,
+        finalOutput: null,
+      },
+      isPolling: false,
+    });
+
+    expect(wrapper.text()).toContain("暂未取得最终状态，请稍后刷新");
+    expect(wrapper.text()).not.toContain("AI 智能评价中");
+  });
 });

@@ -12,24 +12,8 @@
         </div>
         <div class="review-overview__copy">
           <p>REVIEW SUMMARY</p>
-          <h2>
-            {{
-              displayScore === null
-                ? waitingForTeacherOnly
-                  ? "等待教师批改"
-                  : "评价进行中"
-                : "本次作业评价"
-            }}
-          </h2>
-          <span>
-            {{
-              displayScore === null
-                ? waitingForTeacherOnly
-                  ? "本作业未启用 AI 评价，教师批改后将在这里显示反馈"
-                  : "评价完成后将在这里显示得分与改进建议"
-                : `${displaySource}已给出评价，可切换标签查看详细反馈`
-            }}
-          </span>
+          <h2>{{ overviewTitle }}</h2>
+          <span>{{ overviewSubtitle }}</span>
         </div>
       </div>
 
@@ -46,7 +30,25 @@
               <el-icon><Monitor /></el-icon>
               <span>AI批改</span>
               <el-tag
-                v-if="aiReview && typeof aiReview.score === 'number'"
+                v-if="runFailed"
+                type="danger"
+                size="small"
+                class="ml-2"
+                effect="plain"
+              >
+                失败
+              </el-tag>
+              <el-tag
+                v-else-if="runCancelled"
+                type="info"
+                size="small"
+                class="ml-2"
+                effect="plain"
+              >
+                已取消
+              </el-tag>
+              <el-tag
+                v-else-if="aiReview && typeof aiReview.score === 'number'"
                 type="primary"
                 size="small"
                 class="ml-2"
@@ -111,30 +113,71 @@
             </div>
           </div>
 
-          <!-- AI评价进行中 -->
+          <!-- 🔥 AI批改 Run 失败终态 -->
+          <div v-else-if="runFailed" class="no-review-content">
+            <div class="ai-empty-state">
+              <div class="empty-description">
+                <h4 class="text-gray-700 mb-2 text-lg">AI 批改失败</h4>
+                <p class="text-gray-500 mb-1">等待教师人工批改</p>
+                <p class="text-gray-400 text-sm">
+                  本次 AI 自动批改未完成，教师将为您进行人工批改，请耐心等待
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- 🔥 AI批改 Run 取消终态 -->
+          <div v-else-if="runCancelled" class="no-review-content">
+            <div class="ai-empty-state">
+              <div class="empty-description">
+                <h4 class="text-gray-700 mb-2 text-lg">AI 批改已取消</h4>
+                <p class="text-gray-500 mb-1">等待教师人工批改</p>
+                <p class="text-gray-400 text-sm">
+                  AI 自动批改已取消，教师将为您进行人工批改
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- AI评价进行中 / 未取得终态 -->
           <div v-else class="no-review-content">
             <div class="ai-empty-state">
-              <div class="ai-loading-container large">
-                <img
-                  src="@/assets/image/ai_loading.gif"
-                  alt="AI正在批改"
-                  class="ai-loading-gif large"
-                />
-              </div>
-              <div class="empty-description">
-                <h4 class="text-gray-700 mb-2 text-lg">AI 智能评价中</h4>
-                <p class="text-gray-500 mb-1">人工智能正在仔细分析您的作业</p>
-                <p class="text-gray-400 text-sm">
-                  评价完成后会自动显示结果，请耐心等待
-                </p>
-                <p
-                  v-if="isPolling"
-                  class="text-gray-400 text-sm"
-                  data-testid="grading-progress"
-                >
-                  正在查询批改进度（第 {{ pollingCount || 0 }} 次）…
-                </p>
-              </div>
+              <template v-if="isPolling">
+                <div class="ai-loading-container large">
+                  <img
+                    src="@/assets/image/ai_loading.gif"
+                    alt="AI正在批改"
+                    class="ai-loading-gif large"
+                  />
+                </div>
+                <div class="empty-description">
+                  <h4 class="text-gray-700 mb-2 text-lg">AI 智能评价中</h4>
+                  <p class="text-gray-500 mb-1">人工智能正在仔细分析您的作业</p>
+                  <p class="text-gray-400 text-sm">
+                    评价完成后会自动显示结果，请耐心等待
+                  </p>
+                  <p
+                    v-if="isPolling"
+                    class="text-gray-400 text-sm"
+                    data-testid="grading-progress"
+                  >
+                    正在查询批改进度（第 {{ pollingCount || 0 }} 次）…
+                  </p>
+                </div>
+              </template>
+              <template v-else>
+                <div class="empty-description">
+                  <h4 class="text-gray-700 mb-2 text-lg">
+                    暂未取得最终状态，请稍后刷新
+                  </h4>
+                  <p class="text-gray-500 mb-1">
+                    AI 批改仍在进行或暂时无法获取进度
+                  </p>
+                  <p class="text-gray-400 text-sm">
+                    请稍后刷新页面查看最新结果
+                  </p>
+                </div>
+              </template>
             </div>
           </div>
         </el-tab-pane>
@@ -265,6 +308,12 @@ interface Props {
   assignment?: any;
   isPolling?: boolean;
   pollingCount?: number;
+  /** 批改 Run 终态摘要（只读）：failed/cancelled 为真实终态。 */
+  gradingRun?: {
+    status?: string | null;
+    errorCode?: string | null;
+    finalOutput?: string | null;
+  } | null;
 }
 
 const props = defineProps<Props>();
@@ -303,6 +352,37 @@ const waitingForTeacherOnly = computed(
     !props.aiReview &&
     !props.teacherReview
 );
+
+// 批改 Run 终态：failed/cancelled 均为真实终态，优先于进行中状态展示
+const runFailed = computed(() => props.gradingRun?.status === "failed");
+const runCancelled = computed(() => props.gradingRun?.status === "cancelled");
+
+// 评价摘要标题（优先级：教师结果 > AI 结果 > Run 失败/取消 > 进行中）
+const overviewTitle = computed(() => {
+  if (displayScore.value !== null) return "本次作业评价";
+  if (runFailed.value) return "AI 批改失败";
+  if (runCancelled.value) return "AI 批改已取消";
+  if (waitingForTeacherOnly.value) return "等待教师批改";
+  if (props.isPolling) return "评价进行中";
+  // 轮询已停止且仍未取得结果：不再继续写“评价中”
+  return "暂未取得最终状态，请稍后刷新";
+});
+
+const overviewSubtitle = computed(() => {
+  if (displayScore.value !== null) {
+    return `${displaySource.value}已给出评价，可切换标签查看详细反馈`;
+  }
+  if (waitingForTeacherOnly.value) {
+    return "本作业未启用 AI 评价，教师批改后将在这里显示反馈";
+  }
+  if (runFailed.value || runCancelled.value) {
+    return "AI 批改出现问题，教师批改后将在这里显示反馈";
+  }
+  if (props.isPolling) {
+    return "评价完成后将在这里显示得分与改进建议";
+  }
+  return "AI 批改暂未完成，请稍后刷新页面查看最新状态";
+});
 
 // 当前激活的标签页 - 默认显示AI评价
 const activeTab = ref("ai");

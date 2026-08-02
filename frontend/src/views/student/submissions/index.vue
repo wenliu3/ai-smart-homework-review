@@ -250,6 +250,7 @@
                 :assignment="submissionData.assignment"
                 :is-polling="isPolling"
                 :polling-count="pollingCount"
+                :grading-run="gradingRun"
               />
             </div>
           </section>
@@ -327,6 +328,9 @@ const {
   // 轮询状态
   isPolling,
   pollingCount,
+
+  // 批改 Run 终态摘要（只读）
+  gradingRun,
 
   // 计算属性
   isSubmitted,
