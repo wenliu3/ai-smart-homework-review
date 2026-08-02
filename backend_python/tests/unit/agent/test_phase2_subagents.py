@@ -19,7 +19,7 @@ class _FakeAgent:
         self.structured_response = structured_response
         self.calls = []
 
-    def invoke(self, payload):
+    def invoke(self, payload, **kwargs):
         self.calls.append(payload)
         return {"structured_response": self.structured_response}
 

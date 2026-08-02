@@ -9,7 +9,7 @@ from typing import Callable
 
 from ..graphs.grading import GRADING_REVIEW_NODE
 from ..registry import AgentRegistry, agent_registry
-from .grading import invoke_with_repair
+from .grading import invoke_structured_grader
 
 
 def _has_images(state: dict) -> bool:
@@ -25,7 +25,7 @@ def create_node(db, registry: AgentRegistry | None = None) -> Callable:
             "grading_review_vision" if _has_images(state) else "grading_review"
         )
         agent = reg.get_specialist(specialist, db)
-        return invoke_with_repair(
+        return invoke_structured_grader(
             agent,
             state,
             reviewer=True,
