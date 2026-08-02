@@ -14,6 +14,7 @@ invoke_with_repair 是录制回放评测（tests/evals）保留的旧修复循�
 from __future__ import annotations
 
 import json
+import re
 from typing import Callable
 
 from langchain.agents.structured_output import StructuredOutputError
@@ -30,6 +31,36 @@ from ..tools.content import (
     build_grading_message_content,
 )
 from .messages import collect_invoke_usage, merge_usage
+
+# 匹配 ```json ... ``` 代码块
+_JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
+
+
+def _extract_structured_payload(text: str) -> dict | None:
+    """从模型输出文本中正则提取 JSON 载荷。
+
+    模型按提示词以固定 JSON 格式输出，但可能包裹代码块或附带说明。
+    依次尝试：代码块 → 首 { 到末 } 的片段 → 直接 json.loads。
+    """
+    if not text:
+        return None
+    candidates: list[str] = []
+    block = _JSON_BLOCK_RE.search(text)
+    if block:
+        candidates.append(block.group(1))
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        candidates.append(text[start:end + 1])
+    candidates.append(text.strip())
+    for candidate in candidates:
+        try:
+            payload = json.loads(candidate)
+            if isinstance(payload, dict):
+                return payload
+        except (json.JSONDecodeError, ValueError):
+            continue
+    return None
 
 # 直接结构化路径的预算余量守卫（秒）：进入 Agent 前/返回后都要求剩余不少于此值
 MIN_GRADING_BUDGET_SECONDS = 5
@@ -71,6 +102,10 @@ def _grading_prompt(state: dict, *, reviewer: bool) -> str:
         "2. 禁止自创、拆分、合并或新增任何维度（例如不得按作业的小题、任务或章节自拆成多个维度）。\n"
         "3. 每个维度给出 score、max_score、feedback（含得分依据与扣分原因）和 evidence_refs。\n"
         "4. 不得从自然语言解析或生成可信总分；总分由后端汇总。\n"
+        "5. 严格以如下 JSON 格式输出，只输出该 JSON，不要输出任何其他文字：\n"
+        '{"items": [{"criterion_id": "<量表里的id>", "title": "<维度名>", "score": <数字>,\n'
+        '  "max_score": <数字>, "feedback": "<得分依据与扣分原因>", "evidence_refs": ["<提交证据引用>"]}],\n'
+        ' "summary": "<整体总结>", "confidence": <0到1的数字或null>}\n'
         + build_grading_context(
             state["normalized_content"],
             assignment_description=state.get("assignment_description", ""),
@@ -232,7 +267,18 @@ def invoke_structured_grader(
     # 模型调用已返回：预算仍须有余量，否则中断而不是使用可能不完整的产出
     _assert_remaining_budget(budget, "模型调用返回后剩余预算不足")
     total_usage = merge_usage({}, collect_invoke_usage(result))
-    raw = result.get("structured_response") if isinstance(result, dict) else None
+    # 提取结构化载荷：优先 create_agent 的 tool_choice 产物（structured_response）；
+    # 模型按提示词直接输出 JSON 文本时，从最后一条 AIMessage 正则提取。
+    # （mimo 等模型对 tool_choice 强制结构化不稳定，提示词 + 正则提取更可靠）
+    raw = None
+    if isinstance(result, dict):
+        raw = result.get("structured_response")
+        if raw is None:
+            for message in reversed(result.get("messages", [])):
+                value = getattr(message, "content", None)
+                if isinstance(value, str) and value.strip():
+                    raw = _extract_structured_payload(value)
+                    break
     raw_response = (
         json.dumps(raw, ensure_ascii=False, default=str)
         if raw is not None
@@ -259,17 +305,19 @@ def create_node(db, registry: AgentRegistry | None = None) -> Callable:
     reg = registry or agent_registry
 
     def grading_node(state: dict) -> dict:
-        # 单 Agent：优先用 AI 规则指定的模型（state.rule_model_code）直接结构化出分；
-        # 未指定时（兼容无路由的单元测试）回退默认批改模型。
+        # 单 Agent：用 AI 规则指定的模型，按提示词输出固定 JSON，由 invoke 侧正则提取。
+        # 不依赖 tool_choice 强制结构化（mimo 等模型对强制 tool_choice 不稳定，
+        # 大输入下常返回空导致整次降级），提示词 + 正则提取更可靠。
         model_code = state.get("rule_model_code")
         if model_code:
             agent = reg.get_grading_agent(
                 db,
                 model_code=model_code,
                 reviewer=False,
-                structured=True,
+                structured=False,
             )
         else:
+            # 兼容无路由的单元测试：默认批改 agent（tool_choice 产物同样能被提取）
             agent = reg.get_specialist("grading", db)
         return invoke_structured_grader(
             agent,

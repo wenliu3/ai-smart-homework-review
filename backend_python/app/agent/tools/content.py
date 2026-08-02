@@ -24,6 +24,9 @@ _SUPPORTED_TEXT_EXTENSIONS = {".docx": "docx", ".pdf": "pdf", ".txt": "text"}
 _DOCX_EMBED_IMAGE_LIMIT = 6
 # 单张图片进入模型消息的大小上限（5MB）：超限降级为文本占位
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
+# 单个学生文本块进入模型消息的字符上限：长文档/大附件会撑爆模型上下文，
+# 导致结构化评分返回空而整次降级转人工。截断保留主体内容并告警。
+_STUDENT_TEXT_CHAR_LIMIT = 8000
 
 _IMAGE_MAGIC_EXTENSIONS = (
     (b"\x89PNG", ".png"),
@@ -96,6 +99,17 @@ def _attachment_value(attachment: dict, snake: str, camel: str, default=""):
     return attachment.get(camel, attachment.get(snake, default))
 
 
+def _truncate_student_text(text: str, label: str, warnings: list[str]) -> str:
+    """学生正文/附件文本块截断：防止超大输入撑爆模型上下文导致结构化失败。"""
+    if len(text) <= _STUDENT_TEXT_CHAR_LIMIT:
+        return text
+    warnings.append(
+        f"{label}内容超过 {_STUDENT_TEXT_CHAR_LIMIT} 字，"
+        f"已截取前 {_STUDENT_TEXT_CHAR_LIMIT} 字用于批改",
+    )
+    return text[:_STUDENT_TEXT_CHAR_LIMIT]
+
+
 def normalize_submission_content(
     rich_text: str,
     attachments: list[dict] | None,
@@ -116,7 +130,7 @@ def normalize_submission_content(
         blocks.append(SubmissionTextBlock(
             source_type="rich_text",
             label="学生富文本正文",
-            content=body,
+            content=_truncate_student_text(body, "学生富文本正文", warnings),
             evidence_ref="submission:text:1",
         ))
 
@@ -140,7 +154,9 @@ def normalize_submission_content(
                 blocks.append(SubmissionTextBlock(
                     source_type=_SUPPORTED_TEXT_EXTENSIONS.get(extension, "text"),
                     label=f"附件：{file_name}",
-                    content=fallback,
+                    content=_truncate_student_text(
+                        fallback, f"附件：{file_name}", warnings,
+                    ),
                     evidence_ref=f"submission:attachment:{len(blocks) + 1}",
                 ))
             else:
@@ -163,7 +179,9 @@ def normalize_submission_content(
                 blocks.append(SubmissionTextBlock(
                     source_type=_SUPPORTED_TEXT_EXTENSIONS[extension],
                     label=f"附件：{file_name}",
-                    content=content,
+                    content=_truncate_student_text(
+                        content, f"附件：{file_name}", warnings,
+                    ),
                     evidence_ref=f"submission:attachment:{len(blocks) + 1}",
                 ))
             else:

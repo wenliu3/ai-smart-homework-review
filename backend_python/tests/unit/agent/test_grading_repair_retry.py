@@ -318,3 +318,36 @@ def test_review_uses_text_profile_for_text_only_submissions():
     node(_state())
 
     assert requested == ["grading_review"]
+
+
+# ========== 提示词 + 正则提取结构化（mimo 等模型 tool_choice 不可靠的替代方案） ==========
+
+def test_extract_structured_payload_from_code_block_and_bare_json():
+    from app.agent.subagents.grading import _extract_structured_payload
+
+    block = '评分如下：\n```json\n{"items": [{"criterion_id": "quality", "score": 85}], "summary": "不错"}\n```\n完毕。'
+    assert _extract_structured_payload(block)["items"][0]["score"] == 85
+
+    bare = '{"items": [{"criterion_id": "quality", "score": 90}], "summary": "好"}'
+    assert _extract_structured_payload(bare)["items"][0]["score"] == 90
+
+    assert _extract_structured_payload("完全没有 JSON 的输出") is None
+    assert _extract_structured_payload("") is None
+
+
+def test_grader_extracts_draft_from_plain_text_json():
+    """模型按提示词输出纯文本 JSON（无 tool_choice 产物）时，invoke 侧正则提取成功。"""
+    text = (
+        '{"rubric_version": "v1", '
+        '"items": [{"criterion_id": "quality", "title": "质量", "score": 85, '
+        '"max_score": 100, "feedback": "完成良好", "evidence_refs": ["submission:text:1"]}], '
+        '"summary": "总体不错"}'
+    )
+    agent = _SequenceAgent([{"messages": [AIMessage(content=text)]}])
+    node = create_grading_node(object(), _Registry({"grading": agent}))
+
+    update = node(_state())
+
+    assert "grading_draft" in update
+    assert update["grading_draft"].total_score == 85
+    assert "grading_failure" not in update
