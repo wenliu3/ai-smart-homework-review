@@ -103,7 +103,8 @@ def _grading_prompt(state: dict, *, reviewer: bool) -> str:
         "3. 每个维度给出 score、max_score、feedback（含得分依据与扣分原因）和 evidence_refs。\n"
         "4. 不得从自然语言解析或生成可信总分；总分由后端汇总。\n"
         "5. 严格以如下 JSON 格式输出，只输出该 JSON，不要输出任何其他文字：\n"
-        '{"items": [{"criterion_id": "<量表里的id>", "title": "<维度名>", "score": <数字>,\n'
+        '{"rubric_version": "<评分量表的version字段>",\n'
+        ' "items": [{"criterion_id": "<量表里的id>", "title": "<维度名>", "score": <数字>,\n'
         '  "max_score": <数字>, "feedback": "<得分依据与扣分原因>", "evidence_refs": ["<提交证据引用>"]}],\n'
         ' "summary": "<整体总结>", "confidence": <0到1的数字或null>}\n'
         + build_grading_context(
@@ -284,6 +285,10 @@ def invoke_structured_grader(
         if raw is not None
         else ""
     )
+    # rubric_version 由后端决定（量表版本），模型不应编造：一律覆盖为量表真实版本，
+    # 防止模型漏输出或输出错误版本导致校验失败。
+    if isinstance(raw, dict):
+        raw["rubric_version"] = state["rubric"].version
     try:
         draft = GradingDraft.model_validate(
             raw, strict=True,
