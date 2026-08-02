@@ -63,48 +63,93 @@ class _FakeLLM:
         return response
 
 
-def _patch_llm(monkeypatch, fake):
-    monkeypatch.setattr(
-        "app.tasks.grading.model_gateway.get_chat_model_by_code",
-        lambda *args, **kwargs: fake,
+def _patch_ai_call(monkeypatch, content):
+    """mock AiModel 查询与 httpx 调用，返回预设模型响应 content。
+
+    返回 (db, client)：db 是 `_run_ai_grading` 查询 AiModel 的替身；
+    client.sent_payload 记录实际发送的请求体供断言。
+    """
+    from app.models import AiModel
+
+    fake_model = AiModel(
+        code="deepseek", name="DeepSeek", model_name="deepseek-v4-flash",
+        base_url="https://api.deepseek.com", api_key="sk-test",
+        status="active", provider="DeepSeek",
     )
 
+    class _Query:
+        def filter(self, *a, **k):
+            return self
 
-def _texts_from_prompt(prompt):
+        def first(self):
+            return fake_model
+
+    class _DB:
+        def query(self, *a, **k):
+            return _Query()
+
+    class _Resp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"choices": [{"message": {"content": content}}]}
+
+    class _Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def post(self, url, headers=None, json=None):
+            self.sent_payload = json
+            return _Resp()
+
+    client = _Client()
+    monkeypatch.setattr("app.tasks.grading.httpx.Client", lambda *a, **k: client)
+    return _DB(), client
+
+
+def _texts_from_payload(payload):
     return "\n".join(
-        block["text"] for block in prompt if block["type"] == "text"
+        block["text"]
+        for block in payload["messages"][0]["content"]
+        if block["type"] == "text"
     )
 
 
 # ========== 正则提取总分 ==========
 
 def test_run_ai_grading_extracts_fullwidth_score(monkeypatch):
-    fake = _FakeLLM("**【总分：85分】**\n✅ 优点：内容完整")
-    _patch_llm(monkeypatch, fake)
+    db, client = _patch_ai_call(monkeypatch, "**【总分：85分】**\n✅ 优点：内容完整")
 
-    result = _run_ai_grading(object(), _submission(), _assignment())
+    result = _run_ai_grading(db, _submission(), _assignment())
 
     assert result["score"] == 85
     assert result["content"].startswith("**【总分：85分】**")
     assert result["model_code"] == "deepseek"
     # 消息里包含格式要求与学生正文
-    text = _texts_from_prompt(fake.prompt)
+    text = _texts_from_payload(client.sent_payload)
     assert "【总分：XX分】" in text
     assert "学生答案" in text
+    # 模型参数对齐 7/15 版
+    assert client.sent_payload["temperature"] == 0.7
+    assert client.sent_payload["max_tokens"] == 2000
 
 
 def test_run_ai_grading_extracts_halfwidth_score(monkeypatch):
-    _patch_llm(monkeypatch, _FakeLLM("总分:90分"))
+    db, client = _patch_ai_call(monkeypatch, "总分:90分")
 
-    result = _run_ai_grading(object(), _submission(), _assignment())
+    result = _run_ai_grading(db, _submission(), _assignment())
 
     assert result["score"] == 90
 
 
 def test_run_ai_grading_missing_score_degrades(monkeypatch):
-    _patch_llm(monkeypatch, _FakeLLM("内容完整，但回复里没有写总分"))
+    db, _ = _patch_ai_call(monkeypatch, "内容完整，但回复里没有写总分")
 
-    result = _run_ai_grading(object(), _submission(), _assignment())
+    result = _run_ai_grading(db, _submission(), _assignment())
 
     assert result["score"] is None
     assert result["content"].startswith("⚠️ AI 评分解析失败，请教师人工复核。")
@@ -112,13 +157,13 @@ def test_run_ai_grading_missing_score_degrades(monkeypatch):
 
 
 def test_run_ai_grading_coerces_block_content(monkeypatch):
-    """多模态模型 content 为分块列表时仍能解析出总分。"""
-    _patch_llm(
+    """模型响应 content 为分块列表时仍能解析出总分。"""
+    db, _ = _patch_ai_call(
         monkeypatch,
-        _FakeLLM([{"type": "text", "text": "总分：75分\n不错"}]),
+        [{"type": "text", "text": "总分：75分\n不错"}],
     )
 
-    result = _run_ai_grading(object(), _submission(), _assignment())
+    result = _run_ai_grading(db, _submission(), _assignment())
 
     assert result["score"] == 75
     assert "不错" in result["content"]

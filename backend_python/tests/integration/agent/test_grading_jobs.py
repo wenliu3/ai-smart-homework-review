@@ -442,8 +442,14 @@ def test_routing_config_missing_rule_model_fails_controlled(db):
 
 def test_run_ai_grading_routes_by_rule_model_type(db, monkeypatch):
     """_run_ai_grading 按 ai_rule.modelType 显式路由取模型（不回退默认）。"""
+    from app.models import AiModel
     from app.tasks.grading import _run_ai_grading
 
+    db.add(AiModel(
+        code="mimo", name="小米", provider="小米", model_name="mimo-v2.5",
+        base_url="https://api.xiaomimimo.com/v1", api_key="sk-test",
+        status="active", is_default=False,
+    ))
     db.add(_routing_assignment())
     db.commit()
     assignment = db.query(Assignment).one()
@@ -457,26 +463,34 @@ def test_run_ai_grading_routes_by_rule_model_type(db, monkeypatch):
         attachments=[],
     )
 
-    requested = {}
+    sent = {}
 
     class _Resp:
-        content = "**【总分：90分】**\n总体不错"
+        def raise_for_status(self):
+            pass
 
-        def invoke(self, messages):
+        def json(self):
+            return {"choices": [{"message": {"content": "**【总分：90分】**\n总体不错"}}]}
+
+    class _Client:
+        def __enter__(self):
             return self
 
-    def _fake_llm(*args, **kwargs):
-        requested.update(kwargs)
-        return _Resp()
+        def __exit__(self, *a):
+            return False
+
+        def post(self, url, headers=None, json=None):
+            sent["url"] = url
+            sent["json"] = json
+            return _Resp()
 
     monkeypatch.setattr(
-        grading_tasks.model_gateway,
-        "get_chat_model_by_code",
-        _fake_llm,
+        "app.tasks.grading.httpx.Client", lambda *a, **k: _Client(),
     )
 
     result = _run_ai_grading(db, submission, assignment)
 
-    assert requested["model_code"] == "mimo"
+    assert "mimo-v2.5" in sent["json"]["model"]
+    assert sent["json"]["temperature"] == 0.7
     assert result["score"] == 90
     assert result["content"].startswith("**【总分：90分】**")

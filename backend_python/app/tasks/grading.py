@@ -16,12 +16,12 @@ from __future__ import annotations
 import base64
 import hashlib
 import html
+import httpx
 import logging
 import os
 import re
 
 from celery.exceptions import SoftTimeLimitExceeded
-from langchain_core.messages import HumanMessage
 from sqlalchemy import case, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -30,10 +30,8 @@ from ..agent.contracts import (
     AGENT_GRADING_TIMEOUT,
     AGENT_RULE_MODEL_NOT_CONFIGURED,
     GradingRubric,
-    ModelProfile,
     RubricCriterion,
 )
-from ..agent.gateway import model_gateway
 from ..agent.runtime import BudgetExceeded
 from ..assistant_database import AssistantSessionLocal
 from ..config import settings
@@ -43,6 +41,7 @@ from ..database import SessionLocal
 from ..models import (
     AgentRun,
     AgentSession,
+    AiModel,
     Assignment,
     Submission,
 )
@@ -357,9 +356,10 @@ def _grading_prompt_text(assignment) -> str:
         "2. 在开头用 **【总分：XX分】** 标明总分\n"
         "3. 每个评分维度用 **1. 维度名：XX分** 格式加粗标注\n"
         "4. 优点用 ✅ 开头，改进建议用 📝 开头\n"
-        "5. 整体评价用简短总结\n"
-        "6. 请结合学生上传的图片内容进行评判（图表、截图等）\n"
-        "7. 请对照「老师布置的作业要求」和「老师提供的参考附件」，判断学生是否达到要求"
+        "5. 关键分数和评语用 **粗体** 突出显示\n"
+        "6. 整体评价用简短总结，不要过长\n"
+        "7. 请结合学生上传的图片内容进行评判（图表、截图、手写内容等）\n"
+        "8. 请对照上方「老师布置的作业要求」和「老师提供的参考附件」，判断学生是否达到要求"
     )
     return "\n\n".join(parts)
 
@@ -561,18 +561,32 @@ def _run_ai_grading(
     assignment: Assignment,
     rubric=None,  # 兼容旧 runner 签名；直接调 AI 方法不再做量表校验
 ) -> dict:
-    """直接调 AI 批改：多模态消息 → 正则提取总分。
+    """直接调 AI 批改（7 月 15 版方法）：多模态消息 → 正则提取总分。
+
+    参数与 7/15 版完全一致：temperature=0.7、max_tokens=2000、超时 120s，
+    OpenAI 兼容 chat/completions 多模态格式。DeepSeek V4 默认 thinking 不支持
+    tool_choice，沿用 gateway 约定经请求体 thinking.disabled 关闭。
 
     返回 {"score": int|None, "content": ai_text, "model_code": ...}。
     score 为 None（未找到「总分：XX分」）时 content 前缀加人工复核提示。
     """
-    routing = _grading_routing_config(business_db, assignment)
-    model_code = routing["rule_model_code"]
-    llm = model_gateway.get_chat_model_by_code(
-        business_db,
-        model_code=model_code,
-        profile=ModelProfile.VISION_GRADER,
+    model_code = _grading_routing_config(business_db, assignment)["rule_model_code"]
+    model = (
+        business_db.query(AiModel)
+        .filter(AiModel.code == model_code, AiModel.status == "active")
+        .first()
     )
+    if model is None:
+        raise GradingRoutingError(
+            AGENT_RULE_MODEL_NOT_CONFIGURED,
+            f"未找到启用状态下的 AI 规则模型「{model_code}」",
+        )
+    if not (model.api_key or "").strip():
+        raise GradingRoutingError(
+            AGENT_RULE_MODEL_NOT_CONFIGURED,
+            f"AI 规则模型「{model.name}」未配置 API Key",
+        )
+
     prompt = _grading_prompt_text(assignment)
     media_items = _build_media_items(
         submission,
@@ -583,8 +597,38 @@ def _run_ai_grading(
         {"type": "text", "text": f"{prompt}\n\n【学生作业内容】"},
         *media_items,
     ]
-    response = llm.invoke([HumanMessage(content=message_content)])
-    ai_text = _coerce_text_content(response.content)
+    payload: dict = {
+        "model": model.model_name,
+        "messages": [{"role": "user", "content": message_content}],
+        "temperature": 0.7,
+        "max_tokens": 2000,
+    }
+    provider = (model.provider or "").lower()
+    if "deepseek" in provider and "v4" in (model.model_name or "").lower():
+        payload["thinking"] = {"type": "disabled"}
+
+    api_url = f"{model.base_url}/chat/completions"
+    try:
+        with httpx.Client(timeout=120) as client:
+            resp = client.post(
+                api_url,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {model.api_key}",
+                },
+                json=payload,
+            )
+            resp.raise_for_status()
+            result = resp.json()
+    except httpx.HTTPError as exc:
+        raise GradingRoutingError(
+            AGENT_RULE_MODEL_NOT_CONFIGURED,
+            f"AI 批改调用失败：{exc}",
+        ) from exc
+
+    ai_text = _coerce_text_content(
+        (result.get("choices") or [{}])[0].get("message", {}).get("content", ""),
+    )
     match = _SCORE_RE.search(ai_text)
     if match:
         score = int(match.group(1))
