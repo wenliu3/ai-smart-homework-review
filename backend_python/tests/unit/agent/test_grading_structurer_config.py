@@ -95,6 +95,19 @@ def test_grading_structurer_binding_crud(db, ai_model_factory):
     assert get_grading_structurer_binding(db)["enabled"] is False
 
 
+def test_binding_rebind_same_model_is_idempotent(db, ai_model_factory):
+    ai_model_factory(code="deepseek")
+    ai_model_factory(code="mimo", is_default=False)
+
+    set_grading_structurer_binding(db, enabled=True, model_code="deepseek")
+    result = set_grading_structurer_binding(db, enabled=True, model_code="deepseek")
+    assert result["modelCode"] == "deepseek"
+    db.expire_all()
+    assert _binding_flags(db, "deepseek") == {"grading_structurer": True}
+    assert _binding_flags(db, "mimo") == {}
+    assert get_grading_structurer_binding(db)["modelCode"] == "deepseek"
+
+
 def test_binding_enable_raises_when_model_not_found(db, ai_model_factory):
     ai_model_factory(code="deepseek")
     with pytest.raises(NotFoundException) as exc:
