@@ -559,6 +559,7 @@ def _run_ai_grading(
     business_db: Session,
     submission: Submission,
     assignment: Assignment,
+    rubric=None,  # 兼容旧 runner 签名；直接调 AI 方法不再做量表校验
 ) -> dict:
     """直接调 AI 批改：多模态消息 → 正则提取总分。
 
