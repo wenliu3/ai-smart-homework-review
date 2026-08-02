@@ -397,8 +397,8 @@ def _routing_assignment(*, with_model_type: bool = True) -> Assignment:
     )
 
 
-def test_routing_config_disabled_when_no_structurer_binding(db):
-    """关闭绑定：rule_model_code 来自 ai_rule.modelType，独立结构化路径关闭。"""
+def test_routing_config_uses_ai_rule_model_type(db):
+    """单 Agent：rule_model_code 只来自 ai_rule.modelType，不含独立结构化绑定。"""
     db.add(_routing_assignment())
     db.commit()
 
@@ -407,49 +407,22 @@ def test_routing_config_disabled_when_no_structurer_binding(db):
     assert routing == {
         "rule_model_code": "mimo",
         "rule_prompt": "按实验要求评分",
-        "structurer_enabled": False,
-        "structurer_model_code": None,
     }
 
 
-def test_routing_config_enabled_with_bound_structurer(db, ai_model_factory):
-    """开启并绑定 deepseek：独立结构化路径开启，structurer_model_code=deepseek。"""
-    ai_model_factory(code="deepseek", is_default=True)
-    db.add(_routing_assignment())
-    db.commit()
-    ai_model_crud.set_grading_structurer_binding(
-        db, enabled=True, model_code="deepseek",
-    )
-
-    routing = grading_tasks._grading_routing_config(db, db.query(Assignment).one())
-
-    assert routing == {
-        "rule_model_code": "mimo",
-        "rule_prompt": "按实验要求评分",
-        "structurer_enabled": True,
-        "structurer_model_code": "deepseek",
-    }
-
-
-def test_routing_config_codes_stable_across_default_switch(db, ai_model_factory):
-    """切换默认模型后，rule_model_code/structurer_model_code 均不变。"""
+def test_routing_config_stable_across_default_switch(db, ai_model_factory):
+    """切换默认模型后 rule_model_code 不变（不依赖默认模型）。"""
     ai_model_factory(code="mimo", is_default=True)
     ai_model_factory(code="deepseek", is_default=False)
     db.add(_routing_assignment())
     db.commit()
-    ai_model_crud.set_grading_structurer_binding(
-        db, enabled=True, model_code="deepseek",
-    )
 
     before = grading_tasks._grading_routing_config(db, db.query(Assignment).one())
     ai_model_crud.set_default(db, "deepseek")
     after = grading_tasks._grading_routing_config(db, db.query(Assignment).one())
 
     assert before["rule_model_code"] == "mimo"
-    assert before["structurer_model_code"] == "deepseek"
     assert after["rule_model_code"] == "mimo"
-    assert after["structurer_model_code"] == "deepseek"
-    assert after["structurer_enabled"] is True
 
 
 def test_routing_config_missing_rule_model_fails_controlled(db):
@@ -463,26 +436,8 @@ def test_routing_config_missing_rule_model_fails_controlled(db):
     assert exc_info.value.code == AGENT_RULE_MODEL_NOT_CONFIGURED
 
 
-def test_routing_config_structurer_binding_conflict_fails_controlled(
-    db, ai_model_factory,
-):
-    """绑定配置冲突：get_grading_structurer_binding 抛 BizException → 稳定错误码受控失败。"""
-    first = ai_model_factory(code="mimo", is_default=True)
-    second = ai_model_factory(code="deepseek", is_default=False)
-    first.profile_bindings = {"grading_structurer": True}
-    second.profile_bindings = {"grading_structurer": True}
-    db.commit()
-    db.add(_routing_assignment())
-    db.commit()
-
-    with pytest.raises(GradingRoutingError) as exc_info:
-        grading_tasks._grading_routing_config(db, db.query(Assignment).one())
-
-    assert exc_info.value.code == AGENT_RULE_MODEL_NOT_CONFIGURED
-
-
 def test_grading_state_carries_explicit_routing(db, student):
-    """build_grading_state 把显式路由配置写入初始状态。"""
+    """build_grading_state 把规则模型路由写入初始状态。"""
     db.add(_routing_assignment())
     db.commit()
     assignment = db.query(Assignment).one()
@@ -500,64 +455,10 @@ def test_grading_state_carries_explicit_routing(db, student):
         submission,
         assignment,
         grading_tasks.rubric_from_ai_rule(assignment.ai_rule),
-        routing={
-            "rule_model_code": "mimo",
-            "rule_prompt": "按实验要求评分",
-            "structurer_enabled": True,
-            "structurer_model_code": "deepseek",
-        },
+        routing={"rule_model_code": "mimo", "rule_prompt": "按实验要求评分"},
     )
 
     assert state["rule_model_code"] == "mimo"
     assert state["rule_prompt"] == "按实验要求评分"
-    assert state["structurer_enabled"] is True
-    assert state["structurer_model_code"] == "deepseek"
-
-
-def test_invalid_structurer_binding_fails_run_before_model_call(
-    db, assistant_db, student, monkeypatch,
-):
-    """结构化绑定无效：run 以 AGENT_RULE_MODEL_NOT_CONFIGURED 失败，绝不走模型调用。"""
-    db.add(_routing_assignment())
-    db.commit()
-    assignment = db.query(Assignment).one()
-    submission = Submission(
-        assignment_id=assignment.id,
-        student_id=student.id,
-        class_id=1,
-        status="submitted",
-        submission_count=2,
-        content="学生答案",
-    )
-    db.add(submission)
-    db.commit()
-    db.refresh(submission)
-    monkeypatch.setattr(
-        grading_tasks.run_grading_task, "delay", lambda **kwargs: None,
-    )
-    run_id = enqueue_grading_job(
-        db, assistant_db,
-        submission=submission, user_id=student.id, actor_role="student",
-    )
-    monkeypatch.setattr(
-        ai_model_crud,
-        "get_grading_structurer_binding",
-        lambda db_: {"enabled": True, "modelCode": "ghost-model", "model": None},
-    )
-
-    with pytest.raises(GradingRoutingError) as exc_info:
-        execute_grading_job(
-            submission_id=submission.id,
-            submission_count=2,
-            rubric_version="v1",
-            run_id=run_id,
-            user_id=student.id,
-            business_db=db,
-            run_db=assistant_db,
-        )
-
-    assistant_db.expire_all()
-    run = assistant_db.query(AgentRun).filter(AgentRun.id == run_id).one()
-    assert run.status == "failed"
-    assert run.error_code == AGENT_RULE_MODEL_NOT_CONFIGURED
-    assert exc_info.value.code == AGENT_RULE_MODEL_NOT_CONFIGURED
+    assert "structurer_enabled" not in state
+    assert "structurer_model_code" not in state

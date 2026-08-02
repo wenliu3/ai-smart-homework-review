@@ -122,27 +122,7 @@ def _structurer_state(**overrides) -> dict:
     return state
 
 
-# ========== 步骤 1：普通报告节点 ==========
-
-def test_plain_grader_primary_extracts_report_once():
-    agent = _FakeAgent({"messages": [AIMessage(
-        content="主批改普通报告",
-        usage_metadata={"input_tokens": 80, "output_tokens": 40, "total_tokens": 120},
-    )]})
-    registry = _RecordingRegistry(agent)
-    node = create_grading_node(object(), registry)
-
-    result = node(_plain_state())
-
-    assert result["grading_report"] == "主批改普通报告"
-    assert result["usage"]["total_tokens"] == 120
-    assert len(agent.calls) == 1
-    # 普通模式 Agent 走 get_grading_agent(structured=False)，不用 specialist
-    assert registry.grading_calls == [{
-        "model_code": "mimo", "reviewer": False, "structured": False,
-    }]
-    assert registry.specialist_calls == []
-
+# ========== 步骤 1：普通报告节点（保留函数级测试；create_node 分派已随单 Agent 简化移除） ==========
 
 def test_plain_grader_review_extracts_report_once():
     agent = _FakeAgent({"messages": [AIMessage(

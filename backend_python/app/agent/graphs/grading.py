@@ -93,18 +93,12 @@ def _draft_review_reasons(draft: GradingDraft, role: str) -> list[str]:
 def build_grading_graph(
     normalize_node: Callable[[dict], dict],
     grading_node: Callable[[dict], dict],
-    review_node: Callable[[dict], dict],
-    structurer_node: Callable[[dict], dict] | None = None,
     checkpointer=None,
 ):
-    """构建规范化 → 主批改 → 独立复核 → (可选结构化) → 确定性决策工作流。
+    """构建单 Agent 批改图：规范化 → 主批改 → 确定性决策。
 
-    批改/复核/结构化节点返回 grading_failure 时短路到 END——结果转教师人工，
+    主批改节点返回 grading_failure 时短路到 END——结果转教师人工，
     而不是让异常把整个 run 打成 failed 并丢弃模型产出。
-
-    structurer_node 非 None 且 state.structurer_enabled 为 True 时，复核后先走
-    独立结构化节点（规则模型普通报告 → GradingReportPair），再进确定性决策；
-    未开启或未提供 structurer_node 时保持原有直接结构化行为不变。
     """
 
     def _run(node_name: str, node: Callable[[dict], dict]):
@@ -120,28 +114,14 @@ def build_grading_graph(
 
     def decide(state: GradingState) -> dict:
         rubric = state["rubric"]
-        # 独立结构化路径由 report_pair 提供两份草案；直接路径读 grading_draft/review_draft
-        pair = state.get("report_pair")
-        if pair is not None:
-            primary = pair.primary
-            review = pair.review
-        else:
-            primary = state["grading_draft"]
-            review = state["review_draft"]
-        primary = primary.validate_against(rubric)
-        review = review.validate_against(rubric)
-        difference = abs(primary.total_score - review.total_score)
-        reasons: list[str] = []
-        if difference > rubric.total_score * 0.10:
-            reasons.append("两次独立评分差异超过满分 10%")
-        reasons.extend(_draft_review_reasons(primary, "主批改"))
-        reasons.extend(_draft_review_reasons(review, "复核"))
-        # 去重保序
-        reasons = list(dict.fromkeys(reasons))
+        # 单 Agent 模式：主批改草案即最终结果，不做双评分比较。
+        # 仍做确定性的转人工检查（证据缺失 / 模型自报需人工）。
+        draft = state["grading_draft"].validate_against(rubric)
+        reasons = _draft_review_reasons(draft, "主批改")
         outcome = GradingOutcome(
-            primary=primary,
-            review=review,
-            score_difference=difference,
+            primary=draft,
+            review=draft,
+            score_difference=0,
             needs_human_review=bool(reasons),
             review_reasons=reasons,
         )
@@ -156,16 +136,6 @@ def build_grading_graph(
     def after_node(state: GradingState) -> str:
         return "failed" if state.get("grading_failure") else "ok"
 
-    def after_review(state: GradingState) -> str:
-        if state.get("grading_failure"):
-            return "failed"
-        if state.get("structurer_enabled") and structurer_node is not None:
-            return "structurer"
-        return "decision"
-
-    def after_structurer(state: GradingState) -> str:
-        return "failed" if state.get("grading_failure") else "ok"
-
     graph = StateGraph(GradingState)
     graph.add_node(
         NORMALIZE_CONTENT_NODE,
@@ -175,39 +145,14 @@ def build_grading_graph(
         GRADING_AGENT_NODE,
         _run(GRADING_AGENT_NODE, grading_node),
     )
-    graph.add_node(
-        GRADING_REVIEW_NODE,
-        _run(GRADING_REVIEW_NODE, review_node),
-    )
     graph.add_node(GRADING_DECISION_NODE, decide)
-    if structurer_node is not None:
-        graph.add_node(
-            GRADING_STRUCTURER_NODE,
-            _run(GRADING_STRUCTURER_NODE, structurer_node),
-        )
     graph.add_edge(START, NORMALIZE_CONTENT_NODE)
     graph.add_edge(NORMALIZE_CONTENT_NODE, GRADING_AGENT_NODE)
     graph.add_conditional_edges(
         GRADING_AGENT_NODE,
         after_node,
-        {"ok": GRADING_REVIEW_NODE, "failed": END},
+        {"ok": GRADING_DECISION_NODE, "failed": END},
     )
-    # 结构化节点未提供时不注册 "structurer" 出口，避免图校验引用不存在的节点
-    review_map: dict[str, str] = {"failed": END}
-    if structurer_node is not None:
-        review_map["structurer"] = GRADING_STRUCTURER_NODE
-    review_map["decision"] = GRADING_DECISION_NODE
-    graph.add_conditional_edges(
-        GRADING_REVIEW_NODE,
-        after_review,
-        review_map,
-    )
-    if structurer_node is not None:
-        graph.add_conditional_edges(
-            GRADING_STRUCTURER_NODE,
-            after_structurer,
-            {"ok": GRADING_DECISION_NODE, "failed": END},
-        )
     graph.add_edge(GRADING_DECISION_NODE, END)
     return graph.compile(checkpointer=checkpointer)
 

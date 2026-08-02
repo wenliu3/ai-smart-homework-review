@@ -1,15 +1,13 @@
+"""单 Agent 批改图测试：规范化 → 主批改 → 确定性决策。"""
 from app.agent.contracts import (
     CriterionGrade,
     GradingDraft,
-    GradingReportPair,
     GradingRubric,
     RubricCriterion,
 )
 from app.agent.graphs.grading import (
     GRADING_AGENT_NODE,
     GRADING_DECISION_NODE,
-    GRADING_REVIEW_NODE,
-    GRADING_STRUCTURER_NODE,
     NORMALIZE_CONTENT_NODE,
     build_grading_graph,
 )
@@ -50,14 +48,7 @@ def _rubric() -> GradingRubric:
     )
 
 
-def _pair() -> GradingReportPair:
-    return GradingReportPair(
-        primary=_draft(54, 36),
-        review=_draft(52, 35),
-    )
-
-
-def test_grading_graph_runs_named_independent_agents_in_order():
+def test_grading_graph_runs_nodes_in_order():
     calls = []
 
     def normalize(state):
@@ -68,31 +59,29 @@ def test_grading_graph_runs_named_independent_agents_in_order():
         calls.append(GRADING_AGENT_NODE)
         return {"grading_draft": _draft(54, 36)}
 
-    def review(state):
-        calls.append(GRADING_REVIEW_NODE)
-        assert state["grading_draft"].total_score == 90
-        return {"review_draft": _draft(52, 35)}
-
-    result = build_grading_graph(normalize, grade, review).invoke({
+    result = build_grading_graph(normalize, grade).invoke({
         "rubric": _rubric(),
         "submission_id": 7,
         "submission_count": 2,
     })
 
-    assert calls == [
+    assert calls == [NORMALIZE_CONTENT_NODE, GRADING_AGENT_NODE]
+    assert result["outcome"].needs_human_review is False
+    assert result["visited_nodes"] == [
         NORMALIZE_CONTENT_NODE,
         GRADING_AGENT_NODE,
-        GRADING_REVIEW_NODE,
+        GRADING_DECISION_NODE,
     ]
-    assert result["outcome"].needs_human_review is False
-    assert result["visited_nodes"][:3] == calls
 
 
-def test_grading_graph_requires_human_review_over_ten_percent_difference():
+def test_grading_graph_requires_human_review_when_evidence_missing():
+    # 主批改草案缺证据：确定性转人工检查触发，不写入分数
+    draft = _draft(60, 40)
+    draft.items[0].evidence_refs = []
+
     graph = build_grading_graph(
         lambda state: {"normalized_content": {"schema_version": "v1"}},
-        lambda state: {"grading_draft": _draft(60, 40)},
-        lambda state: {"review_draft": _draft(45, 30)},
+        lambda state: {"grading_draft": draft},
     )
 
     result = graph.invoke({
@@ -101,70 +90,16 @@ def test_grading_graph_requires_human_review_over_ten_percent_difference():
         "submission_count": 2,
     })
 
-    assert result["outcome"].score_difference == 25
     assert result["outcome"].needs_human_review is True
-    assert "teacher_score" not in result
-    assert "teacher_review_content" not in result
+    assert "主批改评分缺少提交证据" in result["outcome"].review_reasons[0]
 
 
-# ========== 可选独立结构化节点（任务 5） ==========
-
-def test_structurer_branch_routed_when_enabled():
-    structurer_calls = []
+def test_grading_graph_short_circuits_on_failure():
     graph = build_grading_graph(
         lambda state: {"normalized_content": {"schema_version": "v1"}},
-        lambda state: {"grading_report": "主批改普通报告"},
-        lambda state: {"review_report": "独立复核普通报告"},
-        structurer_node=lambda state: structurer_calls.append(1) or {
-            "report_pair": _pair(),
-            "usage": {"total_tokens": 10},
-        },
-    )
-
-    result = graph.invoke({
-        "rubric": _rubric(),
-        "submission_id": 7,
-        "submission_count": 2,
-        "structurer_enabled": True,
-    })
-
-    assert structurer_calls == [1]
-    assert GRADING_STRUCTURER_NODE in result["visited_nodes"]
-    assert GRADING_DECISION_NODE in result["visited_nodes"]
-    assert result["outcome"].needs_human_review is False
-
-
-def test_structurer_skipped_when_disabled():
-    structurer_calls = []
-    graph = build_grading_graph(
-        lambda state: {"normalized_content": {"schema_version": "v1"}},
-        lambda state: {"grading_draft": _draft(54, 36)},
-        lambda state: {"review_draft": _draft(52, 35)},
-        structurer_node=lambda state: structurer_calls.append(1) or {
-            "report_pair": _pair(),
-        },
-    )
-
-    result = graph.invoke({
-        "rubric": _rubric(),
-        "submission_id": 7,
-        "submission_count": 2,
-        "structurer_enabled": False,
-    })
-
-    assert structurer_calls == []
-    assert GRADING_STRUCTURER_NODE not in result["visited_nodes"]
-    assert result["outcome"].needs_human_review is False
-
-
-def test_structurer_failure_short_circuits_to_end():
-    graph = build_grading_graph(
-        lambda state: {"normalized_content": {"schema_version": "v1"}},
-        lambda state: {"grading_report": "主批改普通报告"},
-        lambda state: {"review_report": "独立复核普通报告"},
-        structurer_node=lambda state: {"grading_failure": {
-            "stage": GRADING_STRUCTURER_NODE,
-            "error": "报告信息不足",
+        lambda state: {"grading_failure": {
+            "stage": GRADING_AGENT_NODE,
+            "error": "结构化校验失败",
             "raw_response": "",
         }},
     )
@@ -173,11 +108,8 @@ def test_structurer_failure_short_circuits_to_end():
         "rubric": _rubric(),
         "submission_id": 7,
         "submission_count": 2,
-        "structurer_enabled": True,
     })
 
     assert "outcome" not in result
-    assert result["grading_failure"]["stage"] == GRADING_STRUCTURER_NODE
-    assert GRADING_STRUCTURER_NODE in result["visited_nodes"]
+    assert result["grading_failure"]["stage"] == GRADING_AGENT_NODE
     assert GRADING_DECISION_NODE not in result["visited_nodes"]
-

@@ -270,11 +270,10 @@ def _validate_structurer_binding(business_db: Session, model_code: str | None) -
 
 
 def _grading_routing_config(business_db: Session, assignment: Assignment) -> dict:
-    """构造批改链路的显式运行配置：规则模型 + 可选独立结构化绑定。
+    """构造批改链路的显式运行配置：规则模型 code。
 
     规则模型 code 只来自作业快照 ai_rule.modelType，**绝不回退默认模型**；
     缺少时抛 GradingRoutingError（稳定错误码 AGENT_RULE_MODEL_NOT_CONFIGURED）。
-    独立结构化绑定读管理员配置，开启时在模型调用前复检绑定有效性。
     """
     ai_rule = assignment.ai_rule or {}
     rule_model_code = str(ai_rule.get("modelType") or "").strip()
@@ -283,24 +282,9 @@ def _grading_routing_config(business_db: Session, assignment: Assignment) -> dic
             AGENT_RULE_MODEL_NOT_CONFIGURED,
             "作业 AI 规则未配置规则模型（modelType），无法发起批改",
         )
-    try:
-        binding = ai_model_crud.get_grading_structurer_binding(business_db)
-    except BizException as exc:
-        # 绑定配置冲突等读取失败：与绑定无效同等对待，以稳定错误码受控失败，
-        # 避免落到通用 except 被吞成 AGENT_GRADING_FAILED。
-        raise GradingRoutingError(
-            AGENT_RULE_MODEL_NOT_CONFIGURED,
-            f"独立结构化绑定配置读取失败：{exc.message}",
-        ) from exc
-    structurer_enabled = bool(binding.get("enabled"))
-    structurer_model_code = binding.get("modelCode")
-    if structurer_enabled:
-        _validate_structurer_binding(business_db, structurer_model_code)
     return {
         "rule_model_code": rule_model_code,
         "rule_prompt": str(ai_rule.get("prompt") or "").strip(),
-        "structurer_enabled": structurer_enabled,
-        "structurer_model_code": structurer_model_code,
     }
 
 
@@ -345,12 +329,11 @@ def build_grading_state(
     upload_dir=None,
     routing: dict | None = None,
 ) -> dict:
-    """构造批改图初始状态：作业要求 + 参考资料 + 预算 + 显式路由配置。
+    """构造批改图初始状态：作业要求 + 参考资料 + 预算 + 规则模型路由。
 
     routing 由任务层（_grading_routing_config）注入，包含 rule_model_code /
-    rule_prompt / structurer_enabled / structurer_model_code。未提供时（无 db
-    上下文的单元测试）保守取 ai_rule 里的规则模型与规则文本，结构化路径默认
-    关闭，保证现有用例不因缺字段而崩。
+    rule_prompt。未提供时（无 db 上下文的单元测试）保守取 ai_rule 里的规则
+    模型与规则文本，保证现有用例不因缺字段而崩。
     """
     base = upload_dir if upload_dir is not None else settings.upload_path
     if routing is None:
@@ -358,8 +341,6 @@ def build_grading_state(
         routing = {
             "rule_model_code": str(ai_rule.get("modelType") or "").strip(),
             "rule_prompt": str(ai_rule.get("prompt") or "").strip(),
-            "structurer_enabled": False,
-            "structurer_model_code": None,
         }
     return {
         "submission_id": submission.id,
@@ -373,8 +354,6 @@ def build_grading_state(
         "runtime_budget": grading_run_budget(),
         "rule_model_code": routing["rule_model_code"],
         "rule_prompt": routing["rule_prompt"],
-        "structurer_enabled": routing["structurer_enabled"],
-        "structurer_model_code": routing["structurer_model_code"],
     }
 
 
@@ -393,9 +372,7 @@ def _run_production_workflow(
             ),
         }
 
-    # 显式运行配置一次计算：state 与 structurer_node 共用同一路由决策，
-    # 保证「structurer_enabled 置 True 的 run 一定带 structurer_node」的原子性，
-    # 避免 decide 因缺 grading_draft 而 KeyError。
+    # 单 Agent 批改：规则模型（ai_rule.modelType）一次直接结构化出分。
     routing = _grading_routing_config(business_db, assignment)
     state = build_grading_state(
         submission,
@@ -403,16 +380,9 @@ def _run_production_workflow(
         rubric,
         routing=routing,
     )
-    structurer_node = (
-        grading_structurer.create_node(business_db)
-        if routing["structurer_enabled"]
-        else None
-    )
     graph = build_grading_graph(
         normalize_node,
         grading.create_node(business_db),
-        grading_review.create_node(business_db),
-        structurer_node=structurer_node,
     )
     return graph.invoke(state)
 

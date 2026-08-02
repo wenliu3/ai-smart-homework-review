@@ -343,21 +343,18 @@ def create_node(db, registry: AgentRegistry | None = None) -> Callable:
     reg = registry or agent_registry
 
     def grading_node(state: dict) -> dict:
-        if state.get("structurer_enabled"):
-            # 独立结构化路径：规则模型按 state.rule_model_code 出普通文本报告
+        # 单 Agent：优先用 AI 规则指定的模型（state.rule_model_code）直接结构化出分；
+        # 未指定时（兼容无路由的单元测试）回退默认批改模型。
+        model_code = state.get("rule_model_code")
+        if model_code:
             agent = reg.get_grading_agent(
                 db,
-                model_code=state["rule_model_code"],
+                model_code=model_code,
                 reviewer=False,
-                structured=False,
+                structured=True,
             )
-            return invoke_plain_grader(
-                agent,
-                state,
-                reviewer=False,
-                stage=GRADING_AGENT_NODE,
-            )
-        agent = reg.get_specialist("grading", db)
+        else:
+            agent = reg.get_specialist("grading", db)
         return invoke_structured_grader(
             agent,
             state,
