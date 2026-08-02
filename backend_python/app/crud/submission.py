@@ -1,7 +1,8 @@
 """提交 CRUD。
 
-AI 批改经 tasks/grading.py 的 Celery 双 Agent 工作流触发；
-旧直连批改链路已删除（规划 4.6 / 决策 D4），用量统计在网关层。
+AI 批改经 tasks/grading.py 的 Celery 异步任务触发（直接调 AI + 正则提取
+总分的 7 月 15 版方法）。本模块保留 apply_ai_grading_result /
+mark_submission_needs_manual_grading 供其他调用方与测试使用。
 """
 import os
 import re

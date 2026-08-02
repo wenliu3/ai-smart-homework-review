@@ -19,7 +19,7 @@ from app.models import (
     Submission,
 )
 from app.tasks import grading as grading_tasks
-from tests.factories import _outcome, _usage
+from tests.factories import _usage
 
 
 class _UsageSpecialists:
@@ -90,10 +90,10 @@ def test_ai_model_counters_increment_atomically(db, ai_model_factory):
     assert model.last_used_at is not None
 
 
-def test_grading_run_persists_usage_and_increments_model(
-    db, assistant_db, student, ai_model_factory, monkeypatch,
+def test_grading_run_completes_without_usage_recording(
+    db, assistant_db, student, monkeypatch,
 ):
-    model = ai_model_factory()
+    """直接调用批改不落 Run 用量（usage 留空），只写回 AI 批改结果。"""
     assignment = Assignment(
         title="用量作业",
         teacher_id=99,
@@ -133,18 +133,17 @@ def test_grading_run_persists_usage_and_increments_model(
         business_db=db,
         run_db=assistant_db,
         workflow_runner=lambda *_: {
-            "outcome": _outcome(),
-            "usage": _usage(500, 120),
-            "model_usage": {
-                "deepseek-chat": {"calls": 1, "total_tokens": 620},
-            },
-            "visited_nodes": ["normalize_submission_content", "grading_agent"],
+            "score": 88,
+            "content": "总体完成良好",
+            "model_code": "deepseek-chat",
         },
     )
 
     assistant_db.expire_all()
     run = assistant_db.query(AgentRun).filter(AgentRun.id == run_id).one()
-    assert run.usage_json == _usage(500, 120)
+    assert run.status == "completed"
+    assert run.usage_json == {}
     db.expire_all()
-    assert model.total_tokens == 620
-    assert model.total_usage == 1
+    persisted = db.query(Submission).filter(Submission.id == submission.id).one()
+    assert persisted.ai_score == 88
+    assert persisted.ai_review_content == "总体完成良好"

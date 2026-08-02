@@ -149,7 +149,7 @@ def test_enqueue_is_idempotent_for_same_submission_version(
     assert dispatched[0]["run_id"] == first
 
 
-def test_execute_job_persists_steps_artifact_and_version_safe_result(
+def test_execute_job_persists_artifact_and_version_safe_result(
     db, assistant_db, student, monkeypatch,
 ):
     assignment = Assignment(
@@ -197,13 +197,9 @@ def test_execute_job_persists_steps_artifact_and_version_safe_result(
         business_db=db,
         run_db=assistant_db,
         workflow_runner=lambda *_: {
-            "outcome": _outcome(),
-            "visited_nodes": [
-                "normalize_submission_content",
-                "grading_agent",
-                "grading_review_agent",
-                "grading_decision",
-            ],
+            "score": 88,
+            "content": "总体完成良好",
+            "model_code": "deepseek-chat",
         },
     )
     db.refresh(submission)
@@ -211,17 +207,14 @@ def test_execute_job_persists_steps_artifact_and_version_safe_result(
 
     assert result["status"] == "completed"
     assert submission.ai_score == 88
+    assert submission.ai_review_content == "总体完成良好"
+    assert submission.ai_review_items is None
     assert run.status == "completed"
-    assert [step.node_name for step in run.steps] == [
-        "normalize_submission_content",
-        "grading_agent",
-        "grading_review_agent",
-        "grading_decision",
-    ]
     artifact = assistant_db.query(AgentArtifact).filter(
         AgentArtifact.run_id == run_id,
     ).one()
     assert artifact.artifact_type == "grading_outcome"
+    assert artifact.payload_json["score"] == 88
 
 
 def test_processing_job_redelivery_recovers_and_completes(
@@ -277,8 +270,9 @@ def test_processing_job_redelivery_recovers_and_completes(
         business_db=db,
         run_db=assistant_db,
         workflow_runner=lambda *_: {
-            "outcome": _outcome(),
-            "visited_nodes": [],
+            "score": 88,
+            "content": "总体完成良好",
+            "model_code": "deepseek-chat",
         },
     )
 
@@ -446,27 +440,43 @@ def test_routing_config_missing_rule_model_fails_controlled(db):
     assert exc_info.value.code == AGENT_RULE_MODEL_NOT_CONFIGURED
 
 
-def test_grading_state_carries_explicit_routing(db, student):
-    """build_grading_state 把规则模型路由写入初始状态。"""
+def test_run_ai_grading_routes_by_rule_model_type(db, monkeypatch):
+    """_run_ai_grading 按 ai_rule.modelType 显式路由取模型（不回退默认）。"""
+    from app.tasks.grading import _run_ai_grading
+
     db.add(_routing_assignment())
     db.commit()
     assignment = db.query(Assignment).one()
     submission = Submission(
         assignment_id=assignment.id,
-        student_id=student.id,
+        student_id=0,
         class_id=1,
         status="submitted",
         submission_count=2,
-    )
-    db.add(submission)
-    db.commit()
-
-    state = grading_tasks.build_grading_state(
-        submission,
-        assignment,
-        grading_tasks.rubric_from_ai_rule(assignment.ai_rule),
-        routing={"rule_model_code": "mimo", "rule_prompt": "按实验要求评分"},
+        content="学生答案",
+        attachments=[],
     )
 
-    assert state["rule_model_code"] == "mimo"
-    assert state["rule_prompt"] == "按实验要求评分"
+    requested = {}
+
+    class _Resp:
+        content = "**【总分：90分】**\n总体不错"
+
+        def invoke(self, messages):
+            return self
+
+    def _fake_llm(*args, **kwargs):
+        requested.update(kwargs)
+        return _Resp()
+
+    monkeypatch.setattr(
+        grading_tasks.model_gateway,
+        "get_chat_model_by_code",
+        _fake_llm,
+    )
+
+    result = _run_ai_grading(db, submission, assignment)
+
+    assert requested["model_code"] == "mimo"
+    assert result["score"] == 90
+    assert result["content"].startswith("**【总分：90分】**")

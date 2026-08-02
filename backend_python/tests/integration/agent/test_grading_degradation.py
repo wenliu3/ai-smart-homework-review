@@ -97,14 +97,9 @@ def test_grading_failure_degrades_to_manual_review(
     result = _execute(
         db, assistant_db, student, submission, run_id,
         lambda *_: {
-            "grading_failure": {
-                "stage": "grading_agent",
-                "error": "评分项必须与量表完整且唯一对应",
-                "raw_response": '{"items": "broken"}',
-            },
-            "visited_nodes": [
-                "normalize_submission_content", "grading_agent",
-            ],
+            "score": None,
+            "content": "⚠️ AI 评分解析失败，请教师人工复核。\n\n（AI 回复中未找到「总分：XX分」格式的分数）",
+            "model_code": None,
         },
     )
     db.refresh(submission)
@@ -114,12 +109,12 @@ def test_grading_failure_degrades_to_manual_review(
     assert result["status"] == "completed"
     assert run.status == "completed"
     assert run.error_code is None
-    # 原始草案留证供排查
+    # 原始全文留证供排查
     artifact = assistant_db.query(AgentArtifact).filter(
         AgentArtifact.run_id == run_id,
         AgentArtifact.artifact_type == "grading_raw_draft",
     ).one()
-    assert "broken" in str(artifact.payload_json)
+    assert "评分解析失败" in str(artifact.payload_json)
     # 教师端拿到明确提示；不写入任何分数
     assert submission.ai_score is None
     assert "人工" in submission.ai_review_content
@@ -217,30 +212,32 @@ def test_enqueue_writes_grading_run_id_to_submission(
 
 # ========== 上下文注入 ==========
 
-def test_grading_state_includes_assignment_context(db, student, tmp_path):
+def test_media_items_include_assignment_context(db, student, tmp_path):
     (tmp_path / "reference.txt").write_text("参考答案要点", encoding="utf-8")
     assignment, submission = _setup(
         db, student,
-        description="请论述软件测试的意义",
+        description="<p>请论述软件测试的意义</p>",
         attachments=[{
             "fileName": "reference.txt",
             "fileUrl": "/uploads/reference.txt",
             "fileType": "text/plain",
         }],
     )
-    monkeypatch_upload = tmp_path
 
-    state = grading_tasks.build_grading_state(
+    media_items = grading_tasks._build_media_items(
         submission,
         assignment,
-        grading_tasks.rubric_from_ai_rule(assignment.ai_rule),
-        upload_dir=monkeypatch_upload,
+        str(tmp_path),
+    )
+    texts = "\n".join(
+        item["text"] for item in media_items if item["type"] == "text"
     )
 
-    assert state["assignment_description"] == "请论述软件测试的意义"
-    assert "参考答案要点" in state["reference_materials"]
-    assert state["runtime_budget"].max_model_calls == 6
-    assert state["submission_id"] == submission.id
+    # 老师作业要求（去 HTML）+ 参考附件文本都进入媒体消息
+    assert "请论述软件测试的意义" in texts
+    assert "参考答案要点" in texts
+    # 学生正文也进入消息
+    assert "学生答案" in texts
 
 
 # ========== 任务 7：硬超时父进程收口与历史僵尸 Run ==========
