@@ -491,6 +491,6 @@ def test_run_ai_grading_routes_by_rule_model_type(db, monkeypatch):
     result = _run_ai_grading(db, submission, assignment)
 
     assert "mimo-v2.5" in sent["json"]["model"]
-    assert sent["json"]["temperature"] == 0.7
+    assert sent["json"]["temperature"] == 0.2
     assert result["score"] == 90
     assert result["content"].startswith("**【总分：90分】**")

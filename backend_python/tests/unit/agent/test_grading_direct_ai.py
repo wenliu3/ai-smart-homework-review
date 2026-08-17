@@ -133,8 +133,8 @@ def test_run_ai_grading_extracts_fullwidth_score(monkeypatch):
     text = _texts_from_payload(client.sent_payload)
     assert "【总分：XX分】" in text
     assert "学生答案" in text
-    # 模型参数对齐 7/15 版
-    assert client.sent_payload["temperature"] == 0.7
+    # 单题批改优先保持评分稳定，降低随机性
+    assert client.sent_payload["temperature"] == 0.2
     assert client.sent_payload["max_tokens"] == 2000
 
 

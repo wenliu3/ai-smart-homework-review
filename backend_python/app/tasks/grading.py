@@ -60,6 +60,8 @@ MANUAL_GRADING_NOTE = (
 _TEXT_CHAR_LIMIT = 8000
 # 单份 docx 最多提取的内嵌图片数：防止图片密集文档撑爆多模态输入
 _DOCX_EMBED_IMAGE_LIMIT = 6
+# 批改强调同一量表下的评分一致性，使用低温度减少随机波动
+_GRADING_TEMPERATURE = 0.2
 # 总分提取正则：兼容「总分：85分」「总分:90分」
 _SCORE_RE = re.compile(r"总分[：:]\s*(\d+)\s*分")
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -563,9 +565,10 @@ def _run_ai_grading(
 ) -> dict:
     """直接调 AI 批改（7 月 15 版方法）：多模态消息 → 正则提取总分。
 
-    参数与 7/15 版完全一致：temperature=0.7、max_tokens=2000、超时 120s，
-    OpenAI 兼容 chat/completions 多模态格式。DeepSeek V4 默认 thinking 不支持
-    tool_choice，沿用 gateway 约定经请求体 thinking.disabled 关闭。
+    沿用 7/15 版 OpenAI 兼容 chat/completions 多模态格式、max_tokens=2000
+    与 120s 超时；temperature 降为 0.2，减少同一量表重复批改时的随机波动。
+    DeepSeek V4 默认 thinking 不支持 tool_choice，沿用 gateway 约定经请求体
+    thinking.disabled 关闭。
 
     返回 {"score": int|None, "content": ai_text, "model_code": ...}。
     score 为 None（未找到「总分：XX分」）时 content 前缀加人工复核提示。
@@ -600,7 +603,7 @@ def _run_ai_grading(
     payload: dict = {
         "model": model.model_name,
         "messages": [{"role": "user", "content": message_content}],
-        "temperature": 0.7,
+        "temperature": _GRADING_TEMPERATURE,
         "max_tokens": 2000,
     }
     provider = (model.provider or "").lower()
