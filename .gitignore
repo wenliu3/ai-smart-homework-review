@@ -101,6 +101,7 @@ backend_python/uploads/*
 .workbuddy
 .worktrees/
 .agents/
+.superpowers/
 /AGENT.md
 /AGENTS.md
 
