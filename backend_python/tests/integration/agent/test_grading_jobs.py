@@ -197,9 +197,14 @@ def test_execute_job_persists_artifact_and_version_safe_result(
         business_db=db,
         run_db=assistant_db,
         workflow_runner=lambda *_: {
-            "score": 88,
-            "content": "总体完成良好",
-            "model_code": "deepseek-chat",
+            "outcome": _outcome(),
+            "usage": {},
+            "model_usage": {},
+            "visited_nodes": [
+                "normalize_submission_content",
+                "grading_agent",
+                "grading_decision",
+            ],
         },
     )
     db.refresh(submission)
@@ -208,13 +213,22 @@ def test_execute_job_persists_artifact_and_version_safe_result(
     assert result["status"] == "completed"
     assert submission.ai_score == 88
     assert submission.ai_review_content == "总体完成良好"
-    assert submission.ai_review_items is None
+    assert submission.ai_review_items == [
+        {
+            "criterion_id": "quality",
+            "title": "质量",
+            "score": 88.0,
+            "max_score": 100.0,
+            "feedback": "完成良好",
+            "evidence_refs": ["submission:text:1"],
+        }
+    ]
     assert run.status == "completed"
     artifact = assistant_db.query(AgentArtifact).filter(
         AgentArtifact.run_id == run_id,
     ).one()
     assert artifact.artifact_type == "grading_outcome"
-    assert artifact.payload_json["score"] == 88
+    assert artifact.payload_json["primary"]["total_score"] == 88
 
 
 def test_processing_job_redelivery_recovers_and_completes(
@@ -270,9 +284,14 @@ def test_processing_job_redelivery_recovers_and_completes(
         business_db=db,
         run_db=assistant_db,
         workflow_runner=lambda *_: {
-            "score": 88,
-            "content": "总体完成良好",
-            "model_code": "deepseek-chat",
+            "outcome": _outcome(),
+            "usage": {},
+            "model_usage": {},
+            "visited_nodes": [
+                "normalize_submission_content",
+                "grading_agent",
+                "grading_decision",
+            ],
         },
     )
 
@@ -440,16 +459,8 @@ def test_routing_config_missing_rule_model_fails_controlled(db):
     assert exc_info.value.code == AGENT_RULE_MODEL_NOT_CONFIGURED
 
 
-def test_run_ai_grading_routes_by_rule_model_type(db, monkeypatch):
-    """_run_ai_grading 按 ai_rule.modelType 显式路由取模型（不回退默认）。"""
-    from app.models import AiModel
-    from app.tasks.grading import _run_ai_grading
-
-    db.add(AiModel(
-        code="mimo", name="小米", provider="小米", model_name="mimo-v2.5",
-        base_url="https://api.xiaomimimo.com/v1", api_key="sk-test",
-        status="active", is_default=False,
-    ))
+def test_build_grading_state_routes_by_rule_model_type(db):
+    """build_grading_state 按 ai_rule.modelType 显式注入路由（不回退默认）。"""
     db.add(_routing_assignment())
     db.commit()
     assignment = db.query(Assignment).one()
@@ -463,34 +474,14 @@ def test_run_ai_grading_routes_by_rule_model_type(db, monkeypatch):
         attachments=[],
     )
 
-    sent = {}
-
-    class _Resp:
-        def raise_for_status(self):
-            pass
-
-        def json(self):
-            return {"choices": [{"message": {"content": "**【总分：90分】**\n总体不错"}}]}
-
-    class _Client:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-        def post(self, url, headers=None, json=None):
-            sent["url"] = url
-            sent["json"] = json
-            return _Resp()
-
-    monkeypatch.setattr(
-        "app.tasks.grading.httpx.Client", lambda *a, **k: _Client(),
+    routing = grading_tasks._grading_routing_config(db, assignment)
+    state = grading_tasks.build_grading_state(
+        submission,
+        assignment,
+        grading_tasks.rubric_from_ai_rule(assignment.ai_rule),
+        routing=routing,
     )
 
-    result = _run_ai_grading(db, submission, assignment)
-
-    assert "mimo-v2.5" in sent["json"]["model"]
-    assert sent["json"]["temperature"] == 0.2
-    assert result["score"] == 90
-    assert result["content"].startswith("**【总分：90分】**")
+    assert state["rule_model_code"] == "mimo"
+    assert state["rule_prompt"] == "按实验要求评分"
+    assert state["runtime_budget"] is not None

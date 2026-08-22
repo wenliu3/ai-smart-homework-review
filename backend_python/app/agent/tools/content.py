@@ -295,6 +295,42 @@ def build_grading_context(
     return "\n".join(parts)
 
 
+# DeepSeek 视觉模型仅接受的图片 MIME（官方 Vision 指南：JPEG/PNG/GIF/WebP）
+_SUPPORTED_IMAGE_MIME = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+
+
+def _encode_image_block(file_path: Path, file_name: str) -> dict | None:
+    """图片文件 → image_url 块；视觉模型不支持的格式（BMP/TIFF 等）转存 PNG。
+
+    DeepSeek Vision 按文件实际内容检测格式，非白名单格式直接转 PNG 编码，
+    避免整次批改因图片格式被拒而降级。返回 None 表示编码彻底失败，
+    调用方降级为文本占位。
+    """
+    data = file_path.read_bytes()
+    mime_type = mimetypes.guess_type(file_name)[0] or "image/jpeg"
+    if mime_type not in _SUPPORTED_IMAGE_MIME:
+        try:
+            from PIL import Image
+            import io as _io
+
+            im = Image.open(_io.BytesIO(data))
+            if im.mode == "P":
+                im = im.convert("RGBA" if "transparency" in im.info else "RGB")
+            elif im.mode not in ("RGB", "RGBA", "L"):
+                im = im.convert("RGB")
+            buf = _io.BytesIO()
+            im.save(buf, format="PNG")
+            data = buf.getvalue()
+            mime_type = "image/png"
+        except Exception:
+            return None
+    encoded = base64.b64encode(data).decode("ascii")
+    return {
+        "type": "image_url",
+        "image_url": {"url": f"data:{mime_type};base64,{encoded}"},
+    }
+
+
 def build_grading_message_content(
     content: NormalizedSubmissionContent,
 ) -> list[dict]:
@@ -316,14 +352,18 @@ def build_grading_message_content(
                 ),
             })
             continue
-        mime_type = mimetypes.guess_type(image.file_name)[0] or "image/jpeg"
-        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
-        blocks.append({
-            "type": "image_url",
-            "image_url": {
-                "url": f"data:{mime_type};base64,{encoded}",
-            },
-        })
+        block = _encode_image_block(path, image.file_name)
+        if block is None:
+            # 编码失败（含不支持格式转换失败）：降级为文本占位
+            blocks.append({
+                "type": "text",
+                "text": (
+                    f"[图片编码失败未传入模型：{image.file_name}"
+                    f" | evidence={image.evidence_ref}]"
+                ),
+            })
+            continue
+        blocks.append(block)
     return blocks
 
 

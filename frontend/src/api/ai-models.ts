@@ -5,7 +5,7 @@ export interface AiModel {
   code: string; // 'deepseek' | 'mimo'
   name: string; // 'DeepSeek' | '豆包'
   provider: string; // 'DeepSeek' | 'ByteDance'
-  modelName: string; // 'deepseek-chat' | 'mimo-v2.5'
+  modelName: string; // 'deepseek-v4-flash-vision-exp' | 'mimo-v2.5'
   baseUrl: string; // API地址（只读）
   apiKey: string; // API密钥（可编辑）
   accessKey?: string; // 访问密钥（豆包必填）

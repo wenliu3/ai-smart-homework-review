@@ -21,14 +21,18 @@ logger = logging.getLogger(__name__)
 MODEL_NOT_CONFIGURED_CODE = 10016
 
 # 批改主批改/复核每次底层请求的请求超时（秒）：按 code 显式路由时，
-# 不再沿用 VISION_GRADER/REVIEWER 的 120/40 秒长超时。
-GRADING_LLM_TIMEOUT = 35
+# 不再沿用 VISION_GRADER/REVIEWER 的 120/40 秒长超时。多模态模型
+# （deepseek-v4-flash-vision-exp）带图批改比纯文本慢，放宽到 60s，
+# 仍在批改预算 grading_run_budget(120s) 内。
+GRADING_LLM_TIMEOUT = 60
 
 # 能力档位参数（规格 11.2）：初期共用默认物理模型，参数按档位隔离
+# VISION_GRADER 温度 0.1：批改追求同量表下评分一致与准确，取 DeepSeek
+# 官方对数据提取/评分类任务的推荐低温度区间。
 PROFILE_SETTINGS: dict[ModelProfile, dict] = {
     ModelProfile.ROUTER: {"temperature": 0.1, "max_tokens": 500, "timeout": 15},
     ModelProfile.GENERAL: {"temperature": 0.3, "max_tokens": 2000, "timeout": 40},
-    ModelProfile.VISION_GRADER: {"temperature": 0.2, "max_tokens": 4000, "timeout": 120},
+    ModelProfile.VISION_GRADER: {"temperature": 0.1, "max_tokens": 4000, "timeout": 120},
     ModelProfile.REVIEWER: {"temperature": 0.1, "max_tokens": 2000, "timeout": 40},
 }
 

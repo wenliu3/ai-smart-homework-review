@@ -1,28 +1,31 @@
 """批改任务的版本幂等边界。
 
-批改核心采用 7 月 15 版直接调用方法：构建多模态媒体消息 → 直接调 AI →
-正则提取「总分：XX分」→ 写回 submission。不再使用 LangGraph 图、
-JSON 结构化校验或 tool_choice（对部分模型不稳定）。
+批改采用单 Agent 结构化直接路径（LangGraph 图）：规范化提交内容 →
+主批改（模型按提示词输出固定 JSON，正则提取 + pydantic 严格校验 +
+量表维度一一对应）→ 确定性决策 → 总分由后端汇总写回 submission。
+
+切换背景（2026-08）：整条链路统一 DeepSeek 多模态模型
+（deepseek-v4-flash-vision-exp）。此前回退到 7/15 版「直接调用 + 正则提取
+总分」的两大原因已消除：mimo 对 tool_choice 不稳定（不再混用供应商）；
+V4 thinking 与结构化冲突（gateway 经 extra_body 显式关闭 thinking）。
+本路径最终形态本就不依赖 tool_choice 强制结构化——提示词要求 JSON +
+从 AIMessage 文本提取 + 校验兜底，对模型宽容度最高。
 
 保留的既有基础设施：
 - Celery 异步任务（run_grading_task / GradingTask 硬超时收口）；
 - 提交版本幂等（enqueue_grading_job / build_grading_idempotency_key）；
 - 受控失败 GradingRoutingError / AGENT_RULE_MODEL_NOT_CONFIGURED
   （作业未配置规则模型 modelType 时在模型调用前受控失败）；
-- finalize_run 写 run 终态与 Artifact（grading_outcome / grading_raw_draft）。
+- finalize_run 写 run 终态与 Artifact（grading_outcome / grading_raw_draft）；
+- 结构化校验失败/预算耗尽 → 降级转人工（mark_submission_needs_manual_grading），
+  模型原始输出留证 Artifact 供排查。
 """
 from __future__ import annotations
 
-import base64
 import hashlib
-import html
-import httpx
 import logging
-import os
-import re
 
 from celery.exceptions import SoftTimeLimitExceeded
-from sqlalchemy import case, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -32,11 +35,21 @@ from ..agent.contracts import (
     GradingRubric,
     RubricCriterion,
 )
-from ..agent.runtime import BudgetExceeded
+from ..agent.graphs.grading import build_grading_graph
+from ..agent.runtime import BudgetExceeded, grading_run_budget
+from ..agent.subagents import grading
+from ..agent.tools.content import (
+    extract_reference_materials,
+    normalize_submission_content,
+)
 from ..assistant_database import AssistantSessionLocal
 from ..config import settings
 from ..crud import agent_run, agent_session
-from ..crud.submission import mark_submission_needs_manual_grading
+from ..crud import ai_model as ai_model_crud
+from ..crud.submission import (
+    apply_ai_grading_result,
+    mark_submission_needs_manual_grading,
+)
 from ..database import SessionLocal
 from ..models import (
     AgentRun,
@@ -45,7 +58,6 @@ from ..models import (
     Assignment,
     Submission,
 )
-from ..plagiarism.extractors import extract_all_from_docx, extract_file_text
 from .celery_app import celery_app
 from .grading_request import GradingTask
 
@@ -55,65 +67,6 @@ logger = logging.getLogger(__name__)
 MANUAL_GRADING_NOTE = (
     "⚠️ AI 批改未能生成有效的结构化评分，本次提交需要教师人工批改。"
 )
-
-# 单个文本块进入模型消息的字符上限：长文档/大附件会撑爆模型上下文
-_TEXT_CHAR_LIMIT = 8000
-# 单份 docx 最多提取的内嵌图片数：防止图片密集文档撑爆多模态输入
-_DOCX_EMBED_IMAGE_LIMIT = 6
-# 批改强调同一量表下的评分一致性，使用低温度减少随机波动
-_GRADING_TEMPERATURE = 0.2
-# 总分提取正则：兼容「总分：85分」「总分:90分」
-_SCORE_RE = re.compile(r"总分[：:]\s*(\d+)\s*分")
-_TAG_RE = re.compile(r"<[^>]+>")
-_WS_RE = re.compile(r"[ \t\r\f\v]+")
-
-
-def _strip_html(text: str) -> str:
-    """去掉 HTML 标签并归一化空白，保留纯文本内容。"""
-    text = html.unescape(_TAG_RE.sub("", text or ""))
-    text = _WS_RE.sub(" ", text)
-    return "\n".join(line.strip() for line in text.splitlines() if line.strip())
-
-
-def _truncate_block(text: str) -> str:
-    """单个文本块截断到 _TEXT_CHAR_LIMIT，防止超大输入。"""
-    text = text or ""
-    if len(text) <= _TEXT_CHAR_LIMIT:
-        return text
-    return text[:_TEXT_CHAR_LIMIT]
-
-
-def _encode_image_to_data_uri(image_bytes: bytes) -> str | None:
-    """将图片二进制编码为 data URI（用于多模态 AI 调用）。"""
-    try:
-        from PIL import Image
-        import io as _io
-
-        im = Image.open(_io.BytesIO(image_bytes))
-        fmt = (im.format or "PNG").lower()
-        mime = "image/jpeg" if fmt in ("jpg", "jpeg") else f"image/{fmt}"
-        b64 = base64.b64encode(image_bytes).decode("ascii")
-        return f"data:{mime};base64,{b64}"
-    except Exception:
-        logger.warning("图片编码失败", exc_info=True)
-        return None
-
-
-def _coerce_text_content(content) -> str:
-    """把模型响应的 content 归一化为纯文本。
-
-    langchain 多模态模型的 content 可能是字符串，也可能是分块列表
-    （[{type: text, text: ...}, ...]）；这里统一取文本块拼接。
-    """
-    if isinstance(content, str):
-        return content
-    parts: list[str] = []
-    for block in content or []:
-        if isinstance(block, str):
-            parts.append(block)
-        elif isinstance(block, dict) and block.get("type") == "text":
-            parts.append(str(block.get("text", "")))
-    return "\n".join(parts)
 
 
 def build_grading_idempotency_key(
@@ -327,359 +280,103 @@ def _grading_routing_config(business_db: Session, assignment: Assignment) -> dic
     }
 
 
-def _grading_prompt_text(assignment) -> str:
-    """拼装 AI 评分规则 + 可选多维度提示 + 输出格式要求。"""
-    ai_rule = assignment.ai_rule or {}
-    parts: list[str] = []
+def _record_grading_model_usage(business_db: Session, graph_result: dict) -> None:
+    """批改运行的模型用量按实际 model code 分别累计（尽力而为，失败不影响批改结果）。
 
-    prompt = str(ai_rule.get("prompt") or "").strip()
-    if prompt:
-        parts.append(prompt)
-
-    criteria = ai_rule.get("criteria")
-    if criteria:
-        lines = []
-        for index, item in enumerate(criteria, 1):
-            title = str(item.get("title") or item.get("name") or f"维度{index}")
-            max_score = item.get("maxScore", item.get("max_score", ""))
-            instructions = str(item.get("instructions") or "").strip()
-            line = f"{index}. {title}（满分{max_score}）"
-            if instructions:
-                line += f"：{instructions}"
-            lines.append(line)
-        parts.append(
-            "评分维度（请严格按以下维度逐项评分，不得自创、拆分或合并维度）：\n"
-            + "\n".join(lines)
-        )
-
-    parts.append(
-        "【输出格式要求】\n"
-        "1. 请使用中文进行批改回答\n"
-        "2. 在开头用 **【总分：XX分】** 标明总分\n"
-        "3. 每个评分维度用 **1. 维度名：XX分** 格式加粗标注\n"
-        "4. 优点用 ✅ 开头，改进建议用 📝 开头\n"
-        "5. 关键分数和评语用 **粗体** 突出显示\n"
-        "6. 整体评价用简短总结，不要过长\n"
-        "7. 请结合学生上传的图片内容进行评判（图表、截图、手写内容等）\n"
-        "8. 请对照上方「老师布置的作业要求」和「老师提供的参考附件」，判断学生是否达到要求"
-    )
-    return "\n\n".join(parts)
+    图状态 model_usage 形如 {code: {"calls": N, "total_tokens": T}}，逐项按 code
+    查模型 id 后原子自增；找不到对应模型时跳过该项并记 warning，绝不回退默认
+    模型、绝不阻塞批改结果。
+    """
+    model_usage = graph_result.get("model_usage") or {}
+    if not model_usage:
+        return
+    for code, stats in model_usage.items():
+        try:
+            model = business_db.query(AiModel).filter(
+                AiModel.code == code,
+            ).first()
+            if model is None:
+                logger.warning(
+                    "批改用量引用的模型 code 不存在，跳过累计: %s",
+                    code,
+                )
+                continue
+            ai_model_crud.increment_usage(
+                business_db,
+                model_id=model.id,
+                calls=int(stats.get("calls", 0)),
+                tokens=int(stats.get("total_tokens", 0)),
+            )
+        except Exception:
+            logger.warning("批改模型用量统计写入失败 code=%s", code, exc_info=True)
+            # increment_usage 内部 commit：失败会把共享会话置于 aborted 态，
+            # 不回滚则后续模型的用量全部静默丢失。这里恢复会话，继续累计其他 code。
+            business_db.rollback()
 
 
-def _build_media_items(
+def build_grading_state(
     submission: Submission,
     assignment: Assignment,
-    upload_dir,
-) -> list[dict]:
-    """构建多模态媒体消息列表。
+    rubric: GradingRubric,
+    upload_dir=None,
+    routing: dict | None = None,
+) -> dict:
+    """构造批改图初始状态：作业要求 + 参考资料 + 预算 + 规则模型路由。
 
-    顺序：老师作业要求（去 HTML）→ 老师参考附件（docx 文本+内嵌图片、
-    图片 data URI、其他文本）→ 学生富文本正文（去 HTML）→ 学生附件。
-    文本块统一截断到 _TEXT_CHAR_LIMIT，docx 内嵌图片上限
-    _DOCX_EMBED_IMAGE_LIMIT 张，防止超大输入撑爆模型上下文。
+    routing 由任务层（_grading_routing_config）注入，包含 rule_model_code /
+    rule_prompt。未提供时（无 db 上下文的单元测试）保守取 ai_rule 里的规则
+    模型与规则文本，保证现有用例不因缺字段而崩。
     """
-    media_items: list[dict] = []
-
-    # ---- 0. 老师的作业要求 + 参考附件 ----
-    desc = _strip_html(assignment.description or "")
-    if desc:
-        media_items.append({
-            "type": "text",
-            "text": "【老师布置的作业要求】\n" + _truncate_block(desc),
-        })
-    teacher_attachments = assignment.attachments or []
-    if teacher_attachments:
-        media_items.append({"type": "text", "text": "\n\n【老师提供的参考附件】"})
-        for t_att in teacher_attachments:
-            t_file_url = str(t_att.get("fileUrl", ""))
-            t_filename = t_file_url.replace("/uploads/", "")
-            t_file_name = str(t_att.get("fileName", "unknown"))
-            t_file_type = str(t_att.get("fileType", ""))
-            t_ext = os.path.splitext(t_file_name)[1].lower()
-            if not t_filename:
-                continue
-            t_file_path = os.path.join(upload_dir, t_filename)
-            if not os.path.exists(t_file_path):
-                continue
-            # 参考图片 → data URI
-            if t_file_type.startswith("image/"):
-                with open(t_file_path, "rb") as f:
-                    img_bytes = f.read()
-                data_uri = _encode_image_to_data_uri(img_bytes)
-                if data_uri:
-                    media_items.append({
-                        "type": "text",
-                        "text": f"\n[参考附件：{t_file_name}]",
-                    })
-                    media_items.append({
-                        "type": "image_url",
-                        "image_url": {"url": data_uri},
-                    })
-                continue
-            # 参考 docx（文本 + 内嵌图片）
-            if t_ext == ".docx":
-                try:
-                    ref_text, ref_images = extract_all_from_docx(t_file_path)
-                except Exception as e:
-                    logger.warning(
-                        "[AI] 参考docx解析失败: %s: %s", t_file_path, e,
-                    )
-                    ref_text, ref_images = "", []
-                if ref_text and ref_text.strip():
-                    media_items.append({
-                        "type": "text",
-                        "text": (
-                            f"\n--- 参考「{t_file_name}」文本内容 ---\n"
-                            f"{_truncate_block(ref_text)}"
-                        ),
-                    })
-                for r_i, r_bytes in enumerate(
-                    ref_images[:_DOCX_EMBED_IMAGE_LIMIT],
-                ):
-                    data_uri = _encode_image_to_data_uri(bytes(r_bytes))
-                    if data_uri:
-                        media_items.append({
-                            "type": "text",
-                            "text": f"\n[参考「{t_file_name}」内嵌图片 {r_i + 1}]",
-                        })
-                        media_items.append({
-                            "type": "image_url",
-                            "image_url": {"url": data_uri},
-                        })
-                if ref_text and ref_text.strip():
-                    continue
-            # 其他参考文件：仅提取文本
-            ref_text = extract_file_text(t_file_path, t_ext)
-            if ref_text and ref_text.strip():
-                media_items.append({
-                    "type": "text",
-                    "text": (
-                        f"\n--- 参考「{t_file_name}」文本内容 ---\n"
-                        f"{_truncate_block(ref_text)}"
-                    ),
-                })
-
-    # ---- 1. 学生富文本编辑器内容 ----
-    editor_text = _strip_html(submission.content or "")
-    if editor_text:
-        media_items.append({
-            "type": "text",
-            "text": "【学生作业正文】\n" + _truncate_block(editor_text),
-        })
-
-    # ---- 2. 学生附件（docx/pdf/txt/图片） ----
-    attachments = submission.attachments or []
-    if attachments:
-        media_items.append({"type": "text", "text": "\n\n【附件内容】"})
-        for att in attachments:
-            file_url = str(att.get("fileUrl", ""))
-            filename = file_url.replace("/uploads/", "")
-            file_type = str(att.get("fileType", ""))
-            file_name = str(att.get("fileName", "unknown"))
-            ext = os.path.splitext(file_name)[1].lower()
-            if not filename:
-                continue
-            file_path = os.path.join(upload_dir, filename)
-            file_exists = os.path.exists(file_path)
-
-            # --- 图片附件：直接编码为 base64 送给 AI ---
-            if file_type.startswith("image/"):
-                if file_exists:
-                    with open(file_path, "rb") as f:
-                        img_bytes = f.read()
-                    data_uri = _encode_image_to_data_uri(img_bytes)
-                    if data_uri:
-                        media_items.append({
-                            "type": "text",
-                            "text": f"\n[图片附件：{file_name}]",
-                        })
-                        media_items.append({
-                            "type": "image_url",
-                            "image_url": {"url": data_uri},
-                        })
-                        continue
-                media_items.append({
-                    "type": "text",
-                    "text": f"\n[已上传图片：{file_name}]",
-                })
-                continue
-
-            # --- docx：同时提取文字和图片 ---
-            if ext == ".docx" and file_exists:
-                try:
-                    doc_text, doc_images = extract_all_from_docx(file_path)
-                except Exception as e:
-                    logger.warning(
-                        "[AI] docx多模态提取失败: %s: %s", file_path, e,
-                    )
-                    doc_text, doc_images = "", []
-                if doc_text and doc_text.strip():
-                    media_items.append({
-                        "type": "text",
-                        "text": (
-                            f"\n--- 附件「{file_name}」文本内容 ---\n"
-                            f"{_truncate_block(doc_text)}"
-                        ),
-                    })
-                for i, img_bytes in enumerate(doc_images[:_DOCX_EMBED_IMAGE_LIMIT]):
-                    data_uri = _encode_image_to_data_uri(bytes(img_bytes))
-                    if data_uri:
-                        media_items.append({
-                            "type": "text",
-                            "text": f"\n[文档「{file_name}」内嵌图片 {i + 1}]",
-                        })
-                        media_items.append({
-                            "type": "image_url",
-                            "image_url": {"url": data_uri},
-                        })
-                if doc_text and doc_text.strip():
-                    continue  # 已处理完文字+图片，跳过下面的纯文本提取
-
-            # --- 其他文件：仅提取文字 ---
-            text = ""
-            if file_exists:
-                text = extract_file_text(file_path, ext)
-            if not text or not text.strip():
-                text = str(att.get("textContent", ""))
-            if text and text.strip():
-                media_items.append({
-                    "type": "text",
-                    "text": (
-                        f"\n--- 附件「{file_name}」文本内容 ---\n"
-                        f"{_truncate_block(text)}"
-                    ),
-                })
-            else:
-                media_items.append({
-                    "type": "text",
-                    "text": f"\n[已上传文件：{file_name}]",
-                })
-    return media_items
+    base = upload_dir if upload_dir is not None else settings.upload_path
+    if routing is None:
+        ai_rule = assignment.ai_rule or {}
+        routing = {
+            "rule_model_code": str(ai_rule.get("modelType") or "").strip(),
+            "rule_prompt": str(ai_rule.get("prompt") or "").strip(),
+        }
+    return {
+        "submission_id": submission.id,
+        "submission_count": submission.submission_count,
+        "rubric": rubric,
+        "assignment_description": (assignment.description or "").strip(),
+        "reference_materials": extract_reference_materials(
+            assignment.attachments or [],
+            base,
+        ),
+        "runtime_budget": grading_run_budget(),
+        "rule_model_code": routing["rule_model_code"],
+        "rule_prompt": routing["rule_prompt"],
+    }
 
 
-def _run_ai_grading(
+def _run_production_workflow(
     business_db: Session,
     submission: Submission,
     assignment: Assignment,
-    rubric=None,  # 兼容旧 runner 签名；直接调 AI 方法不再做量表校验
+    rubric: GradingRubric,
 ) -> dict:
-    """直接调 AI 批改（7 月 15 版方法）：多模态消息 → 正则提取总分。
+    def normalize_node(_state):
+        return {
+            "normalized_content": normalize_submission_content(
+                rich_text=submission.content or "",
+                attachments=submission.attachments or [],
+                upload_dir=settings.upload_path,
+            ),
+        }
 
-    沿用 7/15 版 OpenAI 兼容 chat/completions 多模态格式、max_tokens=2000
-    与 120s 超时；temperature 降为 0.2，减少同一量表重复批改时的随机波动。
-    DeepSeek V4 默认 thinking 不支持 tool_choice，沿用 gateway 约定经请求体
-    thinking.disabled 关闭。
-
-    返回 {"score": int|None, "content": ai_text, "model_code": ...}。
-    score 为 None（未找到「总分：XX分」）时 content 前缀加人工复核提示。
-    """
-    model_code = _grading_routing_config(business_db, assignment)["rule_model_code"]
-    model = (
-        business_db.query(AiModel)
-        .filter(AiModel.code == model_code, AiModel.status == "active")
-        .first()
-    )
-    if model is None:
-        raise GradingRoutingError(
-            AGENT_RULE_MODEL_NOT_CONFIGURED,
-            f"未找到启用状态下的 AI 规则模型「{model_code}」",
-        )
-    if not (model.api_key or "").strip():
-        raise GradingRoutingError(
-            AGENT_RULE_MODEL_NOT_CONFIGURED,
-            f"AI 规则模型「{model.name}」未配置 API Key",
-        )
-
-    prompt = _grading_prompt_text(assignment)
-    media_items = _build_media_items(
+    # 单 Agent 批改：规则模型（ai_rule.modelType）一次直接结构化出分。
+    routing = _grading_routing_config(business_db, assignment)
+    state = build_grading_state(
         submission,
         assignment,
-        settings.upload_path,
+        rubric,
+        routing=routing,
     )
-    message_content = [
-        {"type": "text", "text": f"{prompt}\n\n【学生作业内容】"},
-        *media_items,
-    ]
-    payload: dict = {
-        "model": model.model_name,
-        "messages": [{"role": "user", "content": message_content}],
-        "temperature": _GRADING_TEMPERATURE,
-        "max_tokens": 2000,
-    }
-    provider = (model.provider or "").lower()
-    if "deepseek" in provider and "v4" in (model.model_name or "").lower():
-        payload["thinking"] = {"type": "disabled"}
-
-    api_url = f"{model.base_url}/chat/completions"
-    try:
-        with httpx.Client(timeout=120) as client:
-            resp = client.post(
-                api_url,
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {model.api_key}",
-                },
-                json=payload,
-            )
-            resp.raise_for_status()
-            result = resp.json()
-    except httpx.HTTPError as exc:
-        raise GradingRoutingError(
-            AGENT_RULE_MODEL_NOT_CONFIGURED,
-            f"AI 批改调用失败：{exc}",
-        ) from exc
-
-    ai_text = _coerce_text_content(
-        (result.get("choices") or [{}])[0].get("message", {}).get("content", ""),
+    graph = build_grading_graph(
+        normalize_node,
+        grading.create_node(business_db),
     )
-    match = _SCORE_RE.search(ai_text)
-    if match:
-        score = int(match.group(1))
-    else:
-        score = None
-        ai_text = "⚠️ AI 评分解析失败，请教师人工复核。\n\n" + ai_text
-    return {"score": score, "content": ai_text, "model_code": model_code}
-
-
-def _write_ai_grading_result(
-    business_db: Session,
-    submission_id: int,
-    expected_submission_count: int,
-    *,
-    score: int,
-    content: str,
-) -> bool:
-    """按提交版本原子写回 AI 批改结果（直接写 submission 字段）。
-
-    条件 UPDATE 保证旧 Worker 不能覆盖学生重新提交后的新版本；
-    教师已批改的提交保持 teacher_reviewed 状态。ai_review_items 列保留
-    但新方法不写（置 None）。
-    """
-    statement = (
-        update(Submission)
-        .where(
-            Submission.id == submission_id,
-            Submission.submission_count == expected_submission_count,
-        )
-        .values(
-            ai_score=score,
-            ai_review_content=content,
-            ai_review_items=None,
-            status=case(
-                (
-                    Submission.status == "teacher_reviewed",
-                    Submission.status,
-                ),
-                else_="ai_reviewed",
-            ),
-        )
-    )
-    result = business_db.execute(statement)
-    if result.rowcount != 1:
-        business_db.rollback()
-        return False
-    business_db.commit()
-    return True
+    return graph.invoke(state)
 
 
 def _fail_run_with_code(
@@ -782,68 +479,79 @@ def execute_grading_job(
         if rubric.version != rubric_version:
             raise ValueError("评分量表版本已变化")
 
-        runner = workflow_runner or _run_ai_grading
+        runner = workflow_runner or _run_production_workflow
         try:
-            result = runner(biz, submission, assignment, rubric)
+            graph_result = runner(biz, submission, assignment, rubric)
         except BudgetExceeded as exc:
             # 预算耗尽与结构化失败同等处理：转人工，不丢结果不炸任务
-            result = {
-                "score": None,
-                "content": f"⚠️ AI 批改预算耗尽，请教师人工复核：{exc}",
-                "model_code": None,
+            graph_result = {
+                "grading_failure": {
+                    "stage": "budget",
+                    "error": str(exc),
+                    "raw_response": "",
+                },
+                "visited_nodes": [],
             }
+        for node_name in graph_result.get("visited_nodes", []):
+            agent_run.append_step(
+                audit,
+                run_id,
+                user_id,
+                node_name=node_name,
+                status="completed",
+            )
 
         audit.expire_all()
         current_run = agent_run.get_run(audit, run_id, user_id)
         if current_run is None or current_run.status == "cancelled":
             return {"status": "cancelled", "run_id": run_id}
 
-        score = result.get("score")
-        content = result.get("content") or ""
-        if score is None:
-            # 降级转人工：原始全文留证到 Artifact，教师端拿到明确提示；
+        failure = graph_result.get("grading_failure")
+        if failure:
+            # 降级转人工：原始草案留证到 Artifact，教师端拿到明确提示；
             # run 记为 completed——这是受控降级，不是任务失败
             mark_submission_needs_manual_grading(
                 biz,
                 submission_id=submission_id,
                 expected_submission_count=submission_count,
-                note=content or MANUAL_GRADING_NOTE,
+                note=MANUAL_GRADING_NOTE,
             )
             agent_run.finalize_run(
                 audit,
                 run_id,
                 user_id,
-                final_output="AI 批改未生成有效评分，已转教师人工批改。",
+                final_output="AI 批改未通过结构化校验，已转教师人工批改。",
                 artifacts=[{
                     "artifact_type": "grading_raw_draft",
                     "schema_version": "v1",
-                    "payload": {"content": content},
+                    "payload": failure,
                 }],
-                usage=None,
+                usage=graph_result.get("usage") or None,
             )
+            _record_grading_model_usage(biz, graph_result)
             return {"status": "completed", "run_id": run_id}
 
-        applied = _write_ai_grading_result(
+        outcome = graph_result["outcome"]
+        applied = apply_ai_grading_result(
             biz,
             submission_id=submission_id,
             expected_submission_count=submission_count,
-            score=score,
-            content=content,
+            outcome=outcome,
         )
         if not applied:
             final_output = "提交版本已变化，批改结果未写回。"
             status = "stale"
         else:
-            final_output = "批改完成。"
+            final_output = (
+                "批改完成，等待教师人工复核。"
+                if outcome.needs_human_review
+                else "批改完成。"
+            )
             status = "completed"
         artifacts = [{
             "artifact_type": "grading_outcome",
-            "schema_version": "v1",
-            "payload": {
-                "score": score,
-                "content": content,
-                "model_code": result.get("model_code"),
-            },
+            "schema_version": outcome.schema_version,
+            "payload": outcome.model_dump(mode="json"),
         }]
         agent_run.finalize_run(
             audit,
@@ -851,8 +559,9 @@ def execute_grading_job(
             user_id,
             final_output=final_output,
             artifacts=artifacts,
-            usage=None,
+            usage=graph_result.get("usage") or None,
         )
+        _record_grading_model_usage(biz, graph_result)
         return {"status": status, "run_id": run_id}
     except GradingRoutingError as exc:
         # 运行配置无效（缺规则模型 modelType）：
@@ -862,7 +571,8 @@ def execute_grading_job(
         finally:
             raise
     except SoftTimeLimitExceeded:
-        # Celery 软超时：用独立错误码标记以便与普通失败区分（运营排查队列拥塞）
+        # Celery 软超时：预算应先于它触发，走到这里说明 worker 卡死，
+        # 用独立错误码标记以便与普通失败区分（运营排查队列拥塞）
         try:
             _fail_run_with_code(audit, run_id, user_id, AGENT_GRADING_TIMEOUT)
         finally:
@@ -884,7 +594,8 @@ def execute_grading_job(
     name="agent.grading.run",
     acks_late=True,
     reject_on_worker_lost=True,
-    # 单次模型调用超时由网关 GRADING_LLM_TIMEOUT(35s) 兜底；
+    # 单次模型调用超时由网关 GRADING_LLM_TIMEOUT(60s) 兜底；
+    # 批改预算 grading_run_budget(120s) 先于软超时触发结构化降级，
     # soft_time_limit 是 worker 卡死时的最后兜底；hard limit 再留 30s 清理余量
     soft_time_limit=120,
     time_limit=150,
@@ -916,6 +627,7 @@ def run_grading_task(
 __all__ = [
     "GradingRoutingError",
     "build_grading_idempotency_key",
+    "build_grading_state",
     "enqueue_grading_job",
     "execute_grading_job",
     "rubric_from_ai_rule",

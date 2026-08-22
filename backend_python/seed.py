@@ -130,7 +130,7 @@ def main():
 
         # ===== 4. 初始化 AI 模型 =====
         ai_models = [
-            {"code": "deepseek", "name": "DeepSeek", "provider": "DeepSeek", "model_name": "deepseek-chat", "base_url": "https://api.deepseek.com", "status": "active", "is_default": True, "total_usage": 0, "total_tokens": 0, "last_balance": 0},
+            {"code": "deepseek", "name": "DeepSeek", "provider": "DeepSeek", "model_name": "deepseek-v4-flash-vision-exp", "base_url": "https://api.deepseek.com", "status": "active", "is_default": True, "total_usage": 0, "total_tokens": 0, "last_balance": 0},
             {"code": "mimo", "name": "小米", "provider": "小米", "model_name": "mimo-v2.5", "base_url": "https://api.xiaomimimo.com/v1", "status": "active", "is_default": False, "total_usage": 0, "total_tokens": 0, "last_balance": 0},
         ]
         for m in ai_models:

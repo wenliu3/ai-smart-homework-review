@@ -44,13 +44,16 @@ def _record_factory(built):
 
 
 def _add_real_preset_names(db):
-    """把工厂建出的模型 model_name 校正为真实预置名（deepseek-chat / mimo-v2.5）。
+    """把工厂建出的模型 model_name 校正为真实预置名（多模态 vision / mimo-v2.5）。
 
     ai_model_factory 默认 model_name=code；真实预置模型 code 与 model_name 不同
-    （deepseek → deepseek-chat，mimo → mimo-v2.5）。这里对齐真实配置，
-    用于断言按 code 路由取的是该模型自身的 model_name。只改名已存在的模型。
+    （deepseek → deepseek-v4-flash-vision-exp，mimo → mimo-v2.5）。这里对齐
+    真实配置，用于断言按 code 路由取的是该模型自身的 model_name。只改名已存在的模型。
     """
-    for code, model_name in (("deepseek", "deepseek-chat"), ("mimo", "mimo-v2.5")):
+    for code, model_name in (
+        ("deepseek", "deepseek-v4-flash-vision-exp"),
+        ("mimo", "mimo-v2.5"),
+    ):
         model = db.query(AiModel).filter(AiModel.code == code).first()
         if model is not None:
             model.model_name = model_name
@@ -75,7 +78,7 @@ def test_routes_by_model_code(db, ai_model_factory, monkeypatch):
     gw.get_chat_model_by_code(
         db, model_code="deepseek", profile=ModelProfile.VISION_GRADER, prompt_version="v1",
     )
-    assert captured[-1]["model"] == "openai:deepseek-chat"
+    assert captured[-1]["model"] == "openai:deepseek-v4-flash-vision-exp"
 
 
 def test_by_code_route_applies_grading_timeout(db, ai_model_factory, monkeypatch):
@@ -88,14 +91,14 @@ def test_by_code_route_applies_grading_timeout(db, ai_model_factory, monkeypatch
     gw.get_chat_model_by_code(
         db, model_code="deepseek", profile=ModelProfile.VISION_GRADER, prompt_version="v1",
     )
-    assert captured[-1]["timeout"] == 35  # GRADING_LLM_TIMEOUT，不再用 VISION_GRADER 的 120
-    assert captured[-1]["temperature"] == 0.2
+    assert captured[-1]["timeout"] == 60  # GRADING_LLM_TIMEOUT（多模态放宽），不再用 VISION_GRADER 的 120
+    assert captured[-1]["temperature"] == 0.1
     assert captured[-1]["max_retries"] == 1
 
     gw.get_chat_model_by_code(
         db, model_code="deepseek", profile=ModelProfile.REVIEWER, prompt_version="v1",
     )
-    assert captured[-1]["timeout"] == 35  # 复核同样收口
+    assert captured[-1]["timeout"] == 60  # 复核同样收口
 
 
 def test_by_code_routing_ignores_default_flag(db, ai_model_factory, monkeypatch):
@@ -124,7 +127,7 @@ def test_by_code_routing_ignores_default_flag(db, ai_model_factory, monkeypatch)
     gw2.get_chat_model_by_code(
         db, model_code="deepseek", profile=ModelProfile.VISION_GRADER, prompt_version="v1",
     )
-    assert captured[-1]["model"] == "openai:deepseek-chat"
+    assert captured[-1]["model"] == "openai:deepseek-v4-flash-vision-exp"
 
 
 # ========== 网关：按 code 路由绝不回退默认 ==========
@@ -222,7 +225,7 @@ def test_get_grading_agent_primary_routes_to_vision_grader(db, ai_model_factory,
     registry.get_grading_agent(db, model_code="mimo", reviewer=False, structured=True)
 
     assert captured[-1]["model"] == "openai:mimo-v2.5"
-    assert captured[-1]["timeout"] == 35
+    assert captured[-1]["timeout"] == 60
     assert built[-1]["tools"] == []
     assert built[-1]["context_schema"] is None
     assert built[-1]["response_format"] is GradingDraft
@@ -241,9 +244,9 @@ def test_get_grading_agent_review_routes_to_reviewer(db, ai_model_factory, monke
 
     registry.get_grading_agent(db, model_code="deepseek", reviewer=True, structured=True)
 
-    assert captured[-1]["model"] == "openai:deepseek-chat"
+    assert captured[-1]["model"] == "openai:deepseek-v4-flash-vision-exp"
     assert captured[-1]["temperature"] == 0.1  # REVIEWER 档位
-    assert captured[-1]["timeout"] == 35
+    assert captured[-1]["timeout"] == 60
     assert built[-1]["response_format"] is GradingDraft
     assert "独立批改复核" in built[-1]["system_prompt"]  # grading_review_specialist Prompt
 

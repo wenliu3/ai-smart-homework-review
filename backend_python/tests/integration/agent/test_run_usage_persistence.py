@@ -90,10 +90,12 @@ def test_ai_model_counters_increment_atomically(db, ai_model_factory):
     assert model.last_used_at is not None
 
 
-def test_grading_run_completes_without_usage_recording(
+def test_grading_run_persists_usage_and_result(
     db, assistant_db, student, monkeypatch,
 ):
-    """直接调用批改不落 Run 用量（usage 留空），只写回 AI 批改结果。"""
+    """批改图状态 usage 聚合写 Run.usage_json，AI 结果按版本写回提交行。"""
+    from tests.factories import _outcome
+
     assignment = Assignment(
         title="用量作业",
         teacher_id=99,
@@ -133,16 +135,21 @@ def test_grading_run_completes_without_usage_recording(
         business_db=db,
         run_db=assistant_db,
         workflow_runner=lambda *_: {
-            "score": 88,
-            "content": "总体完成良好",
-            "model_code": "deepseek-chat",
+            "outcome": _outcome(),
+            "usage": _usage(120, 30),
+            "model_usage": {},
+            "visited_nodes": [
+                "normalize_submission_content",
+                "grading_agent",
+                "grading_decision",
+            ],
         },
     )
 
     assistant_db.expire_all()
     run = assistant_db.query(AgentRun).filter(AgentRun.id == run_id).one()
     assert run.status == "completed"
-    assert run.usage_json == {}
+    assert run.usage_json == _usage(120, 30)
     db.expire_all()
     persisted = db.query(Submission).filter(Submission.id == submission.id).one()
     assert persisted.ai_score == 88
