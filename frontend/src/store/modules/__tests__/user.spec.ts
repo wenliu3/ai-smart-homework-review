@@ -11,7 +11,6 @@ vi.mock("../../../store", () => ({
 
 vi.mock("../../../api/auth", () => ({
   login: vi.fn(),
-  register: vi.fn(),
   logout: vi.fn(),
   refreshToken: vi.fn(),
   getUserInfo: vi.fn(),

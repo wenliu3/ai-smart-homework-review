@@ -79,7 +79,19 @@
         </el-col>
 
         <el-col :span="isMobile ? 24 : 12">
-          <el-form-item label="可见性" prop="visibility">
+          <el-form-item prop="visibility">
+            <template #label>
+              <span>可见性</span>
+              <el-tooltip
+                content="私有：仅自己和超级管理员可见；公开：所有教师可见可用；系统：官方内置规则，所有人可用，仅超级管理员可修改"
+                placement="top"
+                effect="dark"
+              >
+                <el-icon class="ml-1 text-gray-400 cursor-help">
+                  <QuestionFilled />
+                </el-icon>
+              </el-tooltip>
+            </template>
             <el-select
               v-model="formData.visibility"
               placeholder="请选择可见性"
@@ -231,7 +243,7 @@
 <script setup>
 import { ref, reactive, computed, nextTick, onMounted } from "vue";
 import { ElMessage } from "element-plus";
-import { Plus, Delete } from "@element-plus/icons-vue";
+import { Plus, Delete, QuestionFilled } from "@element-plus/icons-vue";
 import { createAiRule, updateAiRule, getAiRuleById } from "@/api/ai-rule";
 import { aiModelApi } from "@/api/ai-models";
 import { useStore } from "vuex";

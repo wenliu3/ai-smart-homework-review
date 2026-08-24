@@ -1,7 +1,9 @@
 """权限 CRUD: 菜单/角色/用户资源"""
 from sqlalchemy.orm import Session
 from ..models import User, Role, Menu
-from ..core.exceptions import NotFoundException, ConflictException
+from ..core.exceptions import (
+    NotFoundException, ConflictException, ForbiddenException, BadRequestException,
+)
 from ..core.utils import camel_to_snake
 
 
@@ -23,8 +25,16 @@ def _build_menu_tree(menus):
 
 
 def _resolve_user_id(user_id: str, current_user: User) -> int:
-    """将 'current' 解析为当前登录用户 ID，否则转为整数"""
-    return current_user.id if user_id == "current" else int(user_id)
+    """将 'current' 解析为当前登录用户 ID；普通用户仅可查询自己，superadmin 可查任意用户"""
+    if user_id == "current":
+        return current_user.id
+    try:
+        uid = int(user_id)
+    except (TypeError, ValueError):
+        raise BadRequestException(10011, "无效的用户ID")
+    if uid != current_user.id and current_user.role != "superadmin":
+        raise ForbiddenException(10007, "只能查询自己的资源")
+    return uid
 
 
 def get_user_resources(db: Session, user_id: str, current_user: User) -> dict:
@@ -46,43 +56,6 @@ def get_user_resources(db: Session, user_id: str, current_user: User) -> dict:
         "permissions": list(set(permissions)),
         "menus": _build_menu_tree(menus),
     }
-
-
-def get_user_roles(db: Session, user_id: str, current_user: User) -> list:
-    """获取用户所属角色列表"""
-    uid = _resolve_user_id(user_id, current_user)
-    user = db.query(User).filter(User.id == uid).first()
-    if not user:
-        return []
-    roles = db.query(Role).filter(Role.code == user.role).all()
-    return [r.to_dict() for r in roles]
-
-
-def get_user_menus(db: Session, user_id: str, current_user: User) -> list:
-    """获取用户可访问的菜单树"""
-    uid = _resolve_user_id(user_id, current_user)
-    user = db.query(User).filter(User.id == uid).first()
-    if not user:
-        return []
-    roles = db.query(Role).filter(Role.code == user.role).all()
-    menu_ids = []
-    for r in roles:
-        menu_ids.extend([int(x) for x in (r.menu_ids or [])])
-    menus = db.query(Menu).filter(Menu.id.in_(menu_ids), Menu.status == "active").order_by(Menu.sort.asc()).all()
-    return _build_menu_tree(menus)
-
-
-def get_user_permissions(db: Session, user_id: str, current_user: User) -> list:
-    """获取用户权限列表(去重)"""
-    uid = _resolve_user_id(user_id, current_user)
-    user = db.query(User).filter(User.id == uid).first()
-    if not user:
-        return []
-    roles = db.query(Role).filter(Role.code == user.role).all()
-    permissions = []
-    for r in roles:
-        permissions.extend(r.permissions or [])
-    return list(set(permissions))
 
 
 # ===== 菜单管理 =====
@@ -170,14 +143,6 @@ def get_roles(db: Session, params: dict) -> dict:
     return {"items": [r.to_dict() for r in items], "total": total, "page": page, "limit": limit}
 
 
-def get_role_by_id(db: Session, role_id: int) -> dict:
-    """根据 ID 查询角色"""
-    role = db.query(Role).filter(Role.id == role_id).first()
-    if not role:
-        raise NotFoundException(10015, "角色不存在")
-    return role.to_dict()
-
-
 def get_role_with_menus(db: Session, role_id: int) -> dict:
     """查询角色及其关联的菜单列表"""
     role = db.query(Role).filter(Role.id == role_id).first()
@@ -228,14 +193,3 @@ def delete_role(db: Session, role_id: int) -> dict:
     db.delete(role)
     db.commit()
     return {"success": True}
-
-
-def assign_menus(db: Session, role_id: int, menu_ids: list[str]) -> dict:
-    """为角色分配菜单 — 同时更新 menuIds 和 permissions"""
-    role = db.query(Role).filter(Role.id == role_id).first()
-    if not role:
-        raise NotFoundException(10015, "角色不存在")
-    role.menu_ids = menu_ids
-    role.permissions = menu_ids
-    db.commit()
-    return role.to_dict()

@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 from ..database import get_db
-from ..deps import get_current_user
+from ..deps import get_current_user, require_roles
 from ..models import User
 from ..core.response import ok
 from ..schemas.class_ import ClassCreate, ClassUpdate, JoinClassRequest, AddStudentsRequest, UpdateStudentStatusRequest
@@ -26,12 +26,12 @@ def get_list(request: Request, current_user: User = Depends(get_current_user), d
 
 @router.get("/classes/{class_id}")
 def get_detail(class_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """获取班级详情 — 含教师姓名"""
-    return ok(class_crud.get_detail(db, class_id))
+    """获取班级详情 — 含教师姓名；仅班级归属教师、超级管理员或在班学生可访问"""
+    return ok(class_crud.get_detail(db, class_id, current_user.id, current_user.role))
 
 
 @router.post("/classes/create")
-def create_class(body: ClassCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def create_class(body: ClassCreate, current_user: User = Depends(require_roles("teacher", "superadmin")), db: Session = Depends(get_db)):
     """创建班级 — 管理员可指定 teacherId 代教师创建，教师则自动使用自身ID"""
     data = body.model_dump()
     # 管理员代创建：若指定了 teacherId 且当前用户为 superadmin，则替该教师创建
@@ -41,7 +41,7 @@ def create_class(body: ClassCreate, current_user: User = Depends(get_current_use
 
 
 @router.post("/classes/{class_id}/edit")
-def update_class(class_id: int, body: ClassUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def update_class(class_id: int, body: ClassUpdate, current_user: User = Depends(require_roles("teacher", "superadmin")), db: Session = Depends(get_db)):
     """更新班级信息 — 教师本人或管理员可操作，管理员可更换授课教师"""
     data = body.model_dump(exclude_unset=True)
     # 管理员可指定新教师
@@ -51,46 +51,47 @@ def update_class(class_id: int, body: ClassUpdate, current_user: User = Depends(
 
 
 @router.post("/classes/{class_id}/close")
-def disband_class(class_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """解散班级 — 状态置 disbanded，学生状态置 left"""
-    return ok(class_crud.disband_class(db, class_id, current_user.id))
+def disband_class(class_id: int, current_user: User = Depends(require_roles("teacher", "superadmin")), db: Session = Depends(get_db)):
+    """解散班级 — 状态置 disbanded，学生状态置 left（教师本人或管理员）"""
+    return ok(class_crud.disband_class(db, class_id, current_user.id, current_user.role))
 
 
 @router.post("/classes/{class_id}/regenerate-code")
-def regenerate_code(class_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """重新生成班级邀请码"""
-    return ok(class_crud.regenerate_code(db, class_id, current_user.id))
+def regenerate_code(class_id: int, current_user: User = Depends(require_roles("teacher", "superadmin")), db: Session = Depends(get_db)):
+    """重新生成班级邀请码（教师本人或管理员）"""
+    return ok(class_crud.regenerate_code(db, class_id, current_user.id, current_user.role))
 
 
 @router.get("/classes/{class_id}/students")
 def get_students(class_id: int, request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """分页查询班级学生列表 — 支持状态过滤、姓名/学号搜索"""
+    """分页查询班级学生列表 — 支持状态过滤、姓名/学号搜索；仅班级归属教师、超级管理员或在班学生可访问"""
     q = request.query_params
     return ok(class_crud.get_students(
         db, class_id, page=int(q.get("page", 1)), limit=int(q.get("limit", 20)),
         status=q.get("status"), search=q.get("search"),
+        user_id=current_user.id, user_role=current_user.role,
     ))
 
 
 @router.post("/classes/{class_id}/students")
-def add_students(class_id: int, body: AddStudentsRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def add_students(class_id: int, body: AddStudentsRequest, current_user: User = Depends(require_roles("teacher")), db: Session = Depends(get_db)):
     """教师批量添加学生到班级"""
     return ok(class_crud.add_students(db, class_id, current_user.id, body.studentIds))
 
 
 @router.post("/classes/join")
-def join_class(body: JoinClassRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def join_class(body: JoinClassRequest, current_user: User = Depends(require_roles("student")), db: Session = Depends(get_db)):
     """学生通过邀请码加入班级"""
     return ok(class_crud.join_class(db, current_user.id, body.code))
 
 
 @router.post("/classes/{class_id}/students/status")
-def update_student_status(class_id: int, body: UpdateStudentStatusRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def update_student_status(class_id: int, body: UpdateStudentStatusRequest, current_user: User = Depends(require_roles("teacher")), db: Session = Depends(get_db)):
     """教师批量更新班级学生状态"""
     return ok(class_crud.update_student_status(db, class_id, current_user.id, body.studentIds, body.status))
 
 
 @router.post("/classes/{class_id}/leave")
-def leave_class(class_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def leave_class(class_id: int, current_user: User = Depends(require_roles("student")), db: Session = Depends(get_db)):
     """学生退出班级"""
     return ok(class_crud.leave_class(db, class_id, current_user.id))

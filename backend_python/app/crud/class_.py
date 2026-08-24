@@ -3,7 +3,7 @@ import random, string
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from ..models import User, Class, ClassStudent, Submission
-from ..core.exceptions import BadRequestException, NotFoundException
+from ..core.exceptions import BadRequestException, NotFoundException, ForbiddenException
 from ..core.utils import now, camel_to_snake
 
 
@@ -11,6 +11,26 @@ def _generate_code() -> str:
     """随机生成 6 位班级邀请码(大写字母+数字)"""
     chars = string.ascii_uppercase + string.digits
     return "".join(random.choice(chars) for _ in range(6))
+
+
+def _assert_class_access(db: Session, cls: Class, user_id: int | None, user_role: str | None) -> None:
+    """班级访问校验：超级管理员、班级归属教师、在班（active）学生可访问"""
+    if user_id is None:
+        return
+    if user_role == "superadmin":
+        return
+    if user_role == "teacher":
+        if cls.teacher_id == user_id:
+            return
+    else:
+        member = db.query(ClassStudent).filter(
+            ClassStudent.class_id == cls.id,
+            ClassStudent.student_id == user_id,
+            ClassStudent.status == "active",
+        ).first()
+        if member:
+            return
+    raise ForbiddenException(10007, "无权访问该班级")
 
 
 def get_list(db: Session, page: int = 1, limit: int = 10, status: str | None = None,
@@ -67,11 +87,12 @@ def get_list(db: Session, page: int = 1, limit: int = 10, status: str | None = N
     return {"items": enriched, "total": total, "page": page, "limit": limit}
 
 
-def get_detail(db: Session, class_id: int) -> dict:
-    """获取班级详情 — 含教师姓名"""
+def get_detail(db: Session, class_id: int, user_id: int | None = None, user_role: str | None = None) -> dict:
+    """获取班级详情 — 含教师姓名；仅班级归属教师、超级管理员或在班学生可访问"""
     cls = db.query(Class).filter(Class.id == class_id).first()
     if not cls:
         raise NotFoundException(10015, "班级不存在")
+    _assert_class_access(db, cls, user_id, user_role)
     d = cls.to_dict()
     teacher = db.query(User).filter(User.id == cls.teacher_id).first()
     d["teacherName"] = teacher.name if teacher else ""
@@ -121,12 +142,12 @@ def update_class_admin(db: Session, class_id: int, data: dict) -> dict:
     return {"message": "更新成功"}
 
 
-def disband_class(db: Session, class_id: int, teacher_id: int) -> dict:
-    """解散班级 — 状态置为 disbanded，所有学生状态置为 left"""
+def disband_class(db: Session, class_id: int, teacher_id: int, actor_role: str | None = None) -> dict:
+    """解散班级 — 状态置为 disbanded，所有学生状态置为 left（教师本人或管理员）"""
     cls = db.query(Class).filter(Class.id == class_id).first()
     if not cls:
         raise NotFoundException(10015, "班级不存在")
-    if cls.teacher_id != teacher_id:
+    if cls.teacher_id != teacher_id and actor_role != "superadmin":
         raise BadRequestException(10007, "无权操作此班级")
     cls.status = "disbanded"
     db.query(ClassStudent).filter(ClassStudent.class_id == class_id, ClassStudent.status == "active").update({ClassStudent.status: "left"})
@@ -134,12 +155,12 @@ def disband_class(db: Session, class_id: int, teacher_id: int) -> dict:
     return {"message": "班级已解散"}
 
 
-def regenerate_code(db: Session, class_id: int, teacher_id: int) -> dict:
-    """重新生成班级邀请码"""
+def regenerate_code(db: Session, class_id: int, teacher_id: int, actor_role: str | None = None) -> dict:
+    """重新生成班级邀请码（教师本人或管理员）"""
     cls = db.query(Class).filter(Class.id == class_id).first()
     if not cls:
         raise NotFoundException(10015, "班级不存在")
-    if cls.teacher_id != teacher_id:
+    if cls.teacher_id != teacher_id and actor_role != "superadmin":
         raise BadRequestException(10007, "无权操作此班级")
     cls.code = _generate_code()
     db.commit()
@@ -147,8 +168,14 @@ def regenerate_code(db: Session, class_id: int, teacher_id: int) -> dict:
 
 
 def get_students(db: Session, class_id: int, page: int = 1, limit: int = 20,
-                 status: str | None = None, search: str | None = None) -> dict:
-    """分页查询班级学生列表 — 支持状态过滤、姓名/学号搜索"""
+                 status: str | None = None, search: str | None = None,
+                 user_id: int | None = None, user_role: str | None = None) -> dict:
+    """分页查询班级学生列表 — 支持状态过滤、姓名/学号搜索；
+    仅班级归属教师、超级管理员或在班学生可访问"""
+    cls = db.query(Class).filter(Class.id == class_id).first()
+    if not cls:
+        raise NotFoundException(10015, "班级不存在")
+    _assert_class_access(db, cls, user_id, user_role)
     query = db.query(ClassStudent).filter(ClassStudent.class_id == class_id)
     if status:
         query = query.filter(ClassStudent.status == status)

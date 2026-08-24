@@ -2,7 +2,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from ..models import User
-from ..core.security import hash_password, verify_password
+from ..core.security import hash_password
 from ..core.exceptions import BadRequestException, NotFoundException, ConflictException
 from ..core.utils import camel_to_snake
 from ..config import settings
@@ -10,11 +10,14 @@ from ..config import settings
 
 def get_users(db: Session, page: int = 1, limit: int = 10,
               role: str | None = None, keyword: str | None = None,
+              status: str | None = None,
               sort_field: str = "createdAt", sort_order: str = "desc") -> dict:
-    """分页查询用户列表 — 支持按角色过滤、关键字模糊搜索、字段排序"""
+    """分页查询用户列表 — 支持按角色/状态过滤、关键字模糊搜索、字段排序"""
     query = db.query(User)
     if role:
         query = query.filter(User.role == role)
+    if status:
+        query = query.filter(User.status == status)
     if keyword:
         kw = f"%{keyword}%"
         query = query.filter(or_(
@@ -37,16 +40,25 @@ def get_user_by_id(db: Session, user_id: int) -> User:
 
 
 def create_user(db: Session, data: dict) -> dict:
-    """创建用户 — 校验用户名/邮箱唯一性后写入，密码做 bcrypt 哈希"""
+    """创建用户 — 校验用户名/邮箱/学号唯一性后写入，密码做 bcrypt 哈希。
+
+    非学生角色不保留学号（student_id 置 None）。
+    """
     username = data.get("username")
     email = data.get("email")
+    role = data.get("role", "student")
+    student_id = data.get("studentId") if role == "student" else None
     existing = db.query(User).filter(or_(User.username == username, User.email == email)).first()
     if existing:
         raise ConflictException(10009, "用户名或邮箱已存在")
+    if student_id:
+        dup = db.query(User).filter(User.student_id == student_id).first()
+        if dup:
+            raise ConflictException(10009, "学号已存在")
     user = User(
         username=username, email=email, password=hash_password(data.get("password", "")),
-        name=data.get("name", ""), role=data.get("role", "student"),
-        status=data.get("status", "active"), student_id=data.get("studentId"),
+        name=data.get("name", ""), role=role,
+        status=data.get("status", "active"), student_id=student_id,
         phone=data.get("phone"), must_change_password=data.get("mustChangePassword", False),
     )
     db.add(user)
@@ -55,23 +67,39 @@ def create_user(db: Session, data: dict) -> dict:
 
 
 def update_user(db: Session, user_id: int, data: dict) -> dict:
-    """更新用户信息 — 若包含 password 字段则重新哈希"""
+    """更新用户信息 — 校验邮箱/学号唯一性；若包含 password 字段则重新哈希。
+
+    角色与学号一致性：
+      - 改为非学生角色时清空 student_id；
+      - 学生角色（改后）必须有学号。
+    """
     user = get_user_by_id(db, user_id)
+    # 先按变更后的最终值做校验，避免部分写入后失败
+    if data.get("email"):
+        dup = db.query(User).filter(User.email == data["email"], User.id != user.id).first()
+        if dup:
+            raise ConflictException(10009, "邮箱已被使用")
+    final_role = data.get("role") or user.role
+    final_student_id = data["studentId"] if "studentId" in data else user.student_id
+    if data.get("studentId"):
+        dup = db.query(User).filter(
+            User.student_id == data["studentId"], User.id != user.id,
+        ).first()
+        if dup:
+            raise ConflictException(10009, "学号已被使用")
+    if final_role != "student":
+        # 非学生角色：清除无意义的学号
+        data["studentId"] = None
+    elif not final_student_id and ("role" in data or "studentId" in data):
+        # 把角色改为学生或显式清空学号时，学生必须有学号；
+        # 不触碰学号的普通更新（如仅改状态）不强制存量数据补学号
+        raise BadRequestException(10011, "学生角色必须填写学号")
+
     for k, v in data.items():
         col = camel_to_snake(k)
         if col == "password" and v:
             user.password = hash_password(v)
         elif hasattr(user, col) and col != "id":
-            setattr(user, col, v)
-    db.commit()
-    return user.to_dict(exclude={"password"})
-
-
-def update_profile(db: Session, user: User, data: dict) -> dict:
-    """用户更新自己的资料 — 不可修改 id 和 password"""
-    for k, v in data.items():
-        col = camel_to_snake(k)
-        if hasattr(user, col) and col not in ("id", "password"):
             setattr(user, col, v)
     db.commit()
     return user.to_dict(exclude={"password"})
@@ -207,25 +235,6 @@ def delete_user(db: Session, user_id: int) -> dict:
     db.delete(user)
     db.commit()
     return {"success": True, "message": "删除成功"}
-
-
-def change_password(db: Session, user: User, current_password: str, new_password: str) -> dict:
-    """用户修改自己的密码 — 需校验原密码"""
-    if not verify_password(current_password, user.password):
-        raise BadRequestException(10008, "当前密码错误")
-    user.password = hash_password(new_password)
-    db.commit()
-    return {"success": True, "message": "密码修改成功"}
-
-
-def update_user_password(db: Session, user_id: int, old_password: str, new_password: str) -> dict:
-    """管理员修改指定用户密码 — 需校验旧密码"""
-    user = get_user_by_id(db, user_id)
-    if not verify_password(old_password, user.password):
-        raise BadRequestException(10008, "当前密码错误")
-    user.password = hash_password(new_password)
-    db.commit()
-    return {"success": True, "message": "密码修改成功"}
 
 
 def reset_user_password(db: Session, user_id: int, new_password: str | None) -> dict:

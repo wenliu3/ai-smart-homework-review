@@ -6,37 +6,7 @@ import type {
 } from "@/types/user";
 
 /**
- * 登录
- * @param credentials 登录凭证
- * @returns 登录结果
- */
-export const login = (credentials: { email: string; password: string }) => {
-  return request({
-    url: "/auth/login",
-    method: "post",
-    data: credentials,
-  });
-};
-
-/**
- * 注册
- * @param userData 用户数据
- * @returns 注册结果
- */
-export const register = (userData: {
-  name: string;
-  email: string;
-  password: string;
-}) => {
-  return request({
-    url: "/auth/register",
-    method: "post",
-    data: userData,
-  });
-};
-
-/**
- * 获取用户详细信息
+ * 获取用户详细信息（管理员编辑用户时使用）
  * @param userId 用户ID
  * @returns 用户详细信息
  */
@@ -48,31 +18,7 @@ export const getUser = (userId: string): Promise<User> => {
 };
 
 /**
- * 获取当前用户个人资料
- * @returns 当前用户资料
- */
-export const getUserProfile = (): Promise<User> => {
-  return request({
-    url: "/users/profile",
-    method: "get",
-  });
-};
-
-/**
- * 更新用户个人资料
- * @param userData 用户资料数据
- * @returns 更新后的资料
- */
-export const updateUserProfile = (userData: any) => {
-  return request({
-    url: "/users/profile",
-    method: "put",
-    data: userData,
-  });
-};
-
-/**
- * 更新用户信息
+ * 更新用户信息（单角色设计：role 随本接口直接修改）
  * @param userId 用户ID
  * @param data 更新的数据
  * @returns 更新后的用户信息
@@ -101,39 +47,6 @@ export const updateUser = (
   });
 };
 
-/**
- * 更改密码
- * @param passwordData 密码数据
- * @returns 操作结果
- */
-export const changePassword = (passwordData: {
-  currentPassword: string;
-  newPassword: string;
-}) => {
-  return request({
-    url: "/users/password",
-    method: "put",
-    data: passwordData,
-  });
-};
-
-/**
- * 更新用户密码
- * @param userId 用户ID
- * @param data 新旧密码
- * @returns 操作结果
- */
-export const updateUserPassword = (
-  userId: string,
-  data: { oldPassword: string; newPassword: string }
-): Promise<{ success: boolean; message: string }> => {
-  return request({
-    url: `/users/${userId}/password`,
-    method: "patch",
-    data,
-  });
-};
-
 // 获取用户列表的参数
 export interface GetUsersParams {
   role?: string;
@@ -145,7 +58,7 @@ export interface GetUsersParams {
 }
 
 /**
- * 获取用户列表（支持按角色筛选）
+ * 获取用户列表（仅超级管理员；支持按角色筛选）
  */
 export const getUsers = (
   params?: GetUsersParams
@@ -158,7 +71,7 @@ export const getUsers = (
 };
 
 /**
- * 创建用户
+ * 创建用户（仅超级管理员）
  */
 export const createUser = (data: CreateUserDto): Promise<User> => {
   return request({
@@ -169,7 +82,7 @@ export const createUser = (data: CreateUserDto): Promise<User> => {
 };
 
 /**
- * 删除用户
+ * 删除用户（仅超级管理员）
  */
 export const deleteUser = (
   id: string
@@ -181,9 +94,9 @@ export const deleteUser = (
 };
 
 /**
- * 重置用户密码
+ * 重置用户密码（仅超级管理员）
  * @param userId 用户ID
- * @param newPassword 可选的新密码，不提供则随机生成
+ * @param newPassword 可选的新密码，不提供则使用系统默认密码
  * @returns 操作结果
  */
 export const resetUserPassword = (
@@ -200,7 +113,7 @@ export const resetUserPassword = (
 };
 
 /**
- * 批量导入用户
+ * 批量导入用户（教师/超级管理员）
  * @param users 用户数据数组
  * @returns 导入结果
  */
@@ -213,7 +126,7 @@ export const importUsersBatch = (users: any[]): Promise<any> => {
 };
 
 /**
- * 批量删除用户
+ * 批量删除用户（仅超级管理员）
  * @param userIds 用户ID数组
  * @returns 删除结果
  */
@@ -234,20 +147,4 @@ export const deleteUsersBatch = (
     method: "post",
     data: { userIds },
   });
-};
-
-// 为了兼容可能使用user.service.ts的代码，提供默认导出
-// 实际项目中应该统一使用命名导出
-export default {
-  login,
-  register,
-  getUserProfile,
-  updateUserProfile,
-  changePassword,
-  getUsers,
-  getUser,
-  createUser,
-  updateUser,
-  deleteUser,
-  resetPassword: resetUserPassword,
 };

@@ -134,14 +134,16 @@ export function compareFiles(checkId: string, indexA: number, indexB: number): P
 
 /**
  * 下载查重报告 Excel
+ * 注意：blob 响应时 axios 拦截器返回完整 AxiosResponse，这里统一取出 data 部分
  */
-export function downloadReport(checkId: string): Promise<Blob> {
-  return request({
+export async function downloadReport(checkId: string): Promise<Blob> {
+  const response = await request<any>({
     url: `/plagiarism/${checkId}/report`,
     method: "get",
     responseType: "blob",
     timeout: 60000,
   });
+  return response?.data instanceof Blob ? response.data : response;
 }
 
 /**

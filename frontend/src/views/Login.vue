@@ -30,12 +30,8 @@
         <div class="login-form-container">
           <!-- 表单标题 -->
           <div class="form-header">
-            <h3 class="form-title">
-              {{ isRegister ? "注册账户" : "用户登录" }}
-            </h3>
-            <p class="form-subtitle">
-              {{ isRegister ? "创建您的账户" : "欢迎回来" }}
-            </p>
+            <h3 class="form-title">用户登录</h3>
+            <p class="form-subtitle">欢迎回来</p>
           </div>
 
           <el-form
@@ -45,22 +41,8 @@
             @submit.prevent="submitForm"
             class="mt-2"
           >
-            <!-- 注册表单显示用户名字段 -->
-            <el-form-item v-if="isRegister" label="用户名" prop="username">
-              <el-input
-                v-model="form.username"
-                placeholder="请输入用户名"
-                class="!rounded"
-              ></el-input>
-            </el-form-item>
-
             <!-- 登录账号：由后端自动识别用户名、邮箱或学号 -->
-            <el-form-item
-              v-if="!isRegister"
-              label="账号"
-              prop="account"
-              data-testid="login-account"
-            >
+            <el-form-item label="账号" prop="account" data-testid="login-account">
               <el-input
                 v-model="form.account"
                 placeholder="请输入用户名、邮箱或学号"
@@ -69,40 +51,20 @@
               />
             </el-form-item>
 
-            <!-- 注册邮箱字段 -->
-            <el-form-item v-if="isRegister" label="邮箱" prop="email">
-              <el-input v-model="form.email" placeholder="请输入邮箱" class="!rounded" />
-            </el-form-item>
-
             <!-- 密码字段 -->
             <el-form-item label="密码" prop="password" data-testid="login-password">
               <el-input
                 v-model="form.password"
                 placeholder="请输入密码"
                 type="password"
-                :autocomplete="isRegister ? 'new-password' : 'current-password'"
-                show-password
-                class="!rounded"
-              ></el-input>
-            </el-form-item>
-
-            <!-- 注册表单显示确认密码字段 -->
-            <el-form-item
-              v-if="isRegister"
-              label="确认密码"
-              prop="confirmPassword"
-            >
-              <el-input
-                v-model="form.confirmPassword"
-                placeholder="请再次输入密码"
-                type="password"
+                autocomplete="current-password"
                 show-password
                 class="!rounded"
               ></el-input>
             </el-form-item>
 
             <!-- 记住我选项 -->
-            <el-form-item v-if="!isRegister">
+            <el-form-item>
               <div class="flex justify-between items-center w-full">
                 <div class="flex items-center">
                   <el-checkbox v-model="form.rememberMe">记住我</el-checkbox>
@@ -134,7 +96,7 @@
                 native-type="submit"
                 :loading="loading"
               >
-                {{ isRegister ? "注册" : "登录" }}
+                登录
               </el-button>
             </el-form-item>
 
@@ -142,18 +104,6 @@
             <div v-if="error" class="text-red-500 text-sm mb-4 text-center">
               {{ error }}
             </div>
-
-            <!-- 切换登录/注册表单 -->
-            <!-- <div class="text-center text-sm mt-4">
-          <span v-if="isRegister">
-            已有账号?
-            <a href="#" @click.prevent="isRegister = false" class="text-blue-500 hover:text-blue-700 transition-colors">点击登录</a>
-          </span>
-          <span v-else>
-            没有账号?
-            <a href="#" @click.prevent="isRegister = true" class="text-blue-500 hover:text-blue-700 transition-colors">点击注册</a>
-          </span>
-        </div> -->
           </el-form>
         </div>
       </div>
@@ -180,28 +130,15 @@ const store = useStore();
 const formRef = ref<FormInstance>();
 
 // 状态管理
-const isRegister = ref(false);
 const loading = ref(false);
 const error = ref<string | null>(null);
 
 // 表单数据
 const form = reactive({
   account: "",
-  username: "",
-  email: "",
   password: "",
-  confirmPassword: "",
   rememberMe: true, // 默认勾选记住密码
 });
-
-// 校验密码是否一致
-const validateConfirmPassword = (rule: any, value: string, callback: any) => {
-  if (value !== form.password) {
-    callback(new Error("两次输入的密码不一致"));
-  } else {
-    callback();
-  }
-};
 
 const validateAccount = (
   _rule: unknown,
@@ -223,18 +160,9 @@ const validateAccount = (
 // 表单校验规则
 const rules = reactive<FormRules>({
   account: [{ validator: validateAccount, trigger: "blur" }],
-  username: [{ required: true, message: "请输入用户名", trigger: "blur" }],
-  email: [
-    { required: true, message: "请输入邮箱", trigger: "blur" },
-    { type: "email", message: "请输入正确的邮箱格式", trigger: "blur" },
-  ],
   password: [
     { required: true, message: "请输入密码", trigger: "blur" },
     { min: 6, message: "密码长度至少为6个字符", trigger: "blur" },
-  ],
-  confirmPassword: [
-    { required: true, message: "请确认密码", trigger: "blur" },
-    { validator: validateConfirmPassword, trigger: "blur" },
   ],
 });
 
@@ -257,45 +185,30 @@ const submitForm = async () => {
       error.value = null;
 
       try {
-        if (isRegister.value) {
-          // 注册逻辑
-          await store.dispatch("user/register", {
-            username: form.username,
-            email: form.email,
-            password: form.password,
-          });
+        const loginData = {
+          usernameOrEmailOrStudentId: form.account.trim(),
+          password: form.password,
+          rememberMe: form.rememberMe,
+        };
 
-          ElMessage.success("注册成功");
+        const loginResponse = await store.dispatch("user/login", loginData);
+
+        ElMessage.success("登录成功");
+
+        // 检查是否需要强制修改密码
+        if (loginResponse.mustChangePassword) {
+          // 跳转到强制修改密码页面，并保存原始跳转地址
+          const redirectUrl = (route.query.redirect as string) || "/dashboard";
+          router.push(
+            `/force-change-password?redirect=${encodeURIComponent(redirectUrl)}`
+          );
         } else {
-          const loginData = {
-            usernameOrEmailOrStudentId: form.account.trim(),
-            password: form.password,
-            rememberMe: form.rememberMe,
-          };
-          
-          const loginResponse = await store.dispatch("user/login", loginData);
-
-          ElMessage.success("登录成功");
-
-          // 检查是否需要强制修改密码
-          if (loginResponse.mustChangePassword) {
-            // 跳转到强制修改密码页面，并保存原始跳转地址
-            const redirectUrl =
-              (route.query.redirect as string) || "/dashboard";
-            router.push(
-              `/force-change-password?redirect=${encodeURIComponent(
-                redirectUrl
-              )}`
-            );
-          } else {
-            // 登录成功后跳转到dashboard，由权限控制逻辑根据角色自动分配
-            router.push((route.query.redirect as string) || "/dashboard");
-          }
+          // 登录成功后跳转到dashboard，由权限控制逻辑根据角色自动分配
+          router.push((route.query.redirect as string) || "/dashboard");
         }
       } catch (err: any) {
-        console.error("登录/注册失败:", err);
-        error.value =
-          err.message || (isRegister.value ? "注册失败" : "登录失败");
+        console.error("登录失败:", err);
+        error.value = err.message || "登录失败";
       } finally {
         loading.value = false;
       }

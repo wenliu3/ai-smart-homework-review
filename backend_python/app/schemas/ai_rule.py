@@ -1,5 +1,9 @@
 """AI 规则相关 schemas"""
+from typing import Literal
 from pydantic import BaseModel
+
+
+AiRuleVisibility = Literal["private", "public", "system"]
 
 
 class AiRuleCriterion(BaseModel):
@@ -17,7 +21,7 @@ class AiRuleCreate(BaseModel):
     modelType: str
     prompt: str
     status: str = "active"
-    visibility: str = "private"
+    visibility: AiRuleVisibility = "private"
     tags: list[str] = []
     maxScore: int = 100
     criteria: list[AiRuleCriterion] | None = None
@@ -30,7 +34,7 @@ class AiRuleUpdate(BaseModel):
     modelType: str | None = None
     prompt: str | None = None
     status: str | None = None
-    visibility: str | None = None
+    visibility: AiRuleVisibility | None = None
     tags: list[str] | None = None
     maxScore: int | None = None
     criteria: list[AiRuleCriterion] | None = None

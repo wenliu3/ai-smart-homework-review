@@ -2,10 +2,8 @@ import request from "@/utils/request";
 import type {
   LoginParams,
   LoginResult,
-  UserInfo,
   RefreshTokenResult,
   ChangePasswordParams,
-  ResetPasswordParams,
 } from "@/types/auth";
 
 /**
@@ -73,57 +71,3 @@ export function firstChangePassword(data: ChangePasswordParams) {
     data,
   });
 }
-
-/**
- * 忘记密码请求
- */
-export const forgotPassword = (
-  email: string
-): Promise<{ success: boolean }> => {
-  return request({
-    url: "/v1/auth/forgot-password",
-    method: "post",
-    data: { email },
-  });
-};
-
-/**
- * 重置密码
- */
-export const resetPassword = (
-  token: string,
-  password: string
-): Promise<{ success: boolean }> => {
-  return request({
-    url: "/v1/auth/reset-password",
-    method: "post",
-    data: { token, password },
-  });
-};
-
-/**
- * 用户注册
- */
-export interface RegisterParams {
-  username: string;
-  password: string;
-  confirmPassword: string;
-  email: string;
-  name?: string;
-}
-
-export interface RegisterResult {
-  token: string;
-  success: boolean;
-  message: string;
-  userId?: string;
-  expiresIn: number;
-}
-
-export const register = (data: RegisterParams): Promise<RegisterResult> => {
-  return request({
-    url: "/v1/auth/register",
-    method: "post",
-    data,
-  });
-};

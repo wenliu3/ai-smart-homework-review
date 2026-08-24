@@ -1,7 +1,7 @@
 """作业 CRUD"""
 from sqlalchemy.orm import Session
 from ..models import User, Class, ClassStudent, Assignment, Submission
-from ..core.exceptions import BadRequestException, NotFoundException
+from ..core.exceptions import BadRequestException, NotFoundException, ForbiddenException
 from ..core.utils import now, camel_to_snake
 from ..plagiarism import merge_results
 
@@ -55,7 +55,12 @@ def get_student_visible_assignment(
 # ========== 教师端 ==========
 
 def get_teacher_assignments(db: Session, teacher_id: int, params: dict) -> dict:
-    """教师端分页查询自己的作业列表 — 含提交数/已批改数/待批改数等统计"""
+    """教师端分页查询自己的作业列表 — 含提交数/已批改数/待批改数等统计。
+
+    支持 title/status/startDate/endDate（SQL 层）与 className/isExpired（内存层，
+    classes 为 JSON 字段、isExpired 依赖当前时间，无法跨库在 SQL 统一过滤）过滤；
+    内存过滤后再排序分页，保证 total 与页内条数一致。
+    """
     page = int(params.get("page", 1))
     page_size = int(params.get("pageSize", 10))
     sort_by = params.get("sortBy", "createdAt")
@@ -70,11 +75,38 @@ def get_teacher_assignments(db: Session, teacher_id: int, params: dict) -> dict:
         query = query.filter(Assignment.start_date >= params["startDate"])
     if params.get("endDate"):
         query = query.filter(Assignment.end_date <= params["endDate"])
+    assignments = query.all()
 
-    total = query.count()
-    col = getattr(Assignment, camel_to_snake(sort_by), Assignment.created_at)
-    col = col.asc() if sort_order == "asc" else col.desc()
-    assignments = query.order_by(col).offset((page - 1) * page_size).limit(page_size).all()
+    # 班级名称过滤：作业的 classes 是 JSON（[{"id","name"}]），匹配任一班级名
+    class_name = (params.get("className") or "").strip()
+    if class_name:
+        kw = class_name.lower()
+        assignments = [
+            a for a in assignments
+            if any(kw in (c.get("name") or "").lower() for c in (a.classes or []))
+        ]
+
+    # 是否过期过滤：end_date 早于当前时间视为已过期（与列表 isExpired 口径一致）
+    raw_expired = params.get("isExpired")
+    if raw_expired is not None and raw_expired != "":
+        want_expired = str(raw_expired).lower() in ("true", "1", "yes")
+        assignments = [
+            a for a in assignments
+            if bool(a.end_date and now() > a.end_date) == want_expired
+        ]
+
+    total = len(assignments)
+    col_name = camel_to_snake(sort_by)
+    reverse = sort_order != "asc"
+    assignments.sort(
+        key=lambda a: (
+            (v := getattr(a, col_name, None) or a.created_at) is None,
+            v,
+        ),
+        reverse=reverse,
+    )
+    start = (page - 1) * page_size
+    assignments = assignments[start:start + page_size]
 
     items = []
     for a in assignments:
@@ -91,11 +123,13 @@ def get_teacher_assignments(db: Session, teacher_id: int, params: dict) -> dict:
     return {"items": items, "total": total, "page": page, "pageSize": page_size}
 
 
-def get_teacher_detail(db: Session, assignment_id: int) -> dict:
-    """获取单个作业详情 — 含提交统计(总数/已批改/待批改/草稿/AI批改/教师批改)"""
+def get_teacher_detail(db: Session, assignment_id: int, teacher_id: int | None = None) -> dict:
+    """获取单个作业详情 — 含提交统计(总数/已批改/待批改/草稿/AI批改/教师批改)；仅限作业归属教师"""
     a = db.query(Assignment).filter(Assignment.alive(), Assignment.id == assignment_id).first()
     if not a:
         raise NotFoundException(10015, "作业不存在")
+    if teacher_id is not None and a.teacher_id != teacher_id:
+        raise ForbiddenException(10007, "无权查看该作业")
     d = a.to_dict()
     total = db.query(Submission).filter(Submission.assignment_id == a.id).count()
     reviewed = db.query(Submission).filter(Submission.assignment_id == a.id, Submission.status.in_(["ai_reviewed", "teacher_reviewed"])).count()
@@ -110,11 +144,13 @@ def get_teacher_detail(db: Session, assignment_id: int) -> dict:
     return d
 
 
-def get_assignment_students(db: Session, assignment_id: int, params: dict) -> dict:
-    """查询某作业下的学生提交列表 — 含学生姓名/学号/班级/AI得分/教师得分"""
+def get_assignment_students(db: Session, assignment_id: int, params: dict, teacher_id: int | None = None) -> dict:
+    """查询某作业下的学生提交列表 — 含学生姓名/学号/班级/AI得分/教师得分；仅限作业归属教师"""
     a = db.query(Assignment).filter(Assignment.alive(), Assignment.id == assignment_id).first()
     if not a:
         raise NotFoundException(10015, "作业不存在")
+    if teacher_id is not None and a.teacher_id != teacher_id:
+        raise ForbiddenException(10007, "无权查看该作业的学生列表")
     page = int(params.get("page", 1))
     limit = int(params.get("limit", 20))
     class_id = params.get("classId")

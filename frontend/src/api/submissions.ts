@@ -160,6 +160,19 @@ export class SubmissionsApi {
   }
 
   /**
+   * 教师删除学生提交（验证作业归属，删除后学生可重新提交）
+   * @param submissionId 提交ID
+   * @returns 删除结果
+   */
+  static async teacherDeleteSubmission(submissionId: string) {
+    return request<{ success: boolean; message: string; resourceId: string }>({
+      url: "/teacher/submissions/delete",
+      method: "POST",
+      data: { submissionId },
+    });
+  }
+
+  /**
    * 保存草稿
    * @param params 保存参数
    * @returns 保存结果

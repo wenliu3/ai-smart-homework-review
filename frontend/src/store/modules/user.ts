@@ -1,7 +1,6 @@
 // user.ts - 用户相关状态管理
 import {
   login,
-  register,
   logout,
   refreshToken,
   getUserInfo,
@@ -14,8 +13,10 @@ import { ElMessage } from "element-plus";
  *
  * 主要功能:
  * 1. 存储用户基础信息和认证状态
- * 2. 提供用户登录、注册、登出和令牌刷新功能
+ * 2. 提供用户登录、登出和令牌刷新功能
  * 3. 管理用户身份认证状态
+ *
+ * 注意：系统不开放自行注册，用户由超级管理员新增或批量导入。
  */
 
 // 创建初始状态
@@ -141,34 +142,6 @@ const actions = {
       }
 
       return null;
-    } catch (error) {
-      throw error;
-    }
-  },
-
-  /**
-   * 用户注册
-   */
-  async register({ commit, dispatch }, registerData) {
-    try {
-      const response = await register(registerData);
-
-      // 保存token
-      localStorage.setItem("token", response.token);
-
-      // 设置用户基本信息
-      commit("SET_USER_INFO", {
-        token: response.token,
-        tokenExpiresAt: Date.now() + response.expiresIn * 1000,
-      });
-
-      // 获取用户信息和菜单
-      await dispatch("getUserInfo");
-      await dispatch("auth/initMenuRole", null, { root: true });
-
-      router.push("/dashboard");
-
-      return response;
     } catch (error) {
       throw error;
     }

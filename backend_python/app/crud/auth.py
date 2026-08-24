@@ -1,4 +1,4 @@
-"""认证 CRUD: 登录/注册/刷新令牌/改密"""
+"""认证 CRUD: 登录/刷新令牌/改密（系统不开放自行注册）"""
 import uuid
 from datetime import timedelta
 from sqlalchemy.orm import Session
@@ -6,7 +6,7 @@ from sqlalchemy import or_
 from ..models import User, RefreshToken
 from ..core.security import hash_password, verify_password, create_access_token
 from ..core.exceptions import (
-    UnauthorizedException, BadRequestException, ConflictException,
+    UnauthorizedException, BadRequestException,
 )
 from ..core.utils import now
 from ..config import settings
@@ -147,36 +147,3 @@ def first_change_password(db: Session, user: User, current_password: str, new_pa
     user.must_change_password = False
     db.commit()
     return {"message": "密码修改成功，请重新登录"}
-
-
-def register(db: Session, username: str, password: str, email: str, name: str | None) -> dict:
-    """用户注册 — 校验用户名/邮箱唯一性后创建学生账号并签发 JWT"""
-    existing = db.query(User).filter(or_(User.username == username, User.email == email)).first()
-    if existing:
-        raise ConflictException(10009, "用户名或邮箱已存在")
-    user = User(
-        username=username, email=email, password=hash_password(password),
-        name=name or username, role="student", status="active",
-    )
-    db.add(user)
-    db.commit()
-    token = create_access_token(str(user.id), user.username, user.role)
-    return {
-        "token": token, "success": True, "message": "注册成功",
-        "userId": str(user.id), "expiresIn": settings.JWT_EXPIRES_IN,
-    }
-
-
-def register_legacy(db: Session, email: str, name: str, password: str) -> dict:
-    """兼容旧版注册 API — 以邮箱作为用户名"""
-    existing = db.query(User).filter(or_(User.username == email, User.email == email)).first()
-    if existing:
-        raise ConflictException(10009, "用户名或邮箱已存在")
-    user = User(
-        username=email, email=email, password=hash_password(password),
-        name=name, role="student", status="active",
-    )
-    db.add(user)
-    db.commit()
-    token = create_access_token(str(user.id), user.username, user.role)
-    return {"token": token, "userId": str(user.id), "expiresIn": settings.JWT_EXPIRES_IN}

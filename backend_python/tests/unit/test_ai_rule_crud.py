@@ -47,7 +47,7 @@ def test_update_rule_replaces_criteria(db):
     new_criteria = [
         {"id": "criterion-a", "title": "维度A", "maxScore": 100, "instructions": ""},
     ]
-    ai_rule_crud.update(db, rule_id, {"criteria": new_criteria})
+    ai_rule_crud.update(db, rule_id, {"criteria": new_criteria}, actor_role="superadmin")
 
     fetched = ai_rule_crud.get_by_id(db, rule_id)
     assert fetched["criteria"] == new_criteria

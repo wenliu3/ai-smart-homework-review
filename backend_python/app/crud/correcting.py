@@ -4,7 +4,7 @@ import logging
 from sqlalchemy.orm import Session
 from ..assistant_database import AssistantSessionLocal
 from ..models import User, Class, Assignment, Submission
-from ..core.exceptions import NotFoundException
+from ..core.exceptions import NotFoundException, ForbiddenException
 from ..core.utils import now, camel_to_snake
 
 logger = logging.getLogger(__name__)
@@ -24,8 +24,21 @@ def _to100(score, max_score):
     return round((score / max_score) * 100) if max_score > 0 else score
 
 
-def get_submission_list(db: Session, params: dict) -> dict:
-    """教师端分页查询提交列表 — 支持按作业/班级/状态/学生姓名/学号过滤，含学生姓名/学号/得分"""
+def _assert_teacher_ownership(db: Session, submission: Submission, teacher_id: int) -> Assignment:
+    """校验提交所属作业归当前教师所有，返回该作业（不存在时抛 404）"""
+    assignment = db.query(Assignment).filter(
+        Assignment.alive(), Assignment.id == submission.assignment_id,
+    ).first()
+    if not assignment:
+        raise NotFoundException(10015, "作业不存在")
+    if assignment.teacher_id != teacher_id:
+        raise ForbiddenException(10007, "无权操作该作业的提交")
+    return assignment
+
+
+def get_submission_list(db: Session, params: dict, teacher_id: int) -> dict:
+    """教师端分页查询提交列表 — 仅返回当前教师自己作业的提交；
+    支持按作业/班级/状态/学生姓名/学号过滤，含学生姓名/学号/得分"""
     page = int(params.get("page", 1))
     limit = int(params.get("limit", 20))
     sort_by = params.get("sortBy", "submittedAt")
@@ -35,11 +48,12 @@ def get_submission_list(db: Session, params: dict) -> dict:
     # 确保 total 和分页数据一致（修复原内存过滤导致 total 与页内条数不符的问题）
     # JOIN Assignment 并带 alive()：软删作业不再级联删提交记录，
     # 不在这里过滤的话，已删作业的提交会永远留在批改队列里还能被打分。
+    # teacher_id 过滤：教师只能看到自己作业的提交（数据范围隔离）。
     query = (
         db.query(Submission)
         .join(User, Submission.student_id == User.id)
         .join(Assignment, Assignment.id == Submission.assignment_id)
-        .filter(Assignment.alive())
+        .filter(Assignment.alive(), Assignment.teacher_id == teacher_id)
     )
     if params.get("assignmentId"):
         query = query.filter(Submission.assignment_id == int(params["assignmentId"]))
@@ -80,15 +94,13 @@ def get_submission_list(db: Session, params: dict) -> dict:
     return {"items": items, "total": total, "page": page, "pageSize": limit}
 
 
-def get_submission_detail(db: Session, submission_id: int) -> dict:
-    """获取单个提交详情 — 含学生信息、班级、附件列表"""
+def get_submission_detail(db: Session, submission_id: int, teacher_id: int) -> dict:
+    """获取单个提交详情 — 含学生信息、班级、附件列表；仅限作业归属教师"""
     s = db.query(Submission).filter(Submission.id == submission_id).first()
     if not s:
         raise NotFoundException(10015, "提交记录不存在")
-    assignment = db.query(Assignment).filter(Assignment.alive(), Assignment.id == s.assignment_id).first()
     # 作业已软删：不能静默回退成 100 分制照常返回（会把 40/50 显示成 40/100）
-    if not assignment:
-        raise NotFoundException(10015, "作业不存在")
+    assignment = _assert_teacher_ownership(db, s, teacher_id)
     student = db.query(User).filter(User.id == s.student_id).first()
     cls = db.query(Class).filter(Class.id == s.class_id).first()
     max_score = _max_score(assignment)
@@ -129,11 +141,9 @@ def submit_teacher_review(
     s = db.query(Submission).filter(Submission.id == submission_id).first()
     if not s:
         raise NotFoundException(10015, "提交记录不存在")
-    # 作业已软删时提交记录仍在库里（保留可恢复），但不能再产生批改数据
-    if db.query(Assignment).filter(
-        Assignment.alive(), Assignment.id == s.assignment_id,
-    ).first() is None:
-        raise NotFoundException(10015, "作业不存在")
+    # 作业已软删时提交记录仍在库里（保留可恢复），但不能再产生批改数据；
+    # 同时校验作业归属，防止任意教师批改他人作业的提交。
+    _assert_teacher_ownership(db, s, actor_user_id)
     s.teacher_score = teacher_score
     s.teacher_review_content = teacher_review_content
     s.teacher_reviewed_at = now()

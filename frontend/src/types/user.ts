@@ -5,8 +5,8 @@
 // 用户角色类型
 export type UserRole = "superadmin" | "teacher" | "student";
 
-// 用户状态类型
-export type UserStatus = "active" | "inactive";
+// 用户状态类型（与后端 UserStatus 枚举一致：active/inactive/locked）
+export type UserStatus = "active" | "inactive" | "locked";
 
 // 用户基本信息
 export interface User {
@@ -30,7 +30,7 @@ export interface User {
   tokenExpiresAt?: number;
 }
 
-// 创建用户DTO
+// 创建用户DTO（与后端 UserCreate Schema 一致；confirmPassword 仅前端校验用，不发送）
 export interface CreateUserDto {
   username: string;
   email: string;
@@ -40,13 +40,10 @@ export interface CreateUserDto {
   studentId?: string;
   phone?: string;
   status?: UserStatus;
-  avatar?: string;
-  meta?: Record<string, any>;
 }
 
-// 更新用户DTO
+// 更新用户DTO（与后端 UserUpdate Schema 一致）
 export interface UpdateUserDto {
-  username?: string;
   email?: string;
   name?: string;
   role?: UserRole;
@@ -54,7 +51,6 @@ export interface UpdateUserDto {
   phone?: string;
   status?: UserStatus;
   avatar?: string;
-  meta?: Record<string, any>;
 }
 
 // 用户查询参数
@@ -77,10 +73,4 @@ export interface UserListResponse {
   total: number;
   page: number;
   limit: number;
-}
-
-// 修改密码DTO
-export interface ChangePasswordDto {
-  currentPassword: string;
-  newPassword: string;
 }

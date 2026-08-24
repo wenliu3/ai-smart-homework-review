@@ -341,7 +341,7 @@ import { ref, reactive, watch, computed, nextTick, onBeforeUnmount } from "vue";
 import { UploadFilled, Download, Delete, Document, Setting, User } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
 import type { UploadFile } from "element-plus";
-import { adhocCheck, compareFiles, getAiSuggestion, cleanupCheckFiles, type AdhocCheckResult, type CompareResult } from "@/api/plagiarism";
+import { adhocCheck, compareFiles, getAiSuggestion, cleanupCheckFiles, downloadReport as downloadReportApi, type AdhocCheckResult, type CompareResult } from "@/api/plagiarism";
 
 interface ParsedFile {
   raw: File;
@@ -681,19 +681,9 @@ const startCheck = async () => {
 /** 下载报告 */
 const downloadReport = async () => {
   if (!result.value?.checkId) return;
-  const url = `/api/plagiarism/${result.value.checkId}/report`;
-  const token = localStorage.getItem("token");
   try {
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) {
-      const errorData = await res.json().catch(() => null);
-      ElMessage.error(errorData?.message || `下载失败 (HTTP ${res.status})`);
-      return;
-    }
-    const blob = await res.blob();
-    if (blob.size === 0 || blob.type.includes("application/json")) {
+    const blob = await downloadReportApi(result.value.checkId);
+    if (!blob || blob.size === 0 || blob.type.includes("application/json")) {
       ElMessage.error("下载失败：服务器未返回有效文件，可能查重结果已过期");
       return;
     }
@@ -703,8 +693,8 @@ const downloadReport = async () => {
     a.click();
     URL.revokeObjectURL(a.href);
     ElMessage.success("报告下载成功");
-  } catch (error) {
-    ElMessage.error("下载失败，请重试");
+  } catch (error: any) {
+    ElMessage.error(error?.message || "下载失败，请重试");
   }
 };
 

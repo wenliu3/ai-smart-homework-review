@@ -1,11 +1,6 @@
 const PUBLIC_AUTH_PATHS = new Set([
   "/v1/auth/login",
-  "/v1/auth/register",
-  "/v1/auth/forgot-password",
-  "/v1/auth/reset-password",
   "/v1/auth/refresh-token",
-  "/auth/login",
-  "/auth/register",
 ]);
 
 function normalizeRequestPath(url = ""): string {

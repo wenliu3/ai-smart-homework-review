@@ -87,6 +87,7 @@
               <el-radio-group v-model="form.status">
                 <el-radio label="active">正常</el-radio>
                 <el-radio label="inactive">禁用</el-radio>
+                <el-radio label="locked">锁定</el-radio>
               </el-radio-group>
             </el-form-item>
 
@@ -123,8 +124,6 @@ import { ref, reactive, computed, nextTick } from "vue";
 import { ElMessage } from "element-plus";
 import type { FormInstance, FormRules } from "element-plus/es/components/form";
 import { createUser, getUser, updateUser } from "@/api/user";
-import { assignRolesToUser } from "@/api/user-role";
-import { getRoleList } from "@/api/role";
 import type { CreateUserDto, UpdateUserDto, User } from "@/types/user";
 
 // 组件属性
@@ -232,25 +231,8 @@ const rules = reactive<FormRules>({
   ],
 });
 
-// 存储原始用户数据（用于比较角色是否变化）
+// 存储原始用户数据（编辑时回显）
 const originalUserData = ref<User | null>(null);
-
-// 角色映射表（角色代码到角色ID的映射）
-const roleMapping = ref<Record<string, string>>({});
-
-// 加载角色映射
-const loadRoleMapping = async () => {
-  try {
-    const response = await getRoleList();
-    const mapping: Record<string, string> = {};
-    response.items.forEach((role) => {
-      mapping[role.code] = role._id;
-    });
-    roleMapping.value = mapping;
-  } catch (error) {
-    console.error("加载角色映射失败", error);
-  }
-};
 
 // 打开表单对话框
 const openForm = async (mode: "add" | "edit", id: string = "") => {
@@ -259,9 +241,8 @@ const openForm = async (mode: "add" | "edit", id: string = "") => {
   dialogVisible.value = true;
 
   resetForm();
-
-  // 加载角色映射（用于角色同步）
-  await loadRoleMapping();
+  // 等待表单重置完成后再回显用户数据，避免异步竞态导致表单被清空
+  await nextTick();
 
   if (mode === "edit" && id) {
     await loadUserData(id);
@@ -342,23 +323,8 @@ const submitForm = () => {
           } as CreateUserDto);
           ElMessage.success("创建用户成功");
         } else {
-          // 更新用户基本信息
+          // 单角色设计：role 随 PATCH /users/{id} 直接更新，无需二次调用角色分配接口
           await updateUser(userId.value, userData as UpdateUserDto);
-
-          // 检查角色是否发生变化，如果变化则同步角色分配
-          if (
-            originalUserData.value &&
-            originalUserData.value.role !== form.role
-          ) {
-            const roleId = roleMapping.value[form.role];
-            if (roleId) {
-              await assignRolesToUser(userId.value, [roleId]);
-              console.log(
-                `用户角色已从 ${originalUserData.value.role} 更新为 ${form.role}`
-              );
-            }
-          }
-
           ElMessage.success("更新用户成功");
         }
 

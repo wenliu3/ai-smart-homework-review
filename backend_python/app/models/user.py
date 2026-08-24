@@ -13,7 +13,7 @@ class User(Base, TimestampMixin, ModelMixin):
     name = Column(String(64), nullable=False)
     role = Column(String(20), nullable=False, default="student")
     status = Column(String(20), nullable=False, default="active")
-    student_id = Column(String(64), nullable=True, index=True)
+    student_id = Column(String(64), nullable=True, unique=True, index=True)
     phone = Column(String(32), nullable=True)
     avatar = Column(String(512), nullable=True)
     meta = Column(JSON, nullable=True)

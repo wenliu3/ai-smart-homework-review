@@ -175,14 +175,6 @@ def get_teacher_pending_tasks(db: Session, teacher_id: int) -> dict:
     return {"assignments": items, "submissions": submissions}
 
 
-def get_teacher_performance_summary() -> dict:
-    return {"messages": []}
-
-
-def get_teacher_quick_actions() -> dict:
-    return {"actions": [{"type": "create_assignment", "label": "发布作业", "path": "/teacher/assignments"}]}
-
-
 # ========== 学生 ==========
 
 def get_student_stats(db: Session, student_id: int) -> dict:
@@ -285,15 +277,3 @@ def get_student_stats(db: Session, student_id: int) -> dict:
         "pendingAssignmentsList": pending_assignments,
         "recentSubmissions": recent,
     }
-
-
-def get_student_learning_progress() -> dict:
-    return {"progress": []}
-
-
-def get_student_achievements() -> dict:
-    return {"achievements": []}
-
-
-def get_student_study_recommendations() -> dict:
-    return {"recommendations": []}

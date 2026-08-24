@@ -44,6 +44,7 @@
             <el-option label="全部" value="" />
             <el-option label="正常" value="active" />
             <el-option label="禁用" value="inactive" />
+            <el-option label="锁定" value="locked" />
           </el-select>
         </el-form-item>
         <el-form-item class="mb-0 flex-shrink-0">

@@ -28,7 +28,23 @@
           <el-option label="禁用" value="inactive" />
         </el-select>
       </el-form-item>
-      <el-form-item label="可见性">
+      <el-form-item>
+        <template #label>
+          <span>可见性</span>
+          <el-tooltip
+            placement="top"
+            effect="dark"
+          >
+            <template #content>
+              私有：仅创建者和超级管理员可见<br />
+              公开：所有教师可见可用<br />
+              系统：官方内置规则，所有人可用，仅超级管理员可修改
+            </template>
+            <el-icon class="ml-1 text-gray-400 cursor-help">
+              <QuestionFilled />
+            </el-icon>
+          </el-tooltip>
+        </template>
         <el-select
           v-model="searchForm.visibility"
           placeholder="可见性"
@@ -120,7 +136,7 @@
 import { ref, reactive, computed, onMounted } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { getAiRuleList, deleteAiRule, copyAiRule, toggleAiRuleStatus } from "../../../api/ai-rule";
-import { Plus, Refresh, Search } from "@element-plus/icons-vue";
+import { Plus, Refresh, Search, QuestionFilled } from "@element-plus/icons-vue";
 import { useStore } from "vuex";
 
 // 导入组件

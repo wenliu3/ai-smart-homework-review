@@ -58,10 +58,20 @@ async def upload_files(files: List[UploadFile] = File(...), current_user: User =
     return ok({"files": attachments, "uploadedCount": len(attachments)})
 
 
+def _safe_file_path(filename: str):
+    """校验文件名并解析为上传目录内的安全路径（防路径穿越）"""
+    if not filename or "/" in filename or "\\" in filename or ".." in filename:
+        raise BadRequestException(10011, "非法文件名")
+    file_path = settings.upload_path / filename
+    if file_path.parent != settings.upload_path:
+        raise BadRequestException(10011, "非法文件名")
+    return file_path
+
+
 @router.get("/upload/download/{filename}")
 def download_file(filename: str, current_user: User = Depends(get_current_user)):
     """下载文件 — 图片/PDF/TXT 内联显示，其他类型附件下载"""
-    file_path = settings.upload_path / filename
+    file_path = _safe_file_path(filename)
     if not file_path.exists():
         return JSONResponse({"code": 404, "message": "文件不存在"}, status_code=404)
     ext = os.path.splitext(filename)[1].lower()
@@ -76,7 +86,7 @@ def download_file(filename: str, current_user: User = Depends(get_current_user))
 @router.get("/upload/preview/{filename}")
 async def preview_file(filename: str, current_user: User = Depends(get_current_user)):
     """在线预览文件 — 图片/PDF/TXT 直接返回，docx 提取文本转HTML"""
-    file_path = settings.upload_path / filename
+    file_path = _safe_file_path(filename)
     if not file_path.exists():
         return JSONResponse({"code": 404, "message": "文件不存在"}, status_code=404)
     ext = os.path.splitext(filename)[1].lower()
@@ -89,8 +99,8 @@ async def preview_file(filename: str, current_user: User = Depends(get_current_u
 
 @router.delete("/upload/delete/{filename}")
 def delete_file(filename: str, current_user: User = Depends(get_current_user)):
-    """删除上传的文件 — 学生取消上传或离开页面时清理未提交的临时文件"""
-    file_path = settings.upload_path / filename
+    """删除上传的文件 — 学生取消上传或离开页面时清理未提交的临时文件（仅限上传根目录内的文件）"""
+    file_path = _safe_file_path(filename)
     if not file_path.exists():
         return ok({"success": True, "message": "文件不存在或已删除"})
     try:

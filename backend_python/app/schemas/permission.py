@@ -48,7 +48,3 @@ class RoleUpdate(BaseModel):
     menuIds: list[str] | None = None
     permissions: list[str] | None = None
     status: str | None = None
-
-
-class AssignMenusRequest(BaseModel):
-    menuIds: list[str]

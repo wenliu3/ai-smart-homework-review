@@ -220,6 +220,7 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import { View, Edit, Paperclip, Document, Delete } from "@element-plus/icons-vue";
 import GradingDrawer from "./GradingDrawer.vue";
 import FilePreviewDialog from "@/components/FilePreviewDialog.vue";
+import { SubmissionsApi } from "@/api/submissions";
 
 // Props
 interface Props {
@@ -289,21 +290,11 @@ const handleDeleteSubmission = async (row: any) => {
       '删除确认',
       { confirmButtonText: '确认删除', cancelButtonText: '取消', type: 'warning' }
     );
-    const token = localStorage.getItem('token');
-    const resp = await fetch('/api/teacher/submissions/delete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ submissionId: row._id }),
-    });
-    const data = await resp.json();
-    if (data.code === 200) {
-      ElMessage.success('已删除学生提交');
-      emit('refresh');
-    } else {
-      ElMessage.error(data.message || '删除失败');
-    }
+    await SubmissionsApi.teacherDeleteSubmission(row._id);
+    ElMessage.success('已删除学生提交');
+    emit('refresh');
   } catch (e: any) {
-    if (e !== 'cancel') ElMessage.error('删除失败: ' + (e?.message || ''));
+    if (e !== 'cancel' && e?.message) ElMessage.error('删除失败: ' + e.message);
   }
 };
 

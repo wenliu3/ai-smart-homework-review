@@ -51,11 +51,11 @@ def test_soft_deleted_assignment_submissions_leave_grading_queue(
     db, teacher, graded_submission,
 ):
     assignment, _ = graded_submission
-    assert correcting_crud.get_submission_list(db, {})["total"] == 1
+    assert correcting_crud.get_submission_list(db, {}, teacher.id)["total"] == 1
 
     assignment_crud.delete_assignment(db, assignment.id, teacher.id)
 
-    assert correcting_crud.get_submission_list(db, {})["total"] == 0
+    assert correcting_crud.get_submission_list(db, {}, teacher.id)["total"] == 0
 
 
 def test_soft_deleted_assignment_submission_detail_is_not_found(
@@ -65,7 +65,7 @@ def test_soft_deleted_assignment_submission_detail_is_not_found(
     assignment_crud.delete_assignment(db, assignment.id, teacher.id)
 
     with pytest.raises(NotFoundException):
-        correcting_crud.get_submission_detail(db, submission.id)
+        correcting_crud.get_submission_detail(db, submission.id, teacher.id)
 
 
 def test_soft_deleted_assignment_submission_cannot_be_graded(
@@ -81,6 +81,7 @@ def test_soft_deleted_assignment_submission_cannot_be_graded(
             submission_id=submission.id,
             teacher_score=45,
             teacher_review_content="不该写进去",
+            actor_user_id=teacher.id,
         )
 
     db.expire_all()
