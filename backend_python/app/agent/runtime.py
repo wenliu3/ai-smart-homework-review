@@ -96,7 +96,7 @@ def default_run_budget() -> RunBudget:
     """
     return RunBudget(
         max_nodes=8,
-        max_tool_calls=12,
+        max_tool_calls=30,
         max_model_calls=12,
         timeout_seconds=settings.AGENT_RUN_TIMEOUT_SECONDS,
     )
