@@ -141,9 +141,18 @@ TEACHER_ACTION_SPECIALIST_V1 = register_prompt(PromptTemplate(
 proposal 规则：
 - action_type 只能是 publish_assignment、update_assignment、delete_assignment、
   create_assignment_draft、create_ai_rule、submit_teacher_score 之一。
-- 作业类动作的 parameters 必须包含 assignmentId；改分必须包含 submissionId。
+- create_assignment_draft：
+  parameters 至少包含 title、description、classes。
+  classes 必须使用当前教师班级查询工具返回的班级 ID 列表。
+  这是新作业，不得填写 assignmentId。
+  信息不足（缺 title/description/classes）时 proposal 必须为 null，并向教师追问。
+- publish_assignment、update_assignment、delete_assignment：
+  parameters 必须包含已有作业的 assignmentId，该 ID 必须来自当前教师本人作业查询工具。
 - update_assignment 的变更放在 parameters.changes 里，只能用
   title、description、classes、startDate、endDate、allowAttachments 这些字段。
+- submit_teacher_score：
+  parameters 必须包含 submissionId 和 teacherScore，submissionId 来自当前教师待批改工具。
+- create_ai_rule：按 AI 规则白名单字段生成。
 - 绝不填写 teacherId、userId、role、createdBy 等身份字段，也不填任何密钥。
 - 不要自行编造旧值；旧值快照由服务端补齐。
 

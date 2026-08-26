@@ -231,6 +231,87 @@ def test_missing_structured_response_degrades_safely(db, teacher):
     assert update["candidate_answer"] == ""
 
 
+# ========== 创建作业草案：班级 ID 与参数契约 ==========
+
+def _draft_response(action_type, parameters, answer="已准备草案"):
+    return {
+        "answer": answer,
+        "evidence_refs": [],
+        "limitations": [],
+        "proposal": {
+            "action_type": action_type,
+            "target_id": None,
+            "parameters": parameters,
+            "summary": "创建作业草案",
+        },
+    }
+
+
+def test_create_assignment_draft_projects_to_whitelist_and_keeps_owned_class(
+    db, teacher,
+):
+    """创建作业草案：只保留白名单字段，从当前教师班级查询工具拿到的 ID 可用。"""
+    klass = Class(name="自然语言处理", code="NLP-CLS", teacher_id=teacher.id)
+    db.add(klass)
+    db.commit()
+    response = _draft_response("create_assignment_draft", {
+        "title": "实验二：语料库分析",
+        "description": "分析语料库",
+        "classes": [klass.id],
+        # assignmentId/无关字段会被服务端白名单投影剔除；
+        # teacherId 等身份字段在提案校验层已被拒绝，不在本轮复测范围。
+        "assignmentId": 999,
+        "junkField": True,
+    })
+    node = teacher_action.create_node(db, _Registry(_Agent(response)))
+
+    update = node(_state(teacher.id))
+
+    draft = update["action_draft"]
+    assert draft.action_type.value == "create_assignment_draft"
+    assert draft.target_id is None
+    params = draft.parameters
+    assert params["title"] == "实验二：语料库分析"
+    assert params["classes"] == [klass.id]
+    # 新作业没有 assignmentId；无关字段被服务端白名单剔除
+    assert "assignmentId" not in params
+    assert "junkField" not in params
+
+
+def test_create_assignment_draft_without_owned_class_produces_no_draft(
+    db, teacher, user_factory,
+):
+    """班级不属于当前教师或无法解析时，不得生成草案。"""
+    other = user_factory("t_cls_other", "teacher")
+    foreign = Class(name="别人的班", code="FOREIGN-CLS", teacher_id=other.id)
+    db.add(foreign)
+    db.commit()
+    response = _draft_response("create_assignment_draft", {
+        "title": "作业",
+        "classes": [foreign.id],
+    })
+    node = teacher_action.create_node(db, _Registry(_Agent(response)))
+
+    update = node(_state(teacher.id))
+
+    assert "action_draft" not in update
+    assert any("作业" in item for item in update["limitations"])
+
+
+def test_create_assignment_draft_without_classes_has_no_draft(
+    db, teacher,
+):
+    """班级解析不出来（缺 classes）时，提案为 null 的语义由服务端强制。"""
+    response = _draft_response("create_assignment_draft", {
+        "title": "作业",
+    })
+    node = teacher_action.create_node(db, _Registry(_Agent(response)))
+
+    update = node(_state(teacher.id))
+
+    assert "action_draft" not in update
+
+
 def test_idempotency_seed_binds_draft_to_run(db, teacher, owned_assignment):
     def build(run_id):
         node = teacher_action.create_node(

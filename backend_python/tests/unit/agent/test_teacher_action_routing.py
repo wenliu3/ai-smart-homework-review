@@ -125,3 +125,53 @@ def test_analysis_question_still_reaches_strategy_agent():
 def test_imperative_write_requests_still_route_to_action_draft(message):
     """疑问句豁免不能把真正的写指令一起放过。"""
     assert route_teacher_intent(message).intent == TeacherIntent.ACTION_DRAFT
+
+
+# ========== 创建作业草稿的自然语言表达 → ACTION_DRAFT（回归） ==========
+
+@pytest.mark.parametrize("message", [
+    "帮我起个作业草稿",
+    "帮我起草一个作业",
+    "帮我起草作业",
+    "生成一个作业草稿",
+    "创建一个作业草稿",
+    "新建一个作业草稿",
+    "帮我做个作业草稿",
+    "帮我做一个作业草稿",
+    "帮我起个 AI 批改规则草稿",
+])
+def test_create_assignment_draft_natural_language_routes_to_action_draft(message):
+    decision = route_teacher_intent(message)
+
+    assert decision.intent == TeacherIntent.ACTION_DRAFT
+    assert decision.target_agent == "teacher_action_agent"
+
+
+def test_create_draft_with_nlp_class_descriptor_routes_to_action_draft():
+    """描述里出现「班级」只是作业属性，不得误判为删除班级而拒绝。"""
+    decision = route_teacher_intent(
+        "你帮我起个作业草稿，是自然语言处理的班级，实验二，关于语料库分析"
+    )
+
+    assert decision.intent == TeacherIntent.ACTION_DRAFT
+    assert decision.target_agent == "teacher_action_agent"
+
+
+# ========== 疑问句不触发写操作（回归） ==========
+
+@pytest.mark.parametrize("message", [
+    "怎么创建作业？",
+    "如何新建作业草稿？",
+    "有哪些作业草稿？",
+    "为什么这个作业不能发布？",
+    "创建作业的步骤是什么？",
+    "要怎么起草一份作业？",
+])
+def test_questions_about_draft_creation_never_route_as_write(message):
+    """询问「怎么/如何/有哪些」是只读提问，不能当作执行写操作。"""
+    intent = route_teacher_intent(message).intent
+
+    assert intent not in (
+        TeacherIntent.ACTION_DRAFT,
+        TeacherIntent.UNSUPPORTED_WRITE,
+    )

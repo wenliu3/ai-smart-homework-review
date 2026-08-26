@@ -59,6 +59,20 @@ def test_teacher_classes_only_returns_owned_records(db, teacher, user_factory):
     assert result.evidence_refs
 
 
+def test_teacher_classes_expose_owned_class_id_for_agent_chaining(db, teacher):
+    """Agent 创建作业草稿需要班级 ID：工具结果必须暴露当前教师名下班级的真实 ID。"""
+    cls = _make_class(db, teacher.id, name="自然语言处理")
+    db.commit()
+
+    result = query_teacher_classes(db, actor_id=teacher.id)
+
+    assert result.status == "ok"
+    record = next(item for item in result.records if item["name"] == "自然语言处理")
+    assert record["id"] == cls.id
+    # 归属边界：只有当前教师自己班级的 ID 会出现，绝不暴露其他教师班级 ID
+    assert len([r for r in result.records if r["id"] == cls.id]) == 1
+
+
 def test_assignment_summary_hides_foreign_assignment(db, teacher, user_factory):
     other = user_factory("t_owner", "teacher")
     assignment = Assignment(

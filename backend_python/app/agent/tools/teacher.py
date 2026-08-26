@@ -36,8 +36,15 @@ def query_teacher_classes(db: Session, actor_id: int) -> TeachingQueryResult:
     classes = db.query(Class).filter(Class.teacher_id == actor_id).order_by(Class.created_at.desc()).all()
     if not classes:
         return TeachingQueryResult(status="empty", title="班级列表", metrics={"classCount": 0})
+    # id 是当前教师本人名下班级的内部标识，仅供 Agent 工具串联与审批载荷使用；
+    # 面向用户的自然语言回答由 prompt 规则约束，绝不展示数据库 ID。
     records = [
-        {"name": item.name, "studentCount": item.student_count or 0, "status": item.status}
+        {
+            "id": item.id,
+            "name": item.name,
+            "studentCount": item.student_count or 0,
+            "status": item.status,
+        }
         for item in classes
     ]
     return TeachingQueryResult(

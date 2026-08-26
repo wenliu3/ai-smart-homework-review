@@ -714,7 +714,17 @@ def _orchestrate_inner(
             error_code=AGENT_RUN_CANCELLED,
         )
     except BudgetExceeded as e:
-        logger.warning("Teacher run budget exceeded: run_id=%s code=%s", run.id, e.code)
+        # 预算超限可能来自节点数/工具数/模型数/总超时四类；日志带上 reason 与计数
+        # 便于定位，SSE 仍只回稳定错误码，绝不泄露内部细节。
+        logger.warning(
+            "Teacher run budget exceeded: run_id=%s code=%s reason=%s "
+            "nodes=%s/%s tools=%s/%s models=%s/%s remaining=%.2fs",
+            run.id, e.code, str(e),
+            budget.node_count, budget.max_nodes,
+            budget.tool_call_count, budget.max_tool_calls,
+            budget.model_call_count, budget.max_model_calls,
+            budget.remaining_seconds,
+        )
         if active_node and active_node not in persisted_nodes:
             failed_duration = max(
                 1, int((time.monotonic() - node_started_at.get(
@@ -1038,6 +1048,7 @@ def orchestrate_student_run(
             subagents,
             is_cancelled=_is_cancelled,
         )
+        effective_budget = budget or default_run_budget()
         stream_ctx = _StreamRunContext()
         try:
             # 真流式（规划 5.4）：对齐教师路径的节点事件与 Step 生命周期
@@ -1050,7 +1061,7 @@ def orchestrate_student_run(
                     "page_context": page_context or "",
                     "conversation_summary": session.summary or "",
                     "recent_messages": recent_messages,
-                    "runtime_budget": budget or default_run_budget(),
+                    "runtime_budget": effective_budget,
                     "visited_nodes": [],
                 },
                 sdb=sdb,
@@ -1109,9 +1120,16 @@ def orchestrate_student_run(
                 error_code=AGENT_RUN_CANCELLED,
             )
         except BudgetExceeded as e:
-            # 与教师路径一致：预算超限落稳定错误码，不误记为通用错误
+            # 与教师路径一致：预算超限落稳定错误码，不误记为通用错误；
+            # 日志带上 reason 与计数便于定位，SSE 仍只回稳定错误码。
             logger.warning(
-                "Student run budget exceeded: run_id=%s code=%s", run.id, e.code,
+                "Student run budget exceeded: run_id=%s code=%s reason=%s "
+                "nodes=%s/%s tools=%s/%s models=%s/%s remaining=%.2fs",
+                run.id, e.code, str(e),
+                effective_budget.node_count, effective_budget.max_nodes,
+                effective_budget.tool_call_count, effective_budget.max_tool_calls,
+                effective_budget.model_call_count, effective_budget.max_model_calls,
+                effective_budget.remaining_seconds,
             )
             stream_ctx.close_running(
                 sdb, student_id,
@@ -1389,6 +1407,7 @@ def orchestrate_admin_run(
             request_id=request_id,
             session_id=session_id,
         )
+        effective_budget = budget or default_run_budget()
         stream_ctx = _StreamRunContext()
         try:
             # 真流式（规划 5.4）：对齐教师路径的节点事件与 Step 生命周期
@@ -1401,7 +1420,7 @@ def orchestrate_admin_run(
                     "page_context": page_context or "",
                     "conversation_summary": session.summary or "",
                     "recent_messages": recent_messages,
-                    "runtime_budget": budget or default_run_budget(),
+                    "runtime_budget": effective_budget,
                     "visited_nodes": [],
                 },
                 sdb=sdb,
@@ -1460,9 +1479,16 @@ def orchestrate_admin_run(
                 error_code=AGENT_RUN_CANCELLED,
             )
         except BudgetExceeded as e:
-            # 与教师路径一致：预算超限落稳定错误码，不误记为通用错误
+            # 与教师路径一致：预算超限落稳定错误码，不误记为通用错误；
+            # 日志带上 reason 与计数便于定位，SSE 仍只回稳定错误码。
             logger.warning(
-                "Admin run budget exceeded: run_id=%s code=%s", run.id, e.code,
+                "Admin run budget exceeded: run_id=%s code=%s reason=%s "
+                "nodes=%s/%s tools=%s/%s models=%s/%s remaining=%.2fs",
+                run.id, e.code, str(e),
+                effective_budget.node_count, effective_budget.max_nodes,
+                effective_budget.tool_call_count, effective_budget.max_tool_calls,
+                effective_budget.model_call_count, effective_budget.max_model_calls,
+                effective_budget.remaining_seconds,
             )
             stream_ctx.close_running(
                 sdb, admin_id,

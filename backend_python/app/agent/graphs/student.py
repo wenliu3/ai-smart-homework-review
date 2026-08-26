@@ -87,6 +87,12 @@ def build_student_graph(subagents, checkpointer=None, is_cancelled=None):
         if is_cancelled is not None and is_cancelled():
             raise RunCancelled("Agent 运行已取消")
 
+    def consume_model_call(state):
+        """进入会调用模型的 specialist/reviewer 前消费一次模型调用预算。"""
+        budget = state.get("runtime_budget")
+        if budget is not None:
+            budget.consume_model_call()
+
     def with_visit(state, update, node):
         return {
             **update,
@@ -120,6 +126,7 @@ def build_student_graph(subagents, checkpointer=None, is_cancelled=None):
         def node(state):
             check_runtime(state)
             emit({"type": "agent.started", "data": {"agent": name}})
+            consume_model_call(state)
             update = method(state)
             emit({"type": "agent.completed", "data": {"agent": name}})
             return with_visit(state, update, name)
@@ -130,6 +137,7 @@ def build_student_graph(subagents, checkpointer=None, is_cancelled=None):
         check_runtime(state)
         emit({"type": "agent.started",
               "data": {"agent": STUDENT_FINAL_REVIEWER_NODE}})
+        consume_model_call(state)
         update = subagents.final_reviewer(state)
         emit({"type": "agent.completed",
               "data": {"agent": STUDENT_FINAL_REVIEWER_NODE}})

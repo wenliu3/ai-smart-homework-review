@@ -8,6 +8,7 @@
 """
 from typing import Callable
 
+from ...crud.action_execution import validate_action_permission
 from ...database import SessionLocal
 from ...models import Assignment
 from ..contracts import TeacherActionResponse
@@ -51,6 +52,18 @@ _SNAPSHOT_FIELDS = (
     "allowAttachments",
 )
 
+# 创建作业草案可接受的参数白名单：与 assignment_crud.create_assignment() 对齐，
+# 且与权限校验一致——validate_action_permission 要求 classes 为归属班级 ID 列表。
+# 刻意排除 aiRule/attachments（Agent 无法校验的复杂字段），避免审批执行阶段才失败。
+_CREATE_ASSIGNMENT_DRAFT_FIELDS = (
+    "title",
+    "description",
+    "classes",
+    "startDate",
+    "endDate",
+    "allowAttachments",
+)
+
 DRAFT_REJECTED_LIMITATION = "提案指向的作业不存在或不属于当前教师，已丢弃该草案"
 DRAFT_INVALID_LIMITATION = "提案参数不完整，未能生成可审批的操作草案"
 
@@ -78,13 +91,35 @@ def _load_assignment_snapshot(assignment_id: int, teacher_id: int) -> dict | Non
         return snapshot
 
 
-def _build_draft(proposal, teacher_id: int, run_id: str):
+def _build_draft(proposal, teacher_id: int, run_id: str, db=None):
     """把模型提案转成服务端签名草案；不合法时返回 (None, 原因)。"""
     action_type = proposal.action_type
     target_type, target_key = _TARGET_SPECS[action_type]
     parameters = dict(proposal.parameters)
     # 快照由服务端重建，模型给的同名键一律丢弃
     parameters.pop("beforeSnapshot", None)
+
+    # 创建作业草案：只投影白名单字段，且必须有 title 与归属班级列表。
+    # 班级列表的归属校验复用审批执行时的同一套权限检查，避免生成后到执行阶段才失败。
+    if action_type == "create_assignment_draft":
+        parameters = {
+            key: parameters[key]
+            for key in _CREATE_ASSIGNMENT_DRAFT_FIELDS
+            if key in parameters
+        }
+        if not parameters.get("title") or not parameters.get("classes"):
+            return None, DRAFT_INVALID_LIMITATION
+        if db is not None:
+            try:
+                validate_action_permission(
+                    "create_assignment_draft",
+                    parameters,
+                    teacher_id,
+                    "teacher",
+                    db,
+                )
+            except ValueError:
+                return None, DRAFT_REJECTED_LIMITATION
 
     target_id = None
     if target_key is not None:
@@ -157,6 +192,7 @@ def create_node(
             response.proposal,
             teacher_id=state["actor"].user_id,
             run_id=state.get("run_id", ""),
+            db=db,
         )
         if draft is None:
             update["limitations"] = [*response.limitations, rejection]

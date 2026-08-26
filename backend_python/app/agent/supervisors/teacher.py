@@ -31,6 +31,16 @@ _UNSUPPORTED_WRITE_TARGETS = (
 )
 # 「打 85 分」这类不含固定动词组合的改分表达
 _SCORE_PATTERN = re.compile(r"[打给评改加扣]\s*\d+(?:\.\d+)?\s*分")
+# 创建作业草稿的自然语言表达：不依赖固定的「创建/新建」二字，且允许描述里出现
+# 「班级」（如「自然语言处理的班级」）——它是作业的属性描述，不是被删除的对象。
+# 疑问句会先被 _is_question 拦截，因此这里只需覆盖祈使/陈述句。
+_DRAFT_CREATE_PATTERN = re.compile(
+    r"(?:帮我|请|给我|帮)?\s*"
+    r"(?:起草|起个|创建|新建|生成|做个|做一个)"
+    r".{0,16}"
+    r"(?:作业|规则|量表)"
+    r"(?:草稿)?"
+)
 _STRATEGY_WORDS = (
     "分析", "趋势", "薄弱", "教学建议", "教学策略", "改进课堂", "改进教学",
 )
@@ -62,7 +72,42 @@ def _is_write_request(message: str) -> bool:
         return False
     return (
         any(word in message for word in _WRITE_WORDS)
+        or _DRAFT_CREATE_PATTERN.search(message) is not None
         or _SCORE_PATTERN.search(message) is not None
+    )
+
+
+def _route_write_decision(message: str) -> IntentDecision:
+    """写请求意图细分：创建草稿优先，其次高风险对象拒绝，最后白名单对象产出草案。"""
+    # 创建草稿意图先于高风险对象判定：描述里出现「班级」只表示作业关联班级，
+    # 不是要删除班级本身（如「是自然语言处理的班级」）。疑问句已在上游被拦截。
+    if _DRAFT_CREATE_PATTERN.search(message) is not None:
+        return IntentDecision(
+            intent=TeacherIntent.ACTION_DRAFT,
+            risk_level=RiskLevel.HIGH,
+            target_agent="teacher_action_agent",
+            reason="创建草稿意图，需产出待审批草案",
+        )
+    if any(word in message for word in _UNSUPPORTED_WRITE_TARGETS):
+        return IntentDecision(
+            intent=TeacherIntent.UNSUPPORTED_WRITE,
+            risk_level=RiskLevel.HIGH,
+            target_agent="none",
+            reason="该对象的写操作不在审批白名单内",
+        )
+    if any(word in message for word in _SUPPORTED_WRITE_TARGETS):
+        return IntentDecision(
+            intent=TeacherIntent.ACTION_DRAFT,
+            risk_level=RiskLevel.HIGH,
+            target_agent="teacher_action_agent",
+            reason="受支持的写操作，需产出待审批草案",
+        )
+    # 目标对象无法识别时不猜测，保守拒绝
+    return IntentDecision(
+        intent=TeacherIntent.UNSUPPORTED_WRITE,
+        risk_level=RiskLevel.HIGH,
+        target_agent="none",
+        reason="写操作目标不明确",
     )
 
 
@@ -75,28 +120,7 @@ def route_teacher_intent(message: str) -> IntentDecision:
             target_agent="casual_chat",
         )
     if _is_write_request(message):
-        # 高风险对象优先判定：同时提到班级和作业时保守拒绝
-        if any(word in message for word in _UNSUPPORTED_WRITE_TARGETS):
-            return IntentDecision(
-                intent=TeacherIntent.UNSUPPORTED_WRITE,
-                risk_level=RiskLevel.HIGH,
-                target_agent="none",
-                reason="该对象的写操作不在审批白名单内",
-            )
-        if any(word in message for word in _SUPPORTED_WRITE_TARGETS):
-            return IntentDecision(
-                intent=TeacherIntent.ACTION_DRAFT,
-                risk_level=RiskLevel.HIGH,
-                target_agent="teacher_action_agent",
-                reason="受支持的写操作，需产出待审批草案",
-            )
-        # 目标对象无法识别时不猜测，保守拒绝
-        return IntentDecision(
-            intent=TeacherIntent.UNSUPPORTED_WRITE,
-            risk_level=RiskLevel.HIGH,
-            target_agent="none",
-            reason="写操作目标不明确",
-        )
+        return _route_write_decision(message)
     if any(word in message for word in _STRATEGY_WORDS):
         return IntentDecision(
             intent=TeacherIntent.TEACHING_STRATEGY,

@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     AGENT_STREAM_MAX_CONCURRENCY: int = 12
     # 多智能体助手总开关（规划 5.6）：False 时新版 /assistant/runs/stream 整体关闭
     MULTI_AGENT_ENABLED: bool = True
+    # 助手整轮运行总超时（秒）：含路由 + 多次模型调用（工具调用→结构化草案→最终审核）。
+    # 单次模型请求超时在 ModelProfile 里单独配置，这里控制整轮串行执行的兜底；
+    # 批改任务使用独立的 grading_run_budget(120s)，不读本值。
+    AGENT_RUN_TIMEOUT_SECONDS: int = 150
     # 教师白名单灰度：逗号分隔教师 ID；空串 = 全部教师放行。
     # 只约束教师角色，学生/管理员不受影响。
     MULTI_AGENT_TEACHER_WHITELIST: str = ""

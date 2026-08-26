@@ -4,6 +4,7 @@ from time import monotonic
 
 from langchain.agents.middleware import wrap_tool_call
 
+from ..config import settings
 from ..models import User
 from .contracts import (
     AGENT_BUDGET_EXCEEDED,
@@ -83,8 +84,19 @@ def is_model_timeout(exc: BaseException) -> bool:
 
 
 def default_run_budget() -> RunBudget:
-    """生产运行使用的固定安全预算。"""
-    return RunBudget(max_nodes=8, max_tool_calls=12, timeout_seconds=45)
+    """教师/学生/管理员助手的整轮安全预算。
+
+    timeout_seconds 从配置读取（AGENT_RUN_TIMEOUT_SECONDS，默认 150），因为创建
+    作业草稿等写操作路径是「多次模型调用串行执行」——单次模型超时远小于整轮预算，
+    但多条串行累计会超过旧的固定 45s。批改任务用独立的 grading_run_budget()，
+    不受此默认值影响。
+    """
+    return RunBudget(
+        max_nodes=8,
+        max_tool_calls=12,
+        max_model_calls=12,
+        timeout_seconds=settings.AGENT_RUN_TIMEOUT_SECONDS,
+    )
 
 
 def grading_run_budget() -> RunBudget:

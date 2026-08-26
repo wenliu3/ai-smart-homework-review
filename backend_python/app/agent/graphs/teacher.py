@@ -59,6 +59,16 @@ def build_teacher_graph(
         if budget is not None:
             budget.consume_node()
 
+    def consume_model_call():
+        """进入会调用模型的 specialist/reviewer 前消费一次模型调用预算。
+
+        教师路径的 write 操作总共需要「工具调用→结构化草案→最终审核」多次串行
+        模型调用；节点数/工具数/单次超时都无法精确约束累计模型调用次数，
+        故在这里按 agent.invoke 次数累计 max_model_calls。
+        """
+        if budget is not None:
+            budget.consume_model_call()
+
     def _with_events(state, update, *events):
         """合并节点更新与事件。"""
         update = dict(update)
@@ -92,6 +102,7 @@ def build_teacher_graph(
     def teaching_data(state):
         consume_node()
         emit(make_event("agent.started", {"agent": TEACHER_DATA_NODE}))
+        consume_model_call()
         update = specialists.teaching_data(state)
         emit(make_event("agent.completed", {"agent": TEACHER_DATA_NODE}))
         update["visited_nodes"] = [*state.get("visited_nodes", []), "teaching_data"]
@@ -118,6 +129,7 @@ def build_teacher_graph(
     def teaching_strategy(state):
         consume_node()
         emit(make_event("agent.started", {"agent": TEACHER_STRATEGY_NODE}))
+        consume_model_call()
         update = specialists.teaching_strategy(state)
         emit(make_event("agent.completed", {"agent": TEACHER_STRATEGY_NODE}))
         update["visited_nodes"] = [*state.get("visited_nodes", []), "teaching_strategy"]
@@ -130,6 +142,7 @@ def build_teacher_graph(
         """写操作 specialist：只构造待审批草案，绝不执行业务写入。"""
         consume_node()
         emit(make_event("agent.started", {"agent": TEACHER_ACTION_NODE}))
+        consume_model_call()
         update = dict(specialists.action_draft(state))
         # 本节点每次执行都必须给出本轮草案：action_draft 是 last-value 通道，
         # 缺键时上一轮被驳回的旧草案会残留下来，被 after_review 当作本轮结果落审批。
@@ -168,6 +181,7 @@ def build_teacher_graph(
     def final_reviewer(state):
         consume_node()
         emit(make_event("agent.started", {"agent": FINAL_REVIEWER_NODE}))
+        consume_model_call()
         update = specialists.final_reviewer(state)
         emit(make_event("agent.completed", {"agent": FINAL_REVIEWER_NODE}))
         update["visited_nodes"] = [*state.get("visited_nodes", []), "final_reviewer"]
