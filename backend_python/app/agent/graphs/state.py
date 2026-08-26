@@ -52,3 +52,7 @@ class TeacherAgentState(TypedDict, total=False):
     # 受支持写请求产出的待审批草案（ActionDraft）与落库后的审批 ID
     action_draft: object
     approval_id: str
+    # 创建作业草稿的受控业务计划（CreateAssignmentDraftPlan，无工具 Agent 产出）
+    candidate_plan: object
+    # 路由选定的 specialist 节点名（ACTION_DRAFT 下区分创建草稿 vs 其他写操作）
+    specialist_node: str

@@ -28,6 +28,7 @@ def test_registered_specialists_have_distinct_names():
         "teaching_data",
         "teaching_strategy",
         "teacher_action",
+        "create_assignment_plan",
         "final_reviewer",
         "grading",
         "grading_review",
@@ -57,10 +58,11 @@ def test_all_specialists_have_distinct_prompt_names():
     """所有 specialist 使用互不混淆的 Prompt 名称。"""
     specs = {spec.name: spec for spec in SpecialistRegistry.default_specs()}
     versions = {spec.prompt_name for spec in specs.values()}
-    assert len(versions) == 16
+    assert len(versions) == 17
     assert "teacher_data_specialist" in versions
     assert "teacher_strategy_specialist" in versions
     assert "teacher_action_specialist" in versions
+    assert "teacher_create_assignment_plan" in versions
     assert "teacher_final_reviewer" in versions
 
 
@@ -189,6 +191,29 @@ def test_agent_factory_receives_correct_tools_per_specialist(db, ai_model_factor
     # 数据和策略有工具，审核无工具
     assert any(c > 0 for c in all_tool_counts)
     assert 0 in all_tool_counts  # final_reviewer
+
+
+def test_agent_factory_receives_global_tool_limit_first(db, ai_model_factory):
+    """全局单轮工具上限必须挂在中间件第一位（先于预算计数，拦截不耗预算）。"""
+    from langchain.agents.middleware import ToolCallLimitMiddleware
+
+    from app.agent.registry import GLOBAL_RUN_TOOL_LIMIT
+
+    ai_model_factory()
+    captured = {}
+
+    def recording_agent_factory(
+        model, tools, system_prompt, context_schema, response_format=None, middleware=None,
+    ):
+        captured["middleware"] = list(middleware or [])
+        return MagicMock()
+
+    registry = SpecialistRegistry(agent_factory=recording_agent_factory)
+    registry.get_specialist("teaching_data", db)
+
+    first = captured["middleware"][0]
+    assert isinstance(first, ToolCallLimitMiddleware)
+    assert first.run_limit == GLOBAL_RUN_TOOL_LIMIT
 
 
 def test_agent_factory_receives_context_schema(db, ai_model_factory):

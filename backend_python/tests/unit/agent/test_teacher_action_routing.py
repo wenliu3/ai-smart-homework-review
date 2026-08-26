@@ -131,20 +131,22 @@ def test_imperative_write_requests_still_route_to_action_draft(message):
 
 @pytest.mark.parametrize("message", [
     "帮我起个作业草稿",
-    "帮我起草一个作业",
+    "帮我起草一份作业",
     "帮我起草作业",
     "生成一个作业草稿",
     "创建一个作业草稿",
     "新建一个作业草稿",
     "帮我做个作业草稿",
     "帮我做一个作业草稿",
-    "帮我起个 AI 批改规则草稿",
+    "创建待审批作业草稿",
+    "为自然语言处理 (NLP)班级新建作业草稿",
 ])
 def test_create_assignment_draft_natural_language_routes_to_action_draft(message):
+    """创建作业草稿进入 ACTION_DRAFT，并定向到无工具创建草稿 Agent。"""
     decision = route_teacher_intent(message)
 
     assert decision.intent == TeacherIntent.ACTION_DRAFT
-    assert decision.target_agent == "teacher_action_agent"
+    assert decision.target_agent == "create_assignment_plan_agent"
 
 
 def test_create_draft_with_nlp_class_descriptor_routes_to_action_draft():
@@ -154,7 +156,23 @@ def test_create_draft_with_nlp_class_descriptor_routes_to_action_draft():
     )
 
     assert decision.intent == TeacherIntent.ACTION_DRAFT
-    assert decision.target_agent == "teacher_action_agent"
+    assert decision.target_agent == "create_assignment_plan_agent"
+
+
+# ========== 白名单外写对象仍必须拒绝（回归） ==========
+
+@pytest.mark.parametrize("message", [
+    "删除这个班级",
+    "创建一个新班级",
+    "移除班级学生",
+    "修改学生账号",
+])
+def test_unsupported_class_or_account_writes_stay_unsupported(message):
+    """删除/新建班级、移除学生、改账号仍在白名单外，必须明确拒绝。"""
+    decision = route_teacher_intent(message)
+
+    assert decision.intent == TeacherIntent.UNSUPPORTED_WRITE
+    assert decision.risk_level == RiskLevel.HIGH
 
 
 # ========== 疑问句不触发写操作（回归） ==========

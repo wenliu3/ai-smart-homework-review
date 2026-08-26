@@ -40,7 +40,7 @@ def test_default_run_budget_enables_all_production_limits():
     budget = default_run_budget()
 
     assert budget.max_nodes == 8
-    assert budget.max_tool_calls == 30
+    assert budget.max_tool_calls == 12
     assert budget.max_model_calls == 12
     # 整轮运行超时从配置读取，默认 150s，足以容纳「工具调用→结构化草案→最终审核」
     # 多次串行模型调用；大于单次模型请求超时（40s）。

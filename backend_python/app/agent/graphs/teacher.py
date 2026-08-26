@@ -11,9 +11,13 @@
 from langgraph.graph import END, START, StateGraph
 from langgraph.config import get_stream_writer
 
+from ...crud.action_execution import validate_action_permission
+from ...database import SessionLocal
 from ..contracts import TeacherIntent
 from ..runtime import RunBudget, RunCancelled
 from ..supervisors import TeacherSupervisor
+from ..tools.approval import create_action_draft
+from ..tools.teacher import resolve_class_by_business_name
 from .events import append_events, make_event
 from .state import TeacherAgentState
 
@@ -39,8 +43,19 @@ CASUAL_CHAT_NODE = "casual_chat"
 TEACHER_DATA_NODE = "teacher_data_agent"
 TEACHER_STRATEGY_NODE = "teacher_strategy_agent"
 TEACHER_ACTION_NODE = "teacher_action_agent"
+CREATE_ASSIGNMENT_PLAN_NODE = "create_assignment_plan"
+RESOLVE_ASSIGNMENT_PLAN_NODE = "resolve_assignment_plan"
 PERSIST_ACTION_DRAFT_NODE = "persist_action_draft"
 FINAL_REVIEWER_NODE = "final_reviewer_agent"
+
+# 创建草稿缺失信息/班级无法解析时的确定性追问（服务端文案，不经模型）
+CREATE_PLAN_INCOMPLETE_MESSAGE = (
+    "我没能从你的请求中整理出完整的作业信息（班级、标题、时间等），请补充后重试。"
+)
+CLASS_UNRESOLVED_MESSAGE = (
+    "未在当前名下的班级中找到「{class_name}」，或该名称指向多个班级，"
+    "请核对班级名称后重试。"
+)
 
 
 def build_teacher_graph(
@@ -58,16 +73,6 @@ def build_teacher_graph(
             raise RunCancelled("Agent 运行已取消")
         if budget is not None:
             budget.consume_node()
-
-    def consume_model_call():
-        """进入会调用模型的 specialist/reviewer 前消费一次模型调用预算。
-
-        教师路径的 write 操作总共需要「工具调用→结构化草案→最终审核」多次串行
-        模型调用；节点数/工具数/单次超时都无法精确约束累计模型调用次数，
-        故在这里按 agent.invoke 次数累计 max_model_calls。
-        """
-        if budget is not None:
-            budget.consume_model_call()
 
     def _with_events(state, update, *events):
         """合并节点更新与事件。"""
@@ -87,11 +92,20 @@ def build_teacher_graph(
         update = supervisor.route(state)
         intent = update["intent"].intent
         if intent == TeacherIntent.TEACHING_DATA:
-            update["last_specialist"] = TEACHER_DATA_NODE
+            node = TEACHER_DATA_NODE
         elif intent == TeacherIntent.TEACHING_STRATEGY:
-            update["last_specialist"] = TEACHER_STRATEGY_NODE
+            node = TEACHER_STRATEGY_NODE
         elif intent == TeacherIntent.ACTION_DRAFT:
-            update["last_specialist"] = TEACHER_ACTION_NODE
+            # 创建草稿走独立的无工具规划流程；其余写操作走 teacher_action Agent。
+            # 注意：句子里的「班级」仅描述作业关联对象，不会误判为修改班级。
+            if update["intent"].target_agent == "create_assignment_plan_agent":
+                node = CREATE_ASSIGNMENT_PLAN_NODE
+            else:
+                node = TEACHER_ACTION_NODE
+        else:
+            node = ""
+        update["specialist_node"] = node or "finalize"
+        update["last_specialist"] = node or TEACHER_DATA_NODE
         update["visited_nodes"] = [*state.get("visited_nodes", []), "route"]
         emit(make_event("route.selected", {"intent": intent.value}))
         return _with_events(state, update,
@@ -102,7 +116,6 @@ def build_teacher_graph(
     def teaching_data(state):
         consume_node()
         emit(make_event("agent.started", {"agent": TEACHER_DATA_NODE}))
-        consume_model_call()
         update = specialists.teaching_data(state)
         emit(make_event("agent.completed", {"agent": TEACHER_DATA_NODE}))
         update["visited_nodes"] = [*state.get("visited_nodes", []), "teaching_data"]
@@ -129,7 +142,6 @@ def build_teacher_graph(
     def teaching_strategy(state):
         consume_node()
         emit(make_event("agent.started", {"agent": TEACHER_STRATEGY_NODE}))
-        consume_model_call()
         update = specialists.teaching_strategy(state)
         emit(make_event("agent.completed", {"agent": TEACHER_STRATEGY_NODE}))
         update["visited_nodes"] = [*state.get("visited_nodes", []), "teaching_strategy"]
@@ -142,7 +154,6 @@ def build_teacher_graph(
         """写操作 specialist：只构造待审批草案，绝不执行业务写入。"""
         consume_node()
         emit(make_event("agent.started", {"agent": TEACHER_ACTION_NODE}))
-        consume_model_call()
         update = dict(specialists.action_draft(state))
         # 本节点每次执行都必须给出本轮草案：action_draft 是 last-value 通道，
         # 缺键时上一轮被驳回的旧草案会残留下来，被 after_review 当作本轮结果落审批。
@@ -152,6 +163,112 @@ def build_teacher_graph(
         return _with_events(state, update,
             make_event("agent.started", {"agent": TEACHER_ACTION_NODE}),
             make_event("agent.completed", {"agent": TEACHER_ACTION_NODE}),
+        )
+
+    def create_assignment_plan(state):
+        """创建作业草稿规划：无工具 LLM 产出结构化业务计划，绝不查询数据库。"""
+        consume_node()
+        emit(make_event("agent.started", {"agent": CREATE_ASSIGNMENT_PLAN_NODE}))
+        update = dict(specialists.create_assignment_plan(state))
+        update.setdefault("candidate_plan", None)
+        emit(make_event("agent.completed", {"agent": CREATE_ASSIGNMENT_PLAN_NODE}))
+        update["visited_nodes"] = [
+            *state.get("visited_nodes", []), CREATE_ASSIGNMENT_PLAN_NODE,
+        ]
+        return _with_events(state, update,
+            make_event("agent.started", {"agent": CREATE_ASSIGNMENT_PLAN_NODE}),
+            make_event("agent.completed", {"agent": CREATE_ASSIGNMENT_PLAN_NODE}),
+        )
+
+    def resolve_assignment_plan(state):
+        """后端确定性解析：按业务名称解析班级、校验归属、签名待审批草案。"""
+        consume_node()
+        plan = state.get("candidate_plan")
+        teacher_id = state["actor"].user_id
+        run_id = state.get("run_id", "")
+        base_update = {
+            "visited_nodes": [
+                *state.get("visited_nodes", []), RESOLVE_ASSIGNMENT_PLAN_NODE,
+            ],
+        }
+
+        def unresolved(candidate_answer: str):
+            return _with_events(state, {
+                **base_update,
+                "candidate_answer": candidate_answer,
+                "evidence_refs": [],
+                "action_draft": None,
+            }, make_event("create.class.unresolved", {}))
+
+        if plan is None:
+            return _with_events(state, {
+                **base_update,
+                "candidate_answer": CREATE_PLAN_INCOMPLETE_MESSAGE,
+                "evidence_refs": [],
+                "action_draft": None,
+            }, make_event("create.plan.incomplete", {}))
+
+        with SessionLocal() as db:
+            resolution = resolve_class_by_business_name(db, teacher_id, plan.class_name)
+            if resolution.status != "ok":
+                return unresolved(
+                    CLASS_UNRESOLVED_MESSAGE.format(class_name=plan.class_name),
+                )
+            parameters = {
+                "title": plan.title,
+                "description": plan.description,
+                "classes": [resolution.class_id],
+                "startDate": plan.start_date.isoformat(),
+                "endDate": plan.end_date.isoformat(),
+                "allowAttachments": plan.allow_attachments,
+            }
+            try:
+                validate_action_permission(
+                    "create_assignment_draft",
+                    parameters,
+                    teacher_id,
+                    "teacher",
+                    db,
+                )
+            except ValueError:
+                return _with_events(state, {
+                    **base_update,
+                    "candidate_answer": "创建作业草案校验未通过，请核对班级归属后重试。",
+                    "evidence_refs": [],
+                    "action_draft": None,
+                }, make_event("create.validation.rejected", {}))
+            draft = create_action_draft(
+                action_type="create_assignment_draft",
+                target_type="assignment",
+                target_id=None,
+                parameters=parameters,
+                summary=(
+                    f"为班级「{resolution.name}」创建作业草稿《{plan.title}》"
+                ),
+                risk_level="medium",
+                idempotency_seed=f"teacher:{teacher_id}:{run_id}",
+            )
+        update = {
+            **base_update,
+            "action_draft": draft,
+            "candidate_answer": (
+                f"已为班级「{resolution.name}」生成作业草稿《{plan.title}》"
+                f"（{plan.start_date:%Y-%m-%d %H:%M} 至 "
+                f"{plan.end_date:%Y-%m-%d %H:%M}）的待审批草案。"
+            ),
+            "evidence_refs": [
+                f"server://classes/{resolution.class_id}?resolved=server",
+            ],
+        }
+        emit(make_event("create.plan.resolved", {
+            "class_name": resolution.name,
+            "class_id": resolution.class_id,
+        }))
+        return _with_events(state, update,
+            make_event("create.plan.resolved", {
+                "class_name": resolution.name,
+                "class_id": resolution.class_id,
+            }),
         )
 
     def persist_action_draft(state):
@@ -181,7 +298,6 @@ def build_teacher_graph(
     def final_reviewer(state):
         consume_node()
         emit(make_event("agent.started", {"agent": FINAL_REVIEWER_NODE}))
-        consume_model_call()
         update = specialists.final_reviewer(state)
         emit(make_event("agent.completed", {"agent": FINAL_REVIEWER_NODE}))
         update["visited_nodes"] = [*state.get("visited_nodes", []), "final_reviewer"]
@@ -235,7 +351,11 @@ def build_teacher_graph(
         )
 
     def select_specialist(state):
-        return state["intent"].intent.value
+        intent = state["intent"].intent
+        if intent == TeacherIntent.ACTION_DRAFT:
+            # ACTION_DRAFT 下按路由选定的子节点（创建草稿 vs 其他写操作）
+            return state.get("specialist_node", TEACHER_ACTION_NODE)
+        return intent.value
 
     def after_review(state):
         review = state["review"]
@@ -260,6 +380,8 @@ def build_teacher_graph(
     graph.add_node(TEACHER_DATA_NODE, teaching_data)
     graph.add_node(TEACHER_STRATEGY_NODE, teaching_strategy)
     graph.add_node(TEACHER_ACTION_NODE, action_draft)
+    graph.add_node(CREATE_ASSIGNMENT_PLAN_NODE, create_assignment_plan)
+    graph.add_node(RESOLVE_ASSIGNMENT_PLAN_NODE, resolve_assignment_plan)
     graph.add_node(FINAL_REVIEWER_NODE, final_reviewer)
     graph.add_node(PERSIST_ACTION_DRAFT_NODE, persist_action_draft)
     graph.add_node("revise", revise)
@@ -272,7 +394,8 @@ def build_teacher_graph(
             TeacherIntent.CASUAL_CHAT.value: CASUAL_CHAT_NODE,
             TeacherIntent.TEACHING_DATA.value: TEACHER_DATA_NODE,
             TeacherIntent.TEACHING_STRATEGY.value: TEACHER_STRATEGY_NODE,
-            TeacherIntent.ACTION_DRAFT.value: TEACHER_ACTION_NODE,
+            TEACHER_ACTION_NODE: TEACHER_ACTION_NODE,
+            CREATE_ASSIGNMENT_PLAN_NODE: CREATE_ASSIGNMENT_PLAN_NODE,
             TeacherIntent.UNSUPPORTED_WRITE.value: "finalize",
         },
     )
@@ -280,6 +403,8 @@ def build_teacher_graph(
     graph.add_edge(TEACHER_DATA_NODE, FINAL_REVIEWER_NODE)
     graph.add_edge(TEACHER_STRATEGY_NODE, FINAL_REVIEWER_NODE)
     graph.add_edge(TEACHER_ACTION_NODE, FINAL_REVIEWER_NODE)
+    graph.add_edge(CREATE_ASSIGNMENT_PLAN_NODE, RESOLVE_ASSIGNMENT_PLAN_NODE)
+    graph.add_edge(RESOLVE_ASSIGNMENT_PLAN_NODE, FINAL_REVIEWER_NODE)
     graph.add_conditional_edges(
         FINAL_REVIEWER_NODE,
         after_review,

@@ -13,6 +13,7 @@ from app.agent.tools.teacher import (
     query_teacher_assignments,
     query_teacher_classes,
     query_teacher_dashboard,
+    resolve_class_by_business_name,
 )
 from app.models import Assignment, Class, ClassStudent, Submission
 
@@ -71,6 +72,68 @@ def test_teacher_classes_expose_owned_class_id_for_agent_chaining(db, teacher):
     assert record["id"] == cls.id
     # 归属边界：只有当前教师自己班级的 ID 会出现，绝不暴露其他教师班级 ID
     assert len([r for r in result.records if r["id"] == cls.id]) == 1
+
+
+# ========== 服务端班级名称解析（创建作业草稿用，非 LLM 工具） ==========
+
+def _add_class(db, teacher_id, name, code):
+    cls = Class(name=name, code=code, teacher_id=teacher_id, status="active")
+    db.add(cls)
+    db.commit()
+    return cls
+
+
+def test_resolve_class_unique_exact_match(db, teacher):
+    cls = _add_class(db, teacher.id, "自然语言处理 (NLP)", "NLP-CLS")
+
+    res = resolve_class_by_business_name(db, teacher.id, "自然语言处理 (NLP)")
+
+    assert res.status == "ok"
+    assert res.class_id == cls.id
+
+
+def test_resolve_class_normalizes_parens_and_case(db, teacher):
+    cls = _add_class(db, teacher.id, "自然语言处理 (NLP)", "NLP-CLS")
+
+    # 空格 / 中英文括号 / 大小写归一化后仍唯一匹配
+    res = resolve_class_by_business_name(db, teacher.id, "自然语言处理(nlp)  ")
+
+    assert res.status == "ok"
+    assert res.class_id == cls.id
+
+
+def test_resolve_class_unique_contains_match(db, teacher):
+    cls = _add_class(db, teacher.id, "高数A班", "MH-CLS")
+
+    res = resolve_class_by_business_name(db, teacher.id, "高数")
+
+    assert res.status == "ok"
+    assert res.class_id == cls.id
+
+
+def test_resolve_class_not_found(db, teacher):
+    res = resolve_class_by_business_name(db, teacher.id, "不存在的班级")
+
+    assert res.status == "not_found"
+
+
+def test_resolve_class_ambiguous_does_not_guess(db, teacher):
+    _add_class(db, teacher.id, "实验班", "E1")
+    _add_class(db, teacher.id, "实验班", "E2")
+
+    res = resolve_class_by_business_name(db, teacher.id, "实验班")
+
+    assert res.status == "ambiguous"
+    assert res.class_id is None
+
+
+def test_resolve_class_ignores_foreign_teacher_class(db, teacher, user_factory):
+    other = user_factory("t_cls_resolve", "teacher")
+    _add_class(db, other.id, "自然语言处理 (NLP)", "NLP-OTH")
+
+    res = resolve_class_by_business_name(db, teacher.id, "自然语言处理 (NLP)")
+
+    assert res.status == "not_found"
 
 
 def test_assignment_summary_hides_foreign_assignment(db, teacher, user_factory):

@@ -191,6 +191,32 @@ class TeacherActionResponse(SpecialistResponse):
     proposal: TeacherActionProposal | None = None
 
 
+class CreateAssignmentDraftPlan(BaseModel):
+    """创建作业草稿的受控业务计划（无任何数据库工具，由后端解析班级）。
+
+    模型只输出业务名称/内容/时间，不得输出身份、权限、班级 ID 或密钥；
+    班级 ID 由服务端按 className 解析后注入 classes。
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+
+    class_name: str = Field(alias="className", min_length=1, max_length=128)
+    title: str = Field(min_length=1, max_length=255)
+    description: str = Field(min_length=1, max_length=10000)
+    start_date: datetime = Field(alias="startDate")
+    end_date: datetime = Field(alias="endDate")
+    allow_attachments: bool = Field(default=False, alias="allowAttachments")
+
+    @model_validator(mode="after")
+    def validate_dates(self):
+        if self.end_date <= self.start_date:
+            raise ValueError("截止时间必须晚于开始时间")
+        return self
+
+
 class RubricCriterion(BaseModel):
     """后端认可的单个评分维度。"""
 

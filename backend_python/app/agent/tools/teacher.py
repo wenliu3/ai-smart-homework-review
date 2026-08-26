@@ -3,6 +3,8 @@
 每个查询都强制 actor_id 权限隔离：教师只能看到自己名下的班级、作业、学生与提交。
 返回结果中绝不包含 password/email/phone 等敏感字段。
 """
+import re
+from dataclasses import dataclass
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -54,6 +56,61 @@ def query_teacher_classes(db: Session, actor_id: int) -> TeachingQueryResult:
         records=records,
         evidence_refs=["mysql://classes?scope=current_teacher"],
     )
+
+
+def normalize_business_name(value: str) -> str:
+    """业务名称归一化：去除空白、中英文括号、书名号、连字符并忽略大小写。
+
+    用于服务端将模型给出的 className 与数据库班级名做确定性匹配，
+    避免依赖模型自行携带班级 ID。
+    """
+    return re.sub(r"[\s()（）「」【】_-]+", "", value).casefold()
+
+
+@dataclass
+class ClassResolution:
+    status: Literal["ok", "not_found", "ambiguous"]
+    class_id: int | None = None
+    name: str | None = None
+    reason: str = ""
+
+
+def resolve_class_by_business_name(
+    db: Session,
+    actor_id: int,
+    class_name: str,
+) -> ClassResolution:
+    """服务端按业务名称解析当前教师名下班级——不由 LLM 调用数据库工具。
+
+    匹配规则：
+    - 先做归一化后的完整名称匹配，唯一即成功；
+    - 无完整匹配时做唯一包含匹配；
+    - 未找到或多重匹配 → not_found/ambiguous，绝不猜测；
+    - 只查询当前教师名下的班级，其他教师班级不可见。
+    """
+    target = normalize_business_name(class_name)
+    if not target:
+        return ClassResolution(status="not_found", reason="班级名称不能为空")
+    candidates = db.query(Class).filter(
+        Class.teacher_id == actor_id,
+    ).all()
+
+    def _pick(items):
+        if len(items) == 1:
+            return ClassResolution(status="ok", class_id=items[0].id, name=items[0].name)
+        if len(items) > 1:
+            return ClassResolution(status="ambiguous", reason="存在多个同名候选班级")
+        return None
+
+    exact = [c for c in candidates if normalize_business_name(c.name) == target]
+    hit = _pick(exact)
+    if hit is not None:
+        return hit
+    contains = [c for c in candidates if target in normalize_business_name(c.name)]
+    hit = _pick(contains)
+    if hit is not None:
+        return hit
+    return ClassResolution(status="not_found", reason="未在当前教师名下找到该班级")
 
 
 def query_class_students(db: Session, actor_id: int, class_id: int) -> TeachingQueryResult:
@@ -109,6 +166,67 @@ def query_teacher_assignments(db: Session, actor_id: int) -> TeachingQueryResult
         metrics={"assignmentCount": len(records)},
         records=records,
         evidence_refs=["mysql://assignments?scope=current_teacher"],
+    )
+
+
+def query_assignments_overview(db: Session, actor_id: int) -> TeachingQueryResult:
+    """作业概况批量聚合：一次/少量 SQL 返回全部作业的提交与批改统计。
+
+    目的是避免模型对每份历史作业逐个调用 get_my_assignment_summary 造成 N 次扇出。
+    只统计当前教师名下的作业。
+    """
+    assignments = (
+        db.query(Assignment)
+        .filter(Assignment.alive(), Assignment.teacher_id == actor_id)
+        .order_by(Assignment.created_at.desc())
+        .all()
+    )
+    if not assignments:
+        return TeachingQueryResult(status="empty", title="作业概况", metrics={"assignmentCount": 0})
+
+    assignment_ids = [a.id for a in assignments]
+    status_rows = {
+        (row[0], row[1]): row[2]
+        for row in db.query(
+            Submission.assignment_id,
+            Submission.status,
+            func.count(Submission.id),
+        )
+        .filter(
+            Submission.assignment_id.in_(assignment_ids),
+            Submission.status != "draft",
+        )
+        .group_by(Submission.assignment_id, Submission.status)
+        .all()
+    }
+
+    def _count(aid, status):
+        return status_rows.get((aid, status), 0)
+
+    records = [
+        {
+            "id": a.id,
+            "title": a.title,
+            "status": a.status,
+            "startDate": a.start_date.isoformat() if a.start_date else None,
+            "endDate": a.end_date.isoformat() if a.end_date else None,
+            "submissionCount": (
+                _count(a.id, "submitted")
+                + _count(a.id, "ai_reviewed")
+                + _count(a.id, "teacher_reviewed")
+            ),
+            "pendingCount": _count(a.id, "submitted"),
+            "aiReviewedCount": _count(a.id, "ai_reviewed"),
+            "teacherReviewedCount": _count(a.id, "teacher_reviewed"),
+        }
+        for a in assignments
+    ]
+    return TeachingQueryResult(
+        status="ok",
+        title="作业概况",
+        metrics={"assignmentCount": len(records)},
+        records=records,
+        evidence_refs=["mysql://assignments/overview?scope=current_teacher"],
     )
 
 
@@ -380,10 +498,24 @@ def get_my_pending_reviews(runtime: ToolRuntime[TeacherContext]) -> dict:
         )
 
 
+@tool(parse_docstring=True, error_on_invalid_docstring=False)
+@_structured_tool
+def get_my_assignments_overview(runtime: ToolRuntime[TeacherContext]) -> dict:
+    """批量查询当前教师全部作业的概况（标题/状态/提交数/待批改数等）。
+
+    查询多个作业时用本工具一次拿全，不要对每份作业逐个调用 get_my_assignment_summary。
+    """
+    with SessionLocal() as db:
+        return serialize_result(
+            query_assignments_overview(db, runtime.context.teacher_id),
+        )
+
+
 STRUCTURED_TOOLS = [
     get_my_classes,
     get_my_class_students,
     get_my_assignments,
+    get_my_assignments_overview,
     get_my_assignment_summary,
     get_my_student,
     get_my_dashboard,

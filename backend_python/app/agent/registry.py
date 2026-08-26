@@ -13,9 +13,11 @@ from dataclasses import dataclass
 from typing import Callable
 
 from langchain.agents import create_agent
+from langchain.agents.middleware import ToolCallLimitMiddleware
 from sqlalchemy.orm import Session
 
 from .contracts import (
+    CreateAssignmentDraftPlan,
     GradingDraft,
     ModelGovernanceResponse,
     ModelProfile,
@@ -25,11 +27,43 @@ from .contracts import (
     TeacherActionResponse,
 )
 from .gateway import get_config_by_code, model_gateway as _default_gateway
+from .runtime import model_budget_middleware, tool_budget_middleware
 from .tools.common import ALL_TOOLS, TeacherContext
-from .tools.teacher import STRUCTURED_TOOLS
+from .tools.teacher import (
+    STRUCTURED_TOOLS,
+    get_my_assignments,
+    get_my_classes,
+    get_my_pending_reviews,
+)
 from .tools.student import STUDENT_TOOLS, StudentContext
 from .tools.admin import ADMIN_TOOLS, AdminContext
-from .runtime import tool_budget_middleware
+
+
+# 教师写操作 Agent 专用工具集合：只保留与动作匹配的最小探查工具
+# （发布/更新/删除作业需要查本人作业；改分需要查待批改），
+# 刻意不绑定 get_my_assignment_summary / get_my_class_students / get_my_student /
+# get_my_dashboard，避免写操作路径对每份历史作业逐个展开摘要造成 N 次扇出。
+# create_assignment_draft 由独立的无工具创建草稿 Agent 承担，不在此集合内。
+TEACHER_ACTION_TOOLS = (
+    get_my_classes,
+    get_my_assignments,
+    get_my_pending_reviews,
+)
+
+# 只读数据 Agent 对单作业摘要的单轮调用上限：超过必须用批量聚合工具。
+ASSIGNMENT_SUMMARY_RUN_LIMIT = 3
+
+# 每个 Agent 单次 invoke 内的全局工具调用上限：防止模型为一次提问把全部工具
+# 逐个试一遍（曾出现一次 invoke 内 12 次工具调用=13 次真实模型请求撞 max_model_calls）。
+# exit_behavior="continue" 只拦截后续工具调用并让模型用已有信息作答，不中断运行；
+# 与 max_model_calls=12、max_tool_calls=12 一起作为最后保护。
+GLOBAL_RUN_TOOL_LIMIT = 6
+
+# 全局工具上限 + 单工具上限，均放在预算计数之前：被拦截的工具不会错误消耗工具预算。
+_AGENT_TOOL_LIMITS = (ToolCallLimitMiddleware(
+    run_limit=GLOBAL_RUN_TOOL_LIMIT,
+    exit_behavior="continue",
+),)
 
 
 @dataclass(frozen=True)
@@ -164,6 +198,25 @@ answer 规则：
 - 用一句话向教师复述你将要提交审批的操作与影响对象（用业务名称，不出现数据库 ID）。
 - 明确说明该操作需要教师本人审批后才会执行。
 - 每项事实必须有 evidence_refs 支撑。
+""",
+))
+
+TEACHER_CREATE_PLAN_PROMPT_V1 = register_prompt(PromptTemplate(
+    name="teacher_create_assignment_plan",
+    version="v1",
+    content="""你是创建作业草稿规划 Agent。你只负责把教师的一条中文请求整理成结构化作业计划，绝不执行任何写入、绝不查询数据库。
+
+流程：
+- 从教师消息里提取目标班级的业务名称（className，保留用户写的班级名，例如「自然语言处理 (NLP)」）。
+- 生成作业标题（title）和完整作业说明（description，含实验目标、内容、操作步骤、提交要求）。
+- 提取开始时间（startDate）与截止时间（endDate）；用户未给时依常识补齐并确保 endDate 晚于 startDate。
+- 若用户指定是否允许附件则设置 allowAttachments，否则为 false。
+
+约束：
+- 不查询任何数据库，不输出或携带内部数据库 ID。
+- 绝不输出 teacherId、userId、role、createdBy、classId、classes、assignmentId、targetId、apiKey、password 等字段。
+- 只输出 CreateAssignmentDraftPlan 结构化的 className/title/description/startDate/endDate/allowAttachments。
+- 信息不足无法生成时，给出面向教师的追问，而不编造。
 """,
 ))
 
@@ -330,6 +383,16 @@ class AgentSpec:
     tools: tuple
     response_format: type
     context_schema: type | None = TeacherContext
+    # 附加中间件（在预算计数中间件之后追加），如单工具调用次数限制
+    middleware: tuple = ()
+
+
+# 只读数据 Agent 对单作业摘要的单轮调用限制中间件（超过须用批量聚合工具）
+_ASSIGNMENT_SUMMARY_LIMIT_MW = (ToolCallLimitMiddleware(
+    tool_name="get_my_assignment_summary",
+    run_limit=ASSIGNMENT_SUMMARY_RUN_LIMIT,
+    exit_behavior="continue",
+),)
 
 
 # 阶段 1 的三个 specialist 规格（规格 20 / 21.1）
@@ -340,6 +403,7 @@ _DEFAULT_SPECS: tuple[AgentSpec, ...] = (
         profile=ModelProfile.GENERAL,
         tools=tuple(STRUCTURED_TOOLS),
         response_format=SpecialistResponse,
+        middleware=_ASSIGNMENT_SUMMARY_LIMIT_MW,
     ),
     AgentSpec(
         name="teaching_strategy",
@@ -347,13 +411,21 @@ _DEFAULT_SPECS: tuple[AgentSpec, ...] = (
         profile=ModelProfile.GENERAL,
         tools=tuple(STRUCTURED_TOOLS),
         response_format=SpecialistResponse,
+        middleware=_ASSIGNMENT_SUMMARY_LIMIT_MW,
     ),
     AgentSpec(
         name="teacher_action",
         prompt_name="teacher_action_specialist",
         profile=ModelProfile.GENERAL,
-        tools=tuple(STRUCTURED_TOOLS),
+        tools=TEACHER_ACTION_TOOLS,
         response_format=TeacherActionResponse,
+    ),
+    AgentSpec(
+        name="create_assignment_plan",
+        prompt_name="teacher_create_assignment_plan",
+        profile=ModelProfile.GENERAL,
+        tools=(),
+        response_format=CreateAssignmentDraftPlan,
     ),
     AgentSpec(
         name="final_reviewer",
@@ -508,13 +580,22 @@ class AgentRegistry:
             llm = self._model_gateway.get_chat_model(
                 db, spec.profile, prompt.version,
             )
+            middleware = [
+                # 顺序（已实证：前面的中间件先执行）：
+                # 1) 全局工具上限 + 单工具上限——先拦截超限调用，被拦截的工具不消耗预算；
+                # 2) 预算计数：模型调用与真实工具执行各计一次。
+                *_AGENT_TOOL_LIMITS,
+                *spec.middleware,
+                model_budget_middleware,
+                tool_budget_middleware,
+            ]
             agent = self._agent_factory(
                 model=llm,
                 tools=list(spec.tools),
                 system_prompt=prompt.content,
                 context_schema=spec.context_schema,
                 response_format=spec.response_format,
-                middleware=[tool_budget_middleware],
+                middleware=middleware,
             )
             # 淘汰同 agent_name 下过期的缓存条目
             stale = [k for k in self._cache if k[0] == agent_name and k != cache_key]

@@ -3,7 +3,7 @@ import logging
 from dataclasses import dataclass, field
 from time import monotonic
 
-from langchain.agents.middleware import wrap_tool_call
+from langchain.agents.middleware import wrap_model_call, wrap_tool_call
 
 from ..config import settings
 from ..models import User
@@ -28,7 +28,8 @@ class RunCancelled(RuntimeError):
 class RunBudget:
     max_nodes: int = 8
     max_tool_calls: int = 12
-    # 模型调用次数上限（每次 agent.invoke 记一次；含格式修复重试）
+    # 模型调用次数上限：按「每次真实模型请求」计数（wrap_model_call），
+    # 而非仅 agent.invoke 外层一次——包含工具循环内的多次底层模型请求。
     max_model_calls: int = 12
     timeout_seconds: int = 45
     node_count: int = 0
@@ -96,7 +97,7 @@ def default_run_budget() -> RunBudget:
     """
     return RunBudget(
         max_nodes=8,
-        max_tool_calls=30,
+        max_tool_calls=12,
         max_model_calls=12,
         timeout_seconds=settings.AGENT_RUN_TIMEOUT_SECONDS,
     )
@@ -160,6 +161,22 @@ def tool_budget_middleware(request, handler):
     return handler(request)
 
 
+@wrap_model_call
+def model_budget_middleware(request, handler):
+    """在每次真实模型请求前消费一次模型调用预算。
+
+    与 tool_budget_middleware 同理，从 context 读取同一 RunBudget。计入 Agent
+    内部工具循环里的每次底层模型请求，而不是只在 agent.invoke() 外层记一次，
+    从而让 models 计数反映真实调用次数（曾有 create 草稿路径显示 models=1，
+    实为多次底层模型请求只计了一次）。
+    """
+    context = request.runtime.context
+    budget = getattr(context, "budget", None)
+    if budget is not None:
+        budget.consume_model_call()
+    return handler(request)
+
+
 __all__ = [
     "BudgetExceeded",
     "RunBudget",
@@ -168,5 +185,6 @@ __all__ = [
     "default_run_budget",
     "grading_run_budget",
     "is_model_timeout",
+    "model_budget_middleware",
     "tool_budget_middleware",
 ]

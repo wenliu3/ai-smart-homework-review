@@ -26,6 +26,7 @@ from . import (
     teacher_action,
     teacher_data,
     teacher_strategy,
+    create_assignment_plan,
 )
 
 
@@ -42,6 +43,7 @@ class SubagentContainer:
         self._teaching_data = teacher_data.create_node(db, registry)
         self._teaching_strategy = teacher_strategy.create_node(db, registry)
         self._action_draft = teacher_action.create_node(db, registry)
+        self._create_assignment_plan = create_assignment_plan.create_node(db, registry)
         self._final_reviewer = final_reviewer.create_node(db, registry)
 
     def teaching_data(self, state: dict) -> dict:
@@ -52,6 +54,9 @@ class SubagentContainer:
 
     def action_draft(self, state: dict) -> dict:
         return self._action_draft(state)
+
+    def create_assignment_plan(self, state: dict) -> dict:
+        return self._create_assignment_plan(state)
 
     def final_reviewer(self, state: dict) -> dict:
         return self._final_reviewer(state)
@@ -139,6 +144,7 @@ __all__ = [
     "teacher_data",
     "teacher_strategy",
     "final_reviewer",
+    "create_assignment_plan",
     "grading",
     "grading_review",
     "plagiarism_analysis",

@@ -72,17 +72,20 @@ def create_node(db, registry: AgentRegistry | None = None) -> Callable:
             intent is not None
             and intent.intent == TeacherIntent.CASUAL_CHAT
         )
-        if not evidence_refs and not is_casual:
+        # 写操作起草路径：候选回答描述的是「用户提供 + 服务端解析」的待审批内容，
+        # 班级归属由服务端解析并在 resolve 节点校验，不要求工具 evidence_refs——
+        # 否则创建作业草稿这类无工具路径会因"缺少证据"被无条件误拒。
+        is_action_draft = (
+            intent is not None
+            and intent.intent == TeacherIntent.ACTION_DRAFT
+        )
+        if not evidence_refs and not is_casual and not is_action_draft:
             return {"review": ReviewResult(
                 approved=False,
                 issues=["事实性回答缺少可核验的证据引用"],
             )}
         actor = state["actor"]
         agent = reg.get_specialist("final_reviewer", db)
-        is_action_draft = (
-            intent is not None
-            and intent.intent == TeacherIntent.ACTION_DRAFT
-        )
         prompt = _REVIEW_TEMPLATE.format(
             candidate=candidate,
             write_rule=(
