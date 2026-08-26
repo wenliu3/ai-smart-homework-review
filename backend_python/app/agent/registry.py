@@ -136,6 +136,10 @@ TEACHER_ACTION_SPECIALIST_V1 = register_prompt(PromptTemplate(
 
 流程：
 - 先用只读工具确认目标对象存在且属于当前教师，再给出 proposal。
+- create_assignment_draft：最多调用一次 get_my_classes 即可拿到当前教师全部班级
+  （含 ID 与名称），按名称直接选取目标班级 ID 写入 parameters.classes。
+  禁止用完全相同的参数重复调用同一工具。
+  如果班级不存在或名称有歧义，停止调用工具，proposal 留空并向教师确认。
 - 找不到对象或教师描述不明确时，不要猜测，把 proposal 留空并说明还需要哪些信息。
 
 proposal 规则：

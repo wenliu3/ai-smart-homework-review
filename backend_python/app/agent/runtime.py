@@ -1,4 +1,5 @@
 """多智能体运行时：预算、取消、身份上下文与工具调用中间件。"""
+import logging
 from dataclasses import dataclass, field
 from time import monotonic
 
@@ -11,6 +12,8 @@ from .contracts import (
     AGENT_RUN_CANCELLED,
     ActorContext,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class BudgetExceeded(RuntimeError):
@@ -125,11 +128,35 @@ def build_actor_context(user: User, request_id: str, session_id: str) -> ActorCo
 
 @wrap_tool_call
 def tool_budget_middleware(request, handler):
-    """在每次真实工具执行前消费当前 RunBudget。"""
+    """在每次真实工具执行前消费当前 RunBudget，并记录工具名/参数键。
+
+    参数只记录键名（arg_keys），不记录值，避免把班级名/学生名等业务数据打进日志。
+    用于排查「一次性调用太多工具」时到底是哪个工具、带什么参数被反复调用。
+    """
     context = request.runtime.context
     budget = getattr(context, "budget", None)
+
+    tool_call = getattr(request, "tool_call", None) or {}
+    tool_name = tool_call.get("name", "unknown")
+    args = tool_call.get("args")
+    arg_keys = sorted(args.keys()) if isinstance(args, dict) else []
+
     if budget is not None:
+        logger.warning(
+            "Agent tool call: name=%s count=%d/%d arg_keys=%s",
+            tool_name,
+            budget.tool_call_count + 1,
+            budget.max_tool_calls,
+            arg_keys,
+        )
         budget.consume_tool_call()
+    else:
+        logger.warning(
+            "Agent tool call(no-budget): name=%s arg_keys=%s",
+            tool_name,
+            arg_keys,
+        )
+
     return handler(request)
 
 
