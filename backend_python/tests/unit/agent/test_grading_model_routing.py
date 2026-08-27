@@ -91,14 +91,14 @@ def test_by_code_route_applies_grading_timeout(db, ai_model_factory, monkeypatch
     gw.get_chat_model_by_code(
         db, model_code="deepseek", profile=ModelProfile.VISION_GRADER, prompt_version="v1",
     )
-    assert captured[-1]["timeout"] == 60  # GRADING_LLM_TIMEOUT（多模态放宽），不再用 VISION_GRADER 的 120
+    assert captured[-1]["timeout"] == 90  # GRADING_LLM_TIMEOUT（多模态放宽），不再用 VISION_GRADER 的 120
     assert captured[-1]["temperature"] == 0.1
     assert captured[-1]["max_retries"] == 1
 
     gw.get_chat_model_by_code(
         db, model_code="deepseek", profile=ModelProfile.REVIEWER, prompt_version="v1",
     )
-    assert captured[-1]["timeout"] == 60  # 复核同样收口
+    assert captured[-1]["timeout"] == 90  # 复核同样收口
 
 
 def test_by_code_routing_ignores_default_flag(db, ai_model_factory, monkeypatch):
@@ -225,7 +225,7 @@ def test_get_grading_agent_primary_routes_to_vision_grader(db, ai_model_factory,
     registry.get_grading_agent(db, model_code="zhipu", reviewer=False, structured=True)
 
     assert captured[-1]["model"] == "openai:glm-5.3-flash"
-    assert captured[-1]["timeout"] == 60
+    assert captured[-1]["timeout"] == 90
     assert built[-1]["tools"] == []
     assert built[-1]["context_schema"] is None
     assert built[-1]["response_format"] is GradingDraft
@@ -246,7 +246,7 @@ def test_get_grading_agent_review_routes_to_reviewer(db, ai_model_factory, monke
 
     assert captured[-1]["model"] == "openai:deepseek-v4-flash-vision-exp"
     assert captured[-1]["temperature"] == 0.1  # REVIEWER 档位
-    assert captured[-1]["timeout"] == 60
+    assert captured[-1]["timeout"] == 90
     assert built[-1]["response_format"] is GradingDraft
     assert "独立批改复核" in built[-1]["system_prompt"]  # grading_review_specialist Prompt
 

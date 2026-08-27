@@ -21,10 +21,10 @@ logger = logging.getLogger(__name__)
 MODEL_NOT_CONFIGURED_CODE = 10016
 
 # 批改主批改/复核每次底层请求的请求超时（秒）：按 code 显式路由时，
-# 不再沿用 VISION_GRADER/REVIEWER 的 120/40 秒长超时。多模态模型
-# （deepseek-v4-flash-vision-exp）带图批改比纯文本慢，放宽到 60s，
-# 仍在批改预算 grading_run_budget(120s) 内。
-GRADING_LLM_TIMEOUT = 60
+# 不再沿用 VISION_GRADER/REVIEWER 的 120/40 秒长超时。多模态模型带图批改
+# 较慢，放宽到 90s；上限受批改整轮预算 grading_run_budget(120s) 约束
+# （与 Celery soft_time_limit 对齐），单次超时不能超过整轮预算。
+GRADING_LLM_TIMEOUT = 90
 
 # 能力档位参数（规格 11.2）：初期共用默认物理模型，参数按档位隔离
 # VISION_GRADER 温度 0.1：批改追求同量表下评分一致与准确，取 DeepSeek
@@ -41,6 +41,11 @@ PROFILE_SETTINGS: dict[ModelProfile, dict] = {
 # this tool_choice"。关闭 thinking 后即可正常做工具调用式结构化输出。
 _DISABLE_THINKING_KWARGS = {"thinking": {"type": "disabled"}}
 
+# 智谱 GLM-5.3 系列（含 glm-5.3-flash）强制开启思考且不支持 disabled
+# （传 disabled 会 400）。能做的最低档是 reasoning_effort="low" 轻度思考，
+# 尽量压缩思考耗时与思考 token 计费。
+_ZHIPU_LOW_THINKING_KWARGS = {"thinking": {"type": "enabled"}, "reasoning_effort": "low"}
+
 
 def _deepseek_thinking_kwargs(config: AiModel) -> dict | None:
     """DeepSeek V4 模型返回关闭 thinking 的 model_kwargs，其余模型返回 None。"""
@@ -48,6 +53,18 @@ def _deepseek_thinking_kwargs(config: AiModel) -> dict | None:
     model_name = (config.model_name or "").lower()
     if "deepseek" in provider and "v4" in model_name:
         return _DISABLE_THINKING_KWARGS
+    return None
+
+
+def _provider_thinking_kwargs(config: AiModel) -> dict | None:
+    """按供应商返回 extra_body 思考参数：DeepSeek V4 关思考，智谱 GLM-5.3 压到低档。"""
+    kwargs = _deepseek_thinking_kwargs(config)
+    if kwargs:
+        return kwargs
+    provider = (config.provider or "").lower()
+    model_name = (config.model_name or "").lower()
+    if "智谱" in (config.provider or "") or "zhipu" in provider or "glm-5.3" in model_name:
+        return _ZHIPU_LOW_THINKING_KWARGS
     return None
 
 
@@ -140,7 +157,7 @@ class ModelGateway:
         params = dict(PROFILE_SETTINGS[profile])
         if timeout is not None:
             params["timeout"] = timeout
-        thinking_kwargs = _deepseek_thinking_kwargs(config)
+        thinking_kwargs = _provider_thinking_kwargs(config)
         if thinking_kwargs:
             # 自定义 API 参数必须走 extra_body：model_kwargs 会被展开成请求参数，
             # 而 extra_body 才会作为请求体字段发给服务端（langchain-openai 约定）。

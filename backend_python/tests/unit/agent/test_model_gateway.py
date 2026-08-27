@@ -139,10 +139,25 @@ def test_deepseek_v4_llm_disables_thinking_for_tool_choice(db, ai_model_factory)
 
 
 def test_non_v4_model_has_no_thinking_kwargs(db, ai_model_factory):
-    """非 DeepSeek V4 模型（如 deepseek-chat / zhipu）不注入 thinking 参数。"""
+    """非 DeepSeek V4 且非智谱的模型（如 deepseek-chat）不注入 thinking 参数。"""
     ai_model_factory(code="deepseek-chat")
     gw = ModelGateway()
 
     llm = gw.get_chat_model(db, ModelProfile.GENERAL, prompt_version="v1")
 
     assert "thinking" not in (llm.extra_body or {})
+
+
+def test_zhipu_glm_llm_uses_low_reasoning_effort(db, ai_model_factory):
+    """智谱 GLM-5.3 系列强制思考且不支持 disabled，网关应注入 reasoning_effort=low。"""
+    ai_model_factory(code="zhipu")
+    db.query(AiModel).filter(AiModel.code == "zhipu").update(
+        {AiModel.provider: "智谱", AiModel.model_name: "glm-5.3-flash"}
+    )
+    db.commit()
+    gw = ModelGateway()
+
+    llm = gw.get_chat_model(db, ModelProfile.GENERAL, prompt_version="v1")
+
+    assert (llm.extra_body or {}).get("reasoning_effort") == "low"
+    assert (llm.extra_body or {}).get("thinking") == {"type": "enabled"}
