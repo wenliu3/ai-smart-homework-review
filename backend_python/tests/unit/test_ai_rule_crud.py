@@ -26,7 +26,7 @@ def _criteria():
 def test_create_rule_round_trips_criteria(db):
     result = ai_rule_crud.create(db, {
         "name": "多维度规则",
-        "modelType": "mimo",
+        "modelType": "zhipu",
         "prompt": "按维度评分",
         "criteria": _criteria(),
     })
@@ -38,7 +38,7 @@ def test_create_rule_round_trips_criteria(db):
 def test_update_rule_replaces_criteria(db):
     result = ai_rule_crud.create(db, {
         "name": "多维度规则",
-        "modelType": "mimo",
+        "modelType": "zhipu",
         "prompt": "按维度评分",
         "criteria": _criteria(),
     })
@@ -56,7 +56,7 @@ def test_update_rule_replaces_criteria(db):
 def test_copy_rule_carries_criteria(db):
     result = ai_rule_crud.create(db, {
         "name": "多维度规则",
-        "modelType": "mimo",
+        "modelType": "zhipu",
         "prompt": "按维度评分",
         "criteria": _criteria(),
     })

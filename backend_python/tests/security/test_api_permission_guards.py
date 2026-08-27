@@ -269,7 +269,7 @@ def test_class_create_forbidden_for_student(client, student, auth_header):
 def test_ai_rule_create_forbidden_for_student(client, student, auth_header):
     response = client.post(
         "/api/v1/ai-rules",
-        json={"name": "学生规则", "modelType": "mimo", "prompt": "x"},
+        json={"name": "学生规则", "modelType": "zhipu", "prompt": "x"},
         headers=auth_header(student),
     )
     assert response.status_code == 403
@@ -279,7 +279,7 @@ def test_ai_rule_update_rejects_non_creator(
     client, db, teacher, teacher_b, auth_header,
 ):
     rule = AiRule(
-        name="教师A的规则", model_type="mimo", prompt="p",
+        name="教师A的规则", model_type="zhipu", prompt="p",
         created_by={"id": str(teacher.id), "name": teacher.name},
     )
     db.add(rule)
@@ -295,7 +295,7 @@ def test_ai_rule_update_rejects_non_creator(
 
 def test_ai_rule_update_allows_superadmin(client, db, teacher, superadmin, auth_header):
     rule = AiRule(
-        name="教师A的规则", model_type="mimo", prompt="p",
+        name="教师A的规则", model_type="zhipu", prompt="p",
         created_by={"id": str(teacher.id), "name": teacher.name},
     )
     db.add(rule)
@@ -314,15 +314,15 @@ def visibility_rules(db, teacher, superadmin):
     """教师A私有规则 + 教师A公开规则 + 系统规则（超管内置）"""
     rules = [
         AiRule(
-            name="A的私有规则", model_type="mimo", prompt="p", visibility="private",
+            name="A的私有规则", model_type="zhipu", prompt="p", visibility="private",
             created_by={"id": str(teacher.id), "name": teacher.name},
         ),
         AiRule(
-            name="A的公开规则", model_type="mimo", prompt="p", visibility="public",
+            name="A的公开规则", model_type="zhipu", prompt="p", visibility="public",
             created_by={"id": str(teacher.id), "name": teacher.name},
         ),
         AiRule(
-            name="系统内置规则", model_type="mimo", prompt="p", visibility="system",
+            name="系统内置规则", model_type="zhipu", prompt="p", visibility="system",
             created_by={"id": str(superadmin.id), "name": superadmin.name},
         ),
     ]
@@ -422,7 +422,7 @@ def test_system_rule_only_superadmin_can_manage(
 def test_ai_rule_rejects_invalid_visibility(client, teacher, auth_header):
     response = client.post(
         "/api/v1/ai-rules",
-        json={"name": "非法可见性", "modelType": "mimo", "prompt": "x", "visibility": "secret"},
+        json={"name": "非法可见性", "modelType": "zhipu", "prompt": "x", "visibility": "secret"},
         headers=auth_header(teacher),
     )
 

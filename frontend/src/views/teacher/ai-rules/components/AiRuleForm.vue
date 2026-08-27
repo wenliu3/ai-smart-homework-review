@@ -331,7 +331,7 @@ const commonTags = ref([
 const getModelIcon = (modelCode) => {
   const icons = {
     deepseek: "🤖",
-    mimo: "📱",
+    zhipu: "🧠",
   };
   return icons[modelCode] || "🔮";
 };

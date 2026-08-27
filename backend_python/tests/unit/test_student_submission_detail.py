@@ -223,7 +223,7 @@ def test_get_my_submission_preserves_ai_rule_max_score_snapshot(
     ai_rule = {
         "id": "9",
         "name": "实验报告规则",
-        "modelType": "mimo",
+        "modelType": "zhipu",
         "prompt": "按实验要求评分",
         "maxScore": 60,
     }
@@ -256,7 +256,7 @@ def test_get_my_submission_defaults_ai_rule_max_score_to_100(
     old_ai_rule = {
         "id": "9",
         "name": "实验报告规则",
-        "modelType": "mimo",
+        "modelType": "zhipu",
         "prompt": "按实验要求评分",
     }
     assignment = Assignment(
@@ -296,7 +296,7 @@ def test_get_my_submission_returns_ai_review_dimension_items(
         ai_rule={
             "id": "9",
             "name": "多维度规则",
-            "modelType": "mimo",
+            "modelType": "zhipu",
             "prompt": "按维度评分",
             "maxScore": 100,
             "criteria": [
@@ -376,7 +376,7 @@ def test_get_my_submission_ai_review_items_is_none_when_missing(
         start_date=datetime.now() - timedelta(days=1),
         end_date=datetime.now() + timedelta(days=1),
         status="published",
-        ai_rule={"id": "9", "modelType": "mimo", "prompt": "整体评分", "maxScore": 100},
+        ai_rule={"id": "9", "modelType": "zhipu", "prompt": "整体评分", "maxScore": 100},
     )
     db.add(assignment)
     db.commit()

@@ -66,7 +66,7 @@
         >
           <el-option label="全部" value="" />
           <el-option label="DeepSeek" value="deepseek" />
-          <el-option label="小米" value="mimo" />
+          <el-option label="智谱GLM" value="zhipu" />
         </el-select>
       </el-form-item>
       <el-form-item class="mb-0 flex-shrink-0">

@@ -18,7 +18,7 @@ describe("AiRuleSelector", () => {
         id: "9",
         name: "实验报告规则",
         description: "",
-        modelType: "mimo",
+        modelType: "zhipu",
         prompt: "按实验要求评分",
         visibility: "private",
         tags: [],
@@ -52,7 +52,7 @@ describe("AiRuleSelector", () => {
     expect(wrapper.emitted("update:modelValue")?.at(-1)?.[0]).toEqual({
       id: "9",
       name: "实验报告规则",
-      modelType: "mimo",
+      modelType: "zhipu",
       prompt: "按实验要求评分",
       maxScore: 60,
     });
@@ -64,7 +64,7 @@ describe("AiRuleSelector", () => {
         id: "9",
         name: "实验报告规则",
         description: "",
-        modelType: "mimo",
+        modelType: "zhipu",
         prompt: "按实验要求评分",
         visibility: "private",
         tags: [],
@@ -91,7 +91,7 @@ describe("AiRuleSelector", () => {
     expect(wrapper.emitted("update:modelValue")?.at(-1)?.[0]).toEqual({
       id: "9",
       name: "实验报告规则",
-      modelType: "mimo",
+      modelType: "zhipu",
       prompt: "按实验要求评分",
       maxScore: 100,
     });

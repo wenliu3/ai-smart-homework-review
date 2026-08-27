@@ -44,15 +44,15 @@ def _record_factory(built):
 
 
 def _add_real_preset_names(db):
-    """把工厂建出的模型 model_name 校正为真实预置名（多模态 vision / mimo-v2.5）。
+    """把工厂建出的模型 model_name 校正为真实预置名（多模态 vision / glm-5.3-flash）。
 
     ai_model_factory 默认 model_name=code；真实预置模型 code 与 model_name 不同
-    （deepseek → deepseek-v4-flash-vision-exp，mimo → mimo-v2.5）。这里对齐
+    （deepseek → deepseek-v4-flash-vision-exp，zhipu → glm-5.3-flash）。这里对齐
     真实配置，用于断言按 code 路由取的是该模型自身的 model_name。只改名已存在的模型。
     """
     for code, model_name in (
         ("deepseek", "deepseek-v4-flash-vision-exp"),
-        ("mimo", "mimo-v2.5"),
+        ("zhipu", "glm-5.3-flash"),
     ):
         model = db.query(AiModel).filter(AiModel.code == code).first()
         if model is not None:
@@ -64,16 +64,16 @@ def _add_real_preset_names(db):
 
 def test_routes_by_model_code(db, ai_model_factory, monkeypatch):
     ai_model_factory(code="deepseek", is_default=True)
-    ai_model_factory(code="mimo", is_default=False)
+    ai_model_factory(code="zhipu", is_default=False)
     _add_real_preset_names(db)
     captured = []
     _patch_init(monkeypatch, captured)
     gw = ModelGateway()
 
     gw.get_chat_model_by_code(
-        db, model_code="mimo", profile=ModelProfile.VISION_GRADER, prompt_version="v1",
+        db, model_code="zhipu", profile=ModelProfile.VISION_GRADER, prompt_version="v1",
     )
-    assert captured[-1]["model"] == "openai:mimo-v2.5"
+    assert captured[-1]["model"] == "openai:glm-5.3-flash"
 
     gw.get_chat_model_by_code(
         db, model_code="deepseek", profile=ModelProfile.VISION_GRADER, prompt_version="v1",
@@ -103,27 +103,27 @@ def test_by_code_route_applies_grading_timeout(db, ai_model_factory, monkeypatch
 
 def test_by_code_routing_ignores_default_flag(db, ai_model_factory, monkeypatch):
     deepseek = ai_model_factory(code="deepseek", is_default=True)
-    mimo = ai_model_factory(code="mimo", is_default=False)
+    zhipu = ai_model_factory(code="zhipu", is_default=False)
     _add_real_preset_names(db)
     captured = []
     _patch_init(monkeypatch, captured)
     gw = ModelGateway()
 
     gw.get_chat_model_by_code(
-        db, model_code="mimo", profile=ModelProfile.VISION_GRADER, prompt_version="v1",
+        db, model_code="zhipu", profile=ModelProfile.VISION_GRADER, prompt_version="v1",
     )
-    assert captured[-1]["model"] == "openai:mimo-v2.5"
+    assert captured[-1]["model"] == "openai:glm-5.3-flash"
 
-    # 切换默认模型（mimo 变默认、deepseek 变非默认）——按 code 路由结果必须不变
+    # 切换默认模型（zhipu 变默认、deepseek 变非默认）——按 code 路由结果必须不变
     deepseek.is_default = False
-    mimo.is_default = True
+    zhipu.is_default = True
     db.commit()
 
     gw2 = ModelGateway()
     gw2.get_chat_model_by_code(
-        db, model_code="mimo", profile=ModelProfile.VISION_GRADER, prompt_version="v1",
+        db, model_code="zhipu", profile=ModelProfile.VISION_GRADER, prompt_version="v1",
     )
-    assert captured[-1]["model"] == "openai:mimo-v2.5"
+    assert captured[-1]["model"] == "openai:glm-5.3-flash"
     gw2.get_chat_model_by_code(
         db, model_code="deepseek", profile=ModelProfile.VISION_GRADER, prompt_version="v1",
     )
@@ -178,26 +178,26 @@ def test_by_code_chat_model_cached_and_invalidated_on_update(db, ai_model_factor
     from datetime import timedelta
 
     deepseek = ai_model_factory(code="deepseek", is_default=True)
-    mimo = ai_model_factory(code="mimo", is_default=False)
+    zhipu = ai_model_factory(code="zhipu", is_default=False)
     _add_real_preset_names(db)
     captured = []
     _patch_init(monkeypatch, captured)
     gw = ModelGateway()
 
     first = gw.get_chat_model_by_code(
-        db, model_code="mimo", profile=ModelProfile.VISION_GRADER, prompt_version="v1",
+        db, model_code="zhipu", profile=ModelProfile.VISION_GRADER, prompt_version="v1",
     )
     second = gw.get_chat_model_by_code(
-        db, model_code="mimo", profile=ModelProfile.VISION_GRADER, prompt_version="v1",
+        db, model_code="zhipu", profile=ModelProfile.VISION_GRADER, prompt_version="v1",
     )
     assert first is second
     assert len(captured) == 1
 
-    # 更新 mimo 配置后缓存失效，重建新 LLM
-    mimo.updated_at = mimo.updated_at + timedelta(seconds=1)
+    # 更新 zhipu 配置后缓存失效，重建新 LLM
+    zhipu.updated_at = zhipu.updated_at + timedelta(seconds=1)
     db.commit()
     rebuilt = gw.get_chat_model_by_code(
-        db, model_code="mimo", profile=ModelProfile.VISION_GRADER, prompt_version="v1",
+        db, model_code="zhipu", profile=ModelProfile.VISION_GRADER, prompt_version="v1",
     )
     assert rebuilt is not first
     assert len(captured) == 2
@@ -214,7 +214,7 @@ def test_by_code_chat_model_cached_and_invalidated_on_update(db, ai_model_factor
 
 def test_get_grading_agent_primary_routes_to_vision_grader(db, ai_model_factory, monkeypatch):
     ai_model_factory(code="deepseek", is_default=True)
-    ai_model_factory(code="mimo", is_default=False)
+    ai_model_factory(code="zhipu", is_default=False)
     _add_real_preset_names(db)
     captured = []
     _patch_init(monkeypatch, captured)
@@ -222,9 +222,9 @@ def test_get_grading_agent_primary_routes_to_vision_grader(db, ai_model_factory,
     gw = ModelGateway()
     registry = AgentRegistry(model_gateway=gw, agent_factory=_record_factory(built))
 
-    registry.get_grading_agent(db, model_code="mimo", reviewer=False, structured=True)
+    registry.get_grading_agent(db, model_code="zhipu", reviewer=False, structured=True)
 
-    assert captured[-1]["model"] == "openai:mimo-v2.5"
+    assert captured[-1]["model"] == "openai:glm-5.3-flash"
     assert captured[-1]["timeout"] == 60
     assert built[-1]["tools"] == []
     assert built[-1]["context_schema"] is None
@@ -265,19 +265,19 @@ def test_get_grading_agent_unstructured_omits_response_format(db, ai_model_facto
 
 def test_get_grading_agent_caches_by_code_reviewer_structured(db, ai_model_factory, monkeypatch):
     ai_model_factory(code="deepseek", is_default=True)
-    ai_model_factory(code="mimo", is_default=False)
+    ai_model_factory(code="zhipu", is_default=False)
     _add_real_preset_names(db)
     _patch_init(monkeypatch, [])
     built = []
     gw = ModelGateway()
     registry = AgentRegistry(model_gateway=gw, agent_factory=_record_factory(built))
 
-    a1 = registry.get_grading_agent(db, model_code="mimo", reviewer=False, structured=True)
-    a2 = registry.get_grading_agent(db, model_code="mimo", reviewer=False, structured=True)
+    a1 = registry.get_grading_agent(db, model_code="zhipu", reviewer=False, structured=True)
+    a2 = registry.get_grading_agent(db, model_code="zhipu", reviewer=False, structured=True)
     assert a1 is a2
     assert len(built) == 1
 
-    b = registry.get_grading_agent(db, model_code="mimo", reviewer=True, structured=True)
+    b = registry.get_grading_agent(db, model_code="zhipu", reviewer=True, structured=True)
     assert b is not a1
     assert len(built) == 2
 

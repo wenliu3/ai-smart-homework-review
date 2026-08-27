@@ -139,7 +139,7 @@ def test_deepseek_v4_llm_disables_thinking_for_tool_choice(db, ai_model_factory)
 
 
 def test_non_v4_model_has_no_thinking_kwargs(db, ai_model_factory):
-    """非 DeepSeek V4 模型（如 deepseek-chat / mimo）不注入 thinking 参数。"""
+    """非 DeepSeek V4 模型（如 deepseek-chat / zhipu）不注入 thinking 参数。"""
     ai_model_factory(code="deepseek-chat")
     gw = ModelGateway()
 

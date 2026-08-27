@@ -13,7 +13,7 @@ export interface AiRule {
   id: string;
   name: string;
   description?: string;
-  modelType: "deepseek" | "mimo";
+  modelType: "deepseek" | "zhipu";
   prompt: string;
   maxScore?: number;
   status: "active" | "inactive";
@@ -35,7 +35,7 @@ export interface AiRuleQueryParams {
   search?: string;
   status?: string;
   visibility?: string;
-  modelType?: "deepseek" | "mimo";
+  modelType?: "deepseek" | "zhipu";
   tags?: string[];
   sort?: string;
   order?: "asc" | "desc";
@@ -45,7 +45,7 @@ export interface AiRuleQueryParams {
 export interface CreateAiRuleDto {
   name: string;
   description?: string;
-  modelType: "deepseek" | "mimo";
+  modelType: "deepseek" | "zhipu";
   prompt: string;
   maxScore?: number;
   visibility?: "private" | "public" | "system";
@@ -58,7 +58,7 @@ export interface CreateAiRuleDto {
 export interface UpdateAiRuleDto {
   name?: string;
   description?: string;
-  modelType?: "deepseek" | "mimo";
+  modelType?: "deepseek" | "zhipu";
   prompt?: string;
   maxScore?: number;
   visibility?: "private" | "public" | "system";

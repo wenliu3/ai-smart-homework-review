@@ -56,10 +56,10 @@ def get_active(db: Session) -> list:
 
 
 def initialize(db: Session) -> dict:
-    """初始化预置 AI 模型(DeepSeek + 小米) — 已存在则跳过"""
+    """初始化预置 AI 模型(DeepSeek + 智谱) — 已存在则跳过"""
     presets = [
         {"code": "deepseek", "name": "DeepSeek", "provider": "DeepSeek", "model_name": "deepseek-v4-flash-vision-exp", "base_url": "https://api.deepseek.com", "status": "active", "is_default": True},
-        {"code": "mimo", "name": "小米", "provider": "小米", "model_name": "mimo-v2.5", "base_url": "https://api.xiaomimimo.com/v1", "status": "active"},
+        {"code": "zhipu", "name": "智谱GLM", "provider": "智谱", "model_name": "glm-5.3-flash", "base_url": "https://open.bigmodel.cn/api/paas/v4", "status": "active"},
     ]
     for m in presets:
         if not db.query(AiModel).filter(AiModel.code == m["code"]).first():

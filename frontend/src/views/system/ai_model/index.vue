@@ -5,7 +5,7 @@
       <div class="header-content">
         <div>
           <h1 class="text-2xl font-bold text-gray-800">AI模型配置</h1>
-          <p class="text-gray-600 mt-2">管理DeepSeek和小米两个AI模型的配置</p>
+          <p class="text-gray-600 mt-2">管理DeepSeek和智谱GLM两个AI模型的配置</p>
         </div>
         <div class="header-actions">
           <el-button
@@ -204,8 +204,8 @@
         </div>
       </el-tab-pane>
 
-      <!-- 小米 配置标签页 -->
-      <el-tab-pane label="📱 小米" name="mimo">
+      <!-- 智谱GLM 配置标签页 -->
+      <el-tab-pane label="🧠 智谱GLM" name="zhipu">
         <div class="model-config-form" v-loading="loading">
           <!-- 基本信息展示/编辑 -->
           <div class="model-info-section mb-6">
@@ -213,61 +213,61 @@
               <h3 class="text-lg font-semibold mb-0">基本信息</h3>
               <el-button
                 size="small"
-                :type="editingBasic.mimo ? 'warning' : 'primary'"
-                @click="toggleEditBasic('mimo')"
+                :type="editingBasic.zhipu ? 'warning' : 'primary'"
+                @click="toggleEditBasic('zhipu')"
               >
-                {{ editingBasic.mimo ? "取消编辑" : "编辑" }}
+                {{ editingBasic.zhipu ? "取消编辑" : "编辑" }}
               </el-button>
             </div>
 
             <!-- 查看模式 -->
-            <el-descriptions :column="2" border v-if="mimoModel && !editingBasic.mimo">
+            <el-descriptions :column="2" border v-if="zhipuModel && !editingBasic.zhipu">
               <el-descriptions-item label="模型名称">{{
-                mimoModel.name
+                zhipuModel.name
               }}</el-descriptions-item>
               <el-descriptions-item label="提供商">{{
-                mimoModel.provider
+                zhipuModel.provider
               }}</el-descriptions-item>
               <el-descriptions-item label="模型版本">{{
-                mimoModel.modelName
+                zhipuModel.modelName
               }}</el-descriptions-item>
               <el-descriptions-item label="API地址">{{
-                mimoModel.baseUrl
+                zhipuModel.baseUrl
               }}</el-descriptions-item>
             </el-descriptions>
 
             <!-- 编辑模式 -->
             <el-form
-              :model="mimoBasicForm"
+              :model="zhipuBasicForm"
               label-width="100px"
-              v-if="mimoModel && editingBasic.mimo"
+              v-if="zhipuModel && editingBasic.zhipu"
             >
               <el-row :gutter="20">
                 <el-col :span="12">
                   <el-form-item label="模型名称">
-                    <el-input v-model="mimoBasicForm.name" />
+                    <el-input v-model="zhipuBasicForm.name" />
                   </el-form-item>
                 </el-col>
                 <el-col :span="12">
                   <el-form-item label="提供商">
-                    <el-input v-model="mimoBasicForm.provider" />
+                    <el-input v-model="zhipuBasicForm.provider" />
                   </el-form-item>
                 </el-col>
                 <el-col :span="12">
                   <el-form-item label="模型版本">
-                    <el-input v-model="mimoBasicForm.modelName" />
+                    <el-input v-model="zhipuBasicForm.modelName" />
                   </el-form-item>
                 </el-col>
                 <el-col :span="12">
                   <el-form-item label="API地址">
-                    <el-input v-model="mimoBasicForm.baseUrl" />
+                    <el-input v-model="zhipuBasicForm.baseUrl" />
                   </el-form-item>
                 </el-col>
               </el-row>
               <el-button
                 type="primary"
                 size="small"
-                @click="saveBasicInfo('mimo')"
+                @click="saveBasicInfo('zhipu')"
                 :loading="savingBasic"
               >
                 保存基本信息
@@ -278,21 +278,21 @@
           <!-- 配置表单 -->
           <div class="config-form-section mb-6">
             <h3 class="text-lg font-semibold mb-3">配置信息</h3>
-            <el-form :model="mimoForm" label-width="120px" v-if="mimoModel">
+            <el-form :model="zhipuForm" label-width="120px" v-if="zhipuModel">
               <el-row :gutter="20">
                 <el-col :span="12">
                   <el-form-item label="API密钥" required>
                     <el-input
-                      v-model="mimoForm.apiKey"
+                      v-model="zhipuForm.apiKey"
                       type="password"
                       show-password
-                      placeholder="请输入小米API密钥"
+                      placeholder="请输入智谱GLM API密钥"
                     />
                   </el-form-item>
                 </el-col>
                 <el-col :span="12">
                   <el-form-item label="状态">
-                    <el-radio-group v-model="mimoForm.status">
+                    <el-radio-group v-model="zhipuForm.status">
                       <el-radio value="active">启用</el-radio>
                       <el-radio value="inactive">禁用</el-radio>
                     </el-radio-group>
@@ -301,7 +301,7 @@
                 <el-col :span="12">
                   <el-form-item label="默认模型">
                     <el-switch
-                      v-model="mimoForm.isDefault"
+                      v-model="zhipuForm.isDefault"
                       active-text="是"
                       inactive-text="否"
                     />
@@ -313,20 +313,20 @@
               <div class="form-actions mt-4">
                 <el-button
                   type="primary"
-                  @click="saveConfig('mimo')"
+                  @click="saveConfig('zhipu')"
                   :loading="saving"
                 >
                   保存配置
                 </el-button>
                 <el-button
-                  @click="refreshBalance('mimo')"
-                  :loading="balanceLoading.mimo"
+                  @click="refreshBalance('zhipu')"
+                  :loading="balanceLoading.zhipu"
                 >
                   刷新余额
                 </el-button>
                 <el-button
-                  @click="testConnection('mimo')"
-                  :loading="testLoading.mimo"
+                  @click="testConnection('zhipu')"
+                  :loading="testLoading.zhipu"
                 >
                   测试连接
                 </el-button>
@@ -337,29 +337,29 @@
           <!-- 使用统计 -->
           <div class="stats-section">
             <h3 class="text-lg font-semibold mb-3">使用统计</h3>
-            <el-row :gutter="20" v-if="mimoModel">
+            <el-row :gutter="20" v-if="zhipuModel">
               <el-col :span="6">
                 <el-statistic
                   title="使用次数"
-                  :value="mimoModel.totalUsage"
+                  :value="zhipuModel.totalUsage"
                 />
               </el-col>
               <el-col :span="6">
                 <el-statistic
                   title="Token消耗"
-                  :value="mimoModel.totalTokens"
+                  :value="zhipuModel.totalTokens"
                 />
               </el-col>
               <el-col :span="6">
                 <el-statistic
                   title="账户余额"
-                  :value="mimoBalance?.balance || 0"
+                  :value="zhipuBalance?.balance || 0"
                   :precision="2"
                   suffix="元"
                 >
                   <template #suffix>
-                    <span :class="getBalanceClass(mimoBalance)">
-                      {{ mimoBalance?.currency || "CNY" }}
+                    <span :class="getBalanceClass(zhipuBalance)">
+                      {{ zhipuBalance?.currency || "CNY" }}
                     </span>
                   </template>
                 </el-statistic>
@@ -368,7 +368,7 @@
                 <el-statistic
                   title="最后使用"
                   :value="0"
-                  :format="() => formatDate(mimoModel.lastUsedAt)"
+                  :format="() => formatDate(zhipuModel.lastUsedAt)"
                   :value-style="{ fontSize: '14px' }"
                 />
               </el-col>
@@ -392,16 +392,16 @@ const activeTab = ref("deepseek");
 const loading = ref(false);
 const saving = ref(false);
 const savingBasic = ref(false);
-const balanceLoading = reactive({ deepseek: false, mimo: false });
-const testLoading = reactive({ deepseek: false, mimo: false });
+const balanceLoading = reactive({ deepseek: false, zhipu: false });
+const testLoading = reactive({ deepseek: false, zhipu: false });
 
 const deepseekModel = ref<AiModel | null>(null);
-const mimoModel = ref<AiModel | null>(null);
+const zhipuModel = ref<AiModel | null>(null);
 const deepseekBalance = ref<ModelBalance | null>(null);
-const mimoBalance = ref<ModelBalance | null>(null);
+const zhipuBalance = ref<ModelBalance | null>(null);
 
 // 基本信息编辑状态
-const editingBasic = reactive({ deepseek: false, mimo: false });
+const editingBasic = reactive({ deepseek: false, zhipu: false });
 
 // 表单数据
 const deepseekForm = reactive({
@@ -410,7 +410,7 @@ const deepseekForm = reactive({
   isDefault: false,
 });
 
-const mimoForm = reactive({
+const zhipuForm = reactive({
   apiKey: "",
   status: "active" as "active" | "inactive",
   isDefault: false,
@@ -424,7 +424,7 @@ const deepseekBasicForm = reactive({
   baseUrl: "",
 });
 
-const mimoBasicForm = reactive({
+const zhipuBasicForm = reactive({
   name: "",
   provider: "",
   modelName: "",
@@ -435,11 +435,11 @@ const mimoBasicForm = reactive({
 const currentModel = computed(() => {
   return activeTab.value === "deepseek"
     ? deepseekModel.value
-    : mimoModel.value;
+    : zhipuModel.value;
 });
 
 const currentForm = computed(() => {
-  return activeTab.value === "deepseek" ? deepseekForm : mimoForm;
+  return activeTab.value === "deepseek" ? deepseekForm : zhipuForm;
 });
 
 // 方法
@@ -448,9 +448,9 @@ const loadModelData = async () => {
   try {
     const response = await aiModelApi.getList();
 
-    // 分离DeepSeek和小米模型
+    // 分离DeepSeek和智谱模型
     const deepseek = response.models.find((m) => m.code === "deepseek");
-    const mimo = response.models.find((m) => m.code === "mimo");
+    const zhipu = response.models.find((m) => m.code === "zhipu");
 
     if (deepseek) {
       deepseekModel.value = deepseek;
@@ -463,15 +463,15 @@ const loadModelData = async () => {
       deepseekBasicForm.baseUrl = deepseek.baseUrl;
     }
 
-    if (mimo) {
-      mimoModel.value = mimo;
-      mimoForm.apiKey = mimo.apiKey;
-      mimoForm.status = mimo.status;
-      mimoForm.isDefault = mimo.isDefault;
-      mimoBasicForm.name = mimo.name;
-      mimoBasicForm.provider = mimo.provider;
-      mimoBasicForm.modelName = mimo.modelName;
-      mimoBasicForm.baseUrl = mimo.baseUrl;
+    if (zhipu) {
+      zhipuModel.value = zhipu;
+      zhipuForm.apiKey = zhipu.apiKey;
+      zhipuForm.status = zhipu.status;
+      zhipuForm.isDefault = zhipu.isDefault;
+      zhipuBasicForm.name = zhipu.name;
+      zhipuBasicForm.provider = zhipu.provider;
+      zhipuBasicForm.modelName = zhipu.modelName;
+      zhipuBasicForm.baseUrl = zhipu.baseUrl;
     }
 
     // 加载余额信息
@@ -486,25 +486,25 @@ const loadModelData = async () => {
 
 const loadBalances = async () => {
   try {
-    const [deepseekBalanceRes, mimoBalanceRes] = await Promise.allSettled([
+    const [deepseekBalanceRes, zhipuBalanceRes] = await Promise.allSettled([
       aiModelApi.getBalance("deepseek"),
-      aiModelApi.getBalance("mimo"),
+      aiModelApi.getBalance("zhipu"),
     ]);
 
     if (deepseekBalanceRes.status === "fulfilled") {
       deepseekBalance.value = deepseekBalanceRes.value;
     }
 
-    if (mimoBalanceRes.status === "fulfilled") {
-      mimoBalance.value = mimoBalanceRes.value;
+    if (zhipuBalanceRes.status === "fulfilled") {
+      zhipuBalance.value = zhipuBalanceRes.value;
     }
   } catch (error) {
     console.error("加载余额失败:", error);
   }
 };
 
-const saveConfig = async (code: "deepseek" | "mimo") => {
-  const form = code === "deepseek" ? deepseekForm : mimoForm;
+const saveConfig = async (code: "deepseek" | "zhipu") => {
+  const form = code === "deepseek" ? deepseekForm : zhipuForm;
 
   if (!form.apiKey.trim()) {
     ElMessage.warning("请输入API密钥");
@@ -515,7 +515,7 @@ const saveConfig = async (code: "deepseek" | "mimo") => {
   try {
     // 如果设为默认，前端先清除另一个模型的 isDefault
     if (form.isDefault) {
-      const other = code === "deepseek" ? mimoForm : deepseekForm;
+      const other = code === "deepseek" ? zhipuForm : deepseekForm;
       other.isDefault = false;
     }
 
@@ -531,7 +531,7 @@ const saveConfig = async (code: "deepseek" | "mimo") => {
     if (code === "deepseek") {
       deepseekModel.value = updatedModel;
     } else {
-      mimoModel.value = updatedModel;
+      zhipuModel.value = updatedModel;
     }
 
     // 如果设为默认，也调用专门的 setDefault 接口确保后端互斥
@@ -551,7 +551,7 @@ const saveConfig = async (code: "deepseek" | "mimo") => {
   }
 };
 
-const refreshBalance = async (code: "deepseek" | "mimo") => {
+const refreshBalance = async (code: "deepseek" | "zhipu") => {
   balanceLoading[code] = true;
   try {
     const balance = await aiModelApi.getBalance(code);
@@ -559,12 +559,12 @@ const refreshBalance = async (code: "deepseek" | "mimo") => {
     if (code === "deepseek") {
       deepseekBalance.value = balance;
     } else {
-      mimoBalance.value = balance;
+      zhipuBalance.value = balance;
     }
 
     if (balance.status === "success") {
       ElMessage.success(
-        `${code === "deepseek" ? "DeepSeek" : "小米"}余额刷新成功`
+        `${code === "deepseek" ? "DeepSeek" : "智谱GLM"}余额刷新成功`
       );
     } else {
       ElMessage.warning(balance.message || "余额查询失败");
@@ -577,14 +577,14 @@ const refreshBalance = async (code: "deepseek" | "mimo") => {
   }
 };
 
-const testConnection = async (code: "deepseek" | "mimo") => {
+const testConnection = async (code: "deepseek" | "zhipu") => {
   testLoading[code] = true;
   try {
     const result = await aiModelApi.testConnection(code);
 
     if (result.success) {
       ElMessage.success(
-        `${code === "deepseek" ? "DeepSeek" : "小米"}连接测试成功 (${
+        `${code === "deepseek" ? "DeepSeek" : "智谱GLM"}连接测试成功 (${
           result.responseTime
         }ms)`
       );
@@ -599,12 +599,12 @@ const testConnection = async (code: "deepseek" | "mimo") => {
   }
 };
 
-const toggleEditBasic = (code: "deepseek" | "mimo") => {
+const toggleEditBasic = (code: "deepseek" | "zhipu") => {
   const editing = editingBasic[code];
   if (!editing) {
     // 进入编辑模式时，用当前模型数据填充表单
-    const model = code === "deepseek" ? deepseekModel.value : mimoModel.value;
-    const form = code === "deepseek" ? deepseekBasicForm : mimoBasicForm;
+    const model = code === "deepseek" ? deepseekModel.value : zhipuModel.value;
+    const form = code === "deepseek" ? deepseekBasicForm : zhipuBasicForm;
     if (model) {
       form.name = model.name;
       form.provider = model.provider;
@@ -615,8 +615,8 @@ const toggleEditBasic = (code: "deepseek" | "mimo") => {
   editingBasic[code] = !editing;
 };
 
-const saveBasicInfo = async (code: "deepseek" | "mimo") => {
-  const form = code === "deepseek" ? deepseekBasicForm : mimoBasicForm;
+const saveBasicInfo = async (code: "deepseek" | "zhipu") => {
+  const form = code === "deepseek" ? deepseekBasicForm : zhipuBasicForm;
 
   if (!form.name.trim() || !form.baseUrl.trim()) {
     ElMessage.warning("模型名称和API地址不能为空");
@@ -637,7 +637,7 @@ const saveBasicInfo = async (code: "deepseek" | "mimo") => {
     if (code === "deepseek") {
       deepseekModel.value = updatedModel;
     } else {
-      mimoModel.value = updatedModel;
+      zhipuModel.value = updatedModel;
     }
 
     editingBasic[code] = false;

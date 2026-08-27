@@ -57,7 +57,7 @@ export interface AiModelStatsResponse {
     todayUsage: number;
     lastBalanceCheck?: string;
   };
-  mimo?: {
+  zhipu?: {
     isOnline: boolean;
     balance: number;
     totalUsage: number;

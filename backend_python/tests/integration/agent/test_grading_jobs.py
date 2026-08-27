@@ -406,7 +406,7 @@ def test_terminal_grading_job_redelivery_keeps_existing_status(
 def _routing_assignment(*, with_model_type: bool = True) -> Assignment:
     ai_rule = {"version": "v1", "maxScore": 100, "prompt": "按实验要求评分"}
     if with_model_type:
-        ai_rule["modelType"] = "mimo"
+        ai_rule["modelType"] = "zhipu"
     return Assignment(
         title="路由测试作业",
         description="",
@@ -428,14 +428,14 @@ def test_routing_config_uses_ai_rule_model_type(db):
     routing = grading_tasks._grading_routing_config(db, db.query(Assignment).one())
 
     assert routing == {
-        "rule_model_code": "mimo",
+        "rule_model_code": "zhipu",
         "rule_prompt": "按实验要求评分",
     }
 
 
 def test_routing_config_stable_across_default_switch(db, ai_model_factory):
     """切换默认模型后 rule_model_code 不变（不依赖默认模型）。"""
-    ai_model_factory(code="mimo", is_default=True)
+    ai_model_factory(code="zhipu", is_default=True)
     ai_model_factory(code="deepseek", is_default=False)
     db.add(_routing_assignment())
     db.commit()
@@ -444,8 +444,8 @@ def test_routing_config_stable_across_default_switch(db, ai_model_factory):
     ai_model_crud.set_default(db, "deepseek")
     after = grading_tasks._grading_routing_config(db, db.query(Assignment).one())
 
-    assert before["rule_model_code"] == "mimo"
-    assert after["rule_model_code"] == "mimo"
+    assert before["rule_model_code"] == "zhipu"
+    assert after["rule_model_code"] == "zhipu"
 
 
 def test_routing_config_missing_rule_model_fails_controlled(db):
@@ -482,6 +482,6 @@ def test_build_grading_state_routes_by_rule_model_type(db):
         routing=routing,
     )
 
-    assert state["rule_model_code"] == "mimo"
+    assert state["rule_model_code"] == "zhipu"
     assert state["rule_prompt"] == "按实验要求评分"
     assert state["runtime_budget"] is not None

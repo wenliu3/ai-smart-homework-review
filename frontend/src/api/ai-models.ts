@@ -2,10 +2,10 @@ import request from "@/utils/request";
 
 // AI模型接口
 export interface AiModel {
-  code: string; // 'deepseek' | 'mimo'
+  code: string; // 'deepseek' | 'zhipu'
   name: string; // 'DeepSeek' | '豆包'
   provider: string; // 'DeepSeek' | 'ByteDance'
-  modelName: string; // 'deepseek-v4-flash-vision-exp' | 'mimo-v2.5'
+  modelName: string; // 'deepseek-v4-flash-vision-exp' | 'glm-5.3-flash'
   baseUrl: string; // API地址（只读）
   apiKey: string; // API密钥（可编辑）
   accessKey?: string; // 访问密钥（豆包必填）

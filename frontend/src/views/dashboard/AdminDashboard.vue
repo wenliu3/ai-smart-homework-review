@@ -133,22 +133,22 @@
           </div>
         </div>
 
-        <!-- 小米模型卡片 -->
-        <div class="ai-model-card" v-if="aiModelStats?.mimo">
+        <!-- 智谱模型卡片 -->
+        <div class="ai-model-card" v-if="aiModelStats?.zhipu">
           <div class="model-header">
             <div class="model-info">
-              <h3 class="model-name">📱 小米</h3>
+              <h3 class="model-name">🧠 智谱GLM</h3>
               <el-tag
-                :type="aiModelStats.mimo.isOnline ? 'success' : 'danger'"
+                :type="aiModelStats.zhipu.isOnline ? 'success' : 'danger'"
                 size="small"
               >
-                {{ aiModelStats.mimo.isOnline ? "在线" : "离线" }}
+                {{ aiModelStats.zhipu.isOnline ? "在线" : "离线" }}
               </el-tag>
             </div>
             <div class="model-balance">
               <span class="balance-label">余额</span>
               <span class="balance-value"
-                >{{ aiModelStats.mimo.balance }}次</span
+                >{{ aiModelStats.zhipu.balance }}次</span
               >
             </div>
           </div>
@@ -156,19 +156,19 @@
             <div class="stat-item">
               <div class="stat-label">今日使用</div>
               <div class="stat-value">
-                {{ aiModelStats.mimo.todayUsage }}次
+                {{ aiModelStats.zhipu.todayUsage }}次
               </div>
             </div>
             <div class="stat-item">
               <div class="stat-label">总使用量</div>
               <div class="stat-value">
-                {{ formatNumber(aiModelStats.mimo.totalUsage) }}次
+                {{ formatNumber(aiModelStats.zhipu.totalUsage) }}次
               </div>
             </div>
             <div class="stat-item">
               <div class="stat-label">总Token</div>
               <div class="stat-value">
-                {{ formatNumber(aiModelStats.mimo.totalTokens) }}
+                {{ formatNumber(aiModelStats.zhipu.totalTokens) }}
               </div>
             </div>
           </div>
